@@ -313,8 +313,11 @@ void desktop_reapply(void) {
              * a reload must not drag every tray-minimised app back on screen. */
             ManagedWindow *mw = window_find(h);
             if (mw && mw->app_hidden) continue;
-            if (d == cur) ShowWindow(h, SW_SHOWNOACTIVATE);
-            else          ShowWindow(h, SW_HIDE);
+            if (d == cur)
+                ShowWindow(h, IsIconic(h) ? SW_SHOWMINNOACTIVE
+                                          : SW_SHOWNOACTIVATE);
+            else
+                ShowWindow(h, SW_HIDE);
         }
     }
     events_suppress_end();
@@ -374,7 +377,10 @@ void desktop_switch(const wchar_t *name) {
         if (!h || !IsWindow(h)) continue;
         ManagedWindow *mw = window_find(h);
         if (mw && mw->app_hidden) continue;
-        ShowWindow(h, SW_SHOWNOACTIVATE);
+        /* SW_SHOWNOACTIVATE restores a minimized window, which would quietly
+         * un-minimize everything every time you came back to a desktop. Hiding
+         * does not clear WS_MINIMIZE, so IsIconic still answers correctly. */
+        ShowWindow(h, IsIconic(h) ? SW_SHOWMINNOACTIVE : SW_SHOWNOACTIVATE);
     }
 
     g.current_desktop_id = target_id;

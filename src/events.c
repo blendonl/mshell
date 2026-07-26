@@ -85,6 +85,25 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         }
         break;
 
+    case EVENT_SYSTEM_MINIMIZESTART:
+    case EVENT_SYSTEM_MINIMIZEEND:
+        /* A window minimized or came back. Minimizing does NOT clear WS_VISIBLE
+         * — it is not a hide — so nothing above notices it, and without this a
+         * minimized window keeps its tile: SetWindowPos on an iconic window only
+         * edits the rect it will restore to, so the cell just sits empty.
+         *
+         * collect_clients skips iconic windows, so both directions are simply a
+         * re-tile. Floating windows are not in the layout either way. */
+        {
+            ManagedWindow *mw = window_find(hwnd);
+            if (mw && !mw->is_floating &&
+                mw->desktop_id == g.current_desktop_id) {
+                mw->has_applied = false;
+                tile_current();
+            }
+        }
+        break;
+
     case EVENT_SYSTEM_FOREGROUND:
         /* Focus changed behind our back — the user clicked a window, or an app
          * activated itself on startup. Re-sync our idea of who is focused:
@@ -235,6 +254,26 @@ bool events_init(void) {
         log_w(L"SetWinEventHook(FOREGROUND) failed: %lu — focus tracking is "
               L"degraded (mouse-driven focus won't be seen)", GetLastError());
 
+    /* Minimize/restore need a THIRD hook, for the same reason the foreground
+     * one is separate: EVENT_SYSTEM_MINIMIZESTART/END are 0x0016/0x0017, in the
+     * system-event range, nowhere near the object range above. They are
+     * adjacent to each other, so one hook covers both.
+     *
+     * Also not fatal: without it a minimized window keeps an empty tile, which
+     * is untidy rather than broken. */
+    g.minimize_hook = SetWinEventHook(
+        EVENT_SYSTEM_MINIMIZESTART,
+        EVENT_SYSTEM_MINIMIZEEND,
+        NULL,
+        events_win_event_proc,
+        0, 0,
+        WINEVENT_OUTOFCONTEXT
+    );
+
+    if (!g.minimize_hook)
+        log_w(L"SetWinEventHook(MINIMIZE) failed: %lu — minimized windows will "
+              L"keep an empty tile", GetLastError());
+
     return true;
 }
 
@@ -249,5 +288,9 @@ void events_shutdown(void) {
     if (g.foreground_hook) {
         UnhookWinEvent(g.foreground_hook);
         g.foreground_hook = NULL;
+    }
+    if (g.minimize_hook) {
+        UnhookWinEvent(g.minimize_hook);
+        g.minimize_hook = NULL;
     }
 }

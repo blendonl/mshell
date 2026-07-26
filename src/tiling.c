@@ -75,6 +75,12 @@ static int collect_clients(Desktop *dt, int mon, Client *out) {
          * app shows it again — but it gets no tile, and in particular is kept
          * out of the placement list, which force-shows anything invisible. */
         if (mw->app_hidden) continue;
+        /* Minimized windows are still WS_VISIBLE, so nothing else filters them
+         * out — but SetWindowPos on an iconic window only edits the rect it
+         * will restore to, so giving one a cell just leaves that cell empty.
+         * IsIconic rather than a tracked flag: it is authoritative even if a
+         * minimize event was missed. */
+        if (IsIconic(dt->windows[i])) continue;
         int wmon = mw->monitor;
         if (wmon < 0 || wmon >= g.monitor_count) wmon = 0;   /* defensive */
         if (wmon != mon) continue;
