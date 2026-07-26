@@ -591,6 +591,14 @@ DWORD    mod_name_to_flag(const char *name);
 Action   action_name_to_enum(const char *name);
 const char *action_enum_to_name(Action action); /* reverse lookup (or NULL)        */
 void     execute_action(Action action, int arg, const wchar_t *command);
+
+/* Copy out the action a WM_MSHELL_ACTION message refers to (its lParam is the
+ * sequence number). The hook records actions BY VALUE rather than posting the
+ * KeyBinding pointer, because a config reload frees every binding while another
+ * keystroke may still be sitting in the queue behind it. False if the ring
+ * lapped before the main thread drained it. */
+bool     kb_take_pending(unsigned seq, Action *action, int *arg,
+                         wchar_t *cmd, size_t cmd_cap);
 KeyMap  *keymap_new(const wchar_t *name, bool persist);
 void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                             Action action, int arg, KeyMap *submap,
