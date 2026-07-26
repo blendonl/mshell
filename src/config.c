@@ -51,16 +51,18 @@ static void config_apply_defaults(void) {
  * Operates on either the live globals or a saved snapshot.
  * =========================================================================== */
 static void config_free_owned(KeyMap *keymaps, int keymap_count,
-                              wchar_t **startup, int startup_count) {
+                              StartupCommand *startup, int startup_count) {
     for (int i = 0; i < keymap_count; i++) {
         for (int j = 0; j < keymaps[i].count; j++) {
             free(keymaps[i].bindings[j].command);
+            free(keymaps[i].bindings[j].args);
         }
         free(keymaps[i].name);
         free(keymaps[i].bindings);
     }
     for (int i = 0; i < startup_count; i++) {
-        free(startup[i]);
+        free(startup[i].cmd);
+        free(startup[i].args);
     }
 }
 
@@ -76,7 +78,7 @@ typedef struct {
     KeyMap   *leader_map;      /* Win-tap target; a pointer into keymaps[]     */
     WindowRule rules[MAX_RULES];
     int       rule_count;
-    wchar_t  *startup_commands[MAX_STARTUP_COMMANDS];
+    StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
     int       startup_count;
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
     int       desktop_rule_count;
@@ -365,17 +367,17 @@ void config_load_builtin(void) {
 
     /* Bare essentials: open a terminal, reload, quit, cycle focus, close. */
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, VK_RETURN,
-                       ACTION_SPAWN, 0, NULL, L"cmd.exe", true);
+                       ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'R',
-                       ACTION_RELOAD, 0, NULL, NULL, true);
+                       ACTION_RELOAD, 0, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'Q',
-                       ACTION_QUIT, 0, NULL, NULL, true);
+                       ACTION_QUIT, 0, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN, 'J',
-                       ACTION_FOCUS_NEXT, 0, NULL, NULL, true);
+                       ACTION_FOCUS_NEXT, 0, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN, 'K',
-                       ACTION_FOCUS_PREV, 0, NULL, NULL, true);
+                       ACTION_FOCUS_PREV, 0, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'C',
-                       ACTION_CLOSE, 0, NULL, NULL, true);
+                       ACTION_CLOSE, 0, NULL, NULL, NULL, true);
 
 }
 

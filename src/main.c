@@ -259,12 +259,15 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         Action  action;
         int     arg;
         wchar_t cmd[MAX_PATH];
+        wchar_t args[SPAWN_ARGS_MAX];
 
-        if (kb_take_pending((unsigned)lp, &action, &arg, cmd, MAX_PATH)) {
+        if (kb_take_pending((unsigned)lp, &action, &arg,
+                            cmd, MAX_PATH, args, SPAWN_ARGS_MAX)) {
             log_w(L"hook match: vk=0x%02X mods=0x%X -> action=%d",
                   (unsigned)(wp & 0xFFFF), (unsigned)((wp >> 16) & 0xFFFF),
                   (int)action);
-            execute_action(action, arg, cmd[0] ? cmd : NULL);
+            execute_action(action, arg, cmd[0] ? cmd : NULL,
+                           args[0] ? args : NULL);
         }
         return 0;
     }
@@ -603,18 +606,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * report it, because a startup program that never appears otherwise looks
      * exactly like mshell ignoring mshell.spawn(). */
     for (int i = 0; i < g.startup_count; i++) {
-        if (g.startup_commands[i]) {
-            INT_PTR code = (INT_PTR)ShellExecuteW(NULL, L"open",
-                                                 g.startup_commands[i],
-                                                 NULL, NULL, SW_SHOW);
-            if (code <= 32)
-                log_err(L"startup: FAILED to launch '%ls' (code %lld) — not on "
-                        L"PATH or not installed? Use a full path in "
-                        L"mshell.spawn().",
-                        g.startup_commands[i], (long long)code);
-            else
-                log_err(L"startup: launched '%ls'", g.startup_commands[i]);
-        }
+        if (g.startup_commands[i].cmd)
+            spawn_command(g.startup_commands[i].cmd,
+                          g.startup_commands[i].args, L"startup");
     }
 
     /* --- per-desktop auto-launch for the initial desktop ---

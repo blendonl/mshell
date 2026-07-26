@@ -142,6 +142,7 @@ void desktop_apply_rules(int slot) {
     dt->n_master     = g.default_nmaster > 0 ? g.default_nmaster : DEFAULT_NMASTER;
     dt->float_all    = false;
     dt->app[0]       = L'\0';
+    dt->app_args[0]  = L'\0';
 
     for (int i = 0; i < g.desktop_rule_count; i++) {
         const DesktopRule *r = &g.desktop_rules[i];
@@ -150,6 +151,10 @@ void desktop_apply_rules(int slot) {
         if (r->app[0]) {
             wcsncpy(dt->app, r->app, MAX_PATH - 1);
             dt->app[MAX_PATH - 1] = L'\0';
+            /* The arguments travel with the app they belong to — a later rule
+             * that replaces the app must not inherit the old one's. */
+            wcsncpy(dt->app_args, r->app_args, SPAWN_ARGS_MAX - 1);
+            dt->app_args[SPAWN_ARGS_MAX - 1] = L'\0';
         }
         if (r->set_float)   dt->float_all    = r->float_all;
         if (r->set_layout)  dt->layout       = r->layout;
@@ -678,16 +683,13 @@ void desktop_launch_app_if_empty(int slot) {
     if (dt->app_pending) return;   /* a launch is already in flight        */
     if (!dt->app[0])     return;   /* no app configured for this desktop   */
 
-    HINSTANCE r = ShellExecuteW(NULL, L"open", dt->app, NULL, NULL, SW_SHOWNORMAL);
-    INT_PTR code = (INT_PTR)r;
-    log_w(L"desktop '%ls' empty — auto-launching '%ls' -> %lld",
-          dt->name, dt->app, (long long)code);
-    if (code <= 32) {
-        /* Launch failed (bad command / not on PATH). Don't latch pending, so a
-         * corrected config works on the next visit instead of staying stuck. */
-        log_err(L"desktop '%ls': app '%ls' FAILED to launch (code %lld) — not "
-                L"on PATH / not installed?", dt->name, dt->app, (long long)code);
-        return;
-    }
+    wchar_t ctx[DESKTOP_NAME_MAX + 16];
+    _snwprintf(ctx, DESKTOP_NAME_MAX + 16, L"desktop '%ls'", dt->name);
+    ctx[DESKTOP_NAME_MAX + 15] = L'\0';
+
+    /* On failure do NOT latch app_pending, so a corrected config takes effect
+     * on the next visit instead of the desktop staying stuck as "launching". */
+    if (!spawn_command(dt->app, dt->app_args, ctx)) return;
+
     dt->app_pending = true;
 }
