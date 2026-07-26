@@ -153,8 +153,21 @@ static bool any_dialog_rule(void) {
 
 /* ===========================================================================
  * is_manageable — filter out windows we should never touch
+ *
+ * `rule_out` reports the matched rule (or NULL) so the caller does not have to
+ * look it up a second time. window_rule_lookup() opens the owning process and
+ * queries its image path, and this runs for every window that SHOWS anywhere on
+ * the system — every menu, tooltip, dropdown and IME candidate list — so doing
+ * it twice per window was a measurable waste on the busiest path there is.
+ * Within this function the lookup is likewise done at most once, memoised in
+ * `rule` / `looked_up`.
  * =========================================================================== */
-bool window_is_manageable(HWND hwnd) {
+static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
+    const WindowRule *rule      = NULL;
+    bool              looked_up = false;
+
+    if (rule_out) *rule_out = NULL;
+
     if (!IsWindowVisible(hwnd))   return false;
     if (!IsWindowEnabled(hwnd))   return false;
     if (IsIconic(hwnd))           return false;  /* minimized */
@@ -175,8 +188,10 @@ bool window_is_manageable(HWND hwnd) {
      * not start pulling in every splash screen and error box a game owns. */
     if (!g.manage_owned && GetWindow(hwnd, GW_OWNER) != NULL) {
         if (!any_dialog_rule()) return false;
-        const WindowRule *r = window_rule_lookup(hwnd);
-        if (!r || !r->set_dialog || !r->dialog || r->action == RULE_IGNORE)
+        rule = window_rule_lookup(hwnd);
+        looked_up = true;
+        if (!rule || !rule->set_dialog || !rule->dialog ||
+            rule->action == RULE_IGNORE)
             return false;
     }
 
@@ -189,14 +204,12 @@ bool window_is_manageable(HWND hwnd) {
     /* Must be an overlapped or popup window (not a child) */
     if (!(style & WS_OVERLAPPEDWINDOW) && !(style & WS_POPUP)) return false;
 
-    /* Cloaked windows (Windows 8+ DWM feature) */
-    int cloaked = 0;
-    HRESULT hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
-                                        &cloaked, sizeof(cloaked));
-    if (SUCCEEDED(hr) && cloaked) return false;
-
     /* Ignore the desktop window and explorer's shell UI. The shell classes
-     * matter in --test mode (explorer is running); harmless otherwise. */
+     * matter in --test mode (explorer is running); harmless otherwise.
+     *
+     * This sits ABOVE the cloaked test on purpose: GetClassNameW is a local
+     * read, while DwmGetWindowAttribute is an RPC to dwm.exe. Rejecting the
+     * cheap way first keeps the expensive question off the common path. */
     wchar_t cls[256];
     get_class_name(hwnd, cls, 256);
     static const wchar_t *ignore_classes[] = {
@@ -226,6 +239,13 @@ bool window_is_manageable(HWND hwnd) {
     int h = r.bottom - r.top;
     if (w < g.min_win_w || h < g.min_win_h) return false;
 
+    /* Cloaked windows (Windows 8+ DWM feature). Last of the cheap rejections
+     * because it is the only one that leaves the process. */
+    int cloaked = 0;
+    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                                        &cloaked, sizeof(cloaked))) && cloaked)
+        return false;
+
     /* Rules have the last word, and they are consulted *before* the caption-less
      * popup heuristic below — a rule that names a window is the user telling us
      * what it is, which beats guessing from styles. That matters for exactly one
@@ -235,7 +255,8 @@ bool window_is_manageable(HWND hwnd) {
      * it stays on screen across every desktop switch and Win+Shift+c can't
      * reach it. Rules match in order, so an "ignore" rule placed ahead of a
      * broad path rule still carves exceptions out of it. */
-    const WindowRule *rule = window_rule_lookup(hwnd);
+    if (!looked_up) rule = window_rule_lookup(hwnd);
+    if (rule_out) *rule_out = rule;
     if (rule) return rule->action != RULE_IGNORE;
 
     /* Ignore invisible/system popups */
@@ -243,6 +264,10 @@ bool window_is_manageable(HWND hwnd) {
         return false;  /* likely a menu / tooltip */
 
     return true;
+}
+
+bool window_is_manageable(HWND hwnd) {
+    return is_manageable(hwnd, NULL);
 }
 
 /* ===========================================================================
@@ -453,9 +478,12 @@ void window_manage(HWND hwnd) {
     /* Already managed? */
     if (window_index_of(hwnd) >= 0) return;
 
-    if (!window_is_manageable(hwnd)) return;
+    /* One lookup for both questions — is_manageable already resolved the rule
+     * (opening the owning process to do it), so asking again here would double
+     * the cost of every window that appears anywhere on the system. */
+    const WindowRule *rule = NULL;
+    if (!is_manageable(hwnd, &rule)) return;
 
-    const WindowRule *rule = window_rule_lookup(hwnd);
     RuleAction action = rule ? rule->action : RULE_MANAGE;
     if (action == RULE_IGNORE) return;
 
@@ -581,6 +609,15 @@ bool window_frame_rect(HWND hwnd, RECT *out) {
  * compensating for DWM's invisible border so the *visible* frame lands exactly
  * where the caller asked. Stripped windows have ~0 border; browsers ~7px.
  * =========================================================================== */
+/* NB: the insets computed below are deliberately NOT cached on ManagedWindow.
+ * It looks tempting — two cross-process calls per placed window per pass — but
+ * a tiling pass is user-initiated, not per-frame, and flush_placements already
+ * skips windows that haven't moved, so the real cost is well under a
+ * millisecond on a pass a human just asked for. Against that, the cache would
+ * have to be invalidated every time a window's frame changes behind our back,
+ * which is precisely what games do (see window_reassert_rule) — and a stale
+ * inset produces a wrong rect, which the drift detector then re-tiles with the
+ * same stale inset. Bad trade: real geometry bugs to buy invisible time. */
 RECT window_adjust_for_frame(HWND hwnd, RECT want) {
     RECT wr, fr;
     if (GetWindowRect(hwnd, &wr) &&
@@ -1013,9 +1050,10 @@ void window_kill(HWND hwnd) {
  * =========================================================================== */
 static BOOL CALLBACK enum_windows_proc(HWND hwnd, LPARAM lp) {
     (void)lp;
-    if (window_is_manageable(hwnd)) {
-        window_manage(hwnd);
-    }
+    /* window_manage() runs the manageability test itself, so testing here too
+     * just paid for every check — including the process query — twice per
+     * window on the system. */
+    window_manage(hwnd);
     return TRUE;
 }
 
