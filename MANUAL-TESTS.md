@@ -51,6 +51,37 @@ From a normal terminal, with mshell running:
 - Signed in as a second user, that user's `--query` reaches their own mshell,
   not yours.
 
+## Features added in 0.11.0
+
+- **Sticky**: `toggle_sticky` on a window, switch desktops — it comes with you,
+  and the bar's window count follows.
+- **Scratchpad**: `mark_scratchpad` on a terminal, switch desktops, then
+  `toggle_scratchpad` — it appears here, focused. Again — it hides.
+- **Zoom**: from the stack it swaps into master; pressed again from master it
+  swaps back out to where the old master went.
+- **Session**: change a desktop's layout and master ratio, quit, restart —
+  both are restored, and you land on the desktop you left. Then
+  `taskkill /F /IM mshell.exe` and restart: still restored (this is the case
+  shutdown-only saving would miss).
+- **--check**: `mshell.exe --check` on a good config prints counts; on a broken
+  one prints the Lua error. Run it while mshell is running and confirm
+  `%TEMP%\mshell.log` is **not** truncated.
+- **Mouse**: drag a tiled window onto another — they swap. Drag it onto empty
+  space — it snaps back. Drag a floating window — it moves normally.
+- **Crash**: not easily forced, but if mshell ever does die, check that windows
+  on other desktops are visible afterwards.
+
+## Privileged helper (0.11.0)
+
+- Without `mshelld.exe` running: open Task Manager. It floats; the log notes
+  once that a window could not be placed. Everything else tiles normally.
+- Start `mshelld.exe` elevated, then reload: Task Manager now tiles.
+- `%TEMP%\mshelld.log` records the connection.
+- Kill `mshelld.exe` while mshell runs: mshell keeps working, and elevated
+  windows go back to floating rather than mshell hanging or crashing.
+- Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
+  each other with a logged protocol-version message.
+
 ## DPI
 
 Needs a scaled display; this is the fix most likely to regress silently.

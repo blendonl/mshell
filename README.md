@@ -67,6 +67,14 @@ tiled, driven entirely from the keyboard and configured in Lua.
   action in the running shell, and `mshell.exe --query` prints its state as JSON
   (desktops, monitors, focused window). The pipe is per-session and its DACL
   admits only the owning user.
+- **Sticky windows**, a **scratchpad**, dwm-style **zoom**, and mouse
+  drag-to-swap between tiles.
+- **Session persistence**: per-desktop layout, master ratio and master count
+  survive a restart, and you come back to the desktop you left.
+- **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
+  still tile windows owned by elevated processes — without your `init.lua` ever
+  becoming administrator-level code. No config, no Lua, no scripting: it moves
+  windows and nothing else.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 

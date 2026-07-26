@@ -3,6 +3,67 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## 0.11.0 — 2026-07-26
+
+The features a tiling WM is expected to have, and the end of the elevated-config
+trade-off.
+
+### Added
+
+- **`mshelld.exe`, a privileged helper** — so you no longer have to choose
+  between tiling elevated windows and keeping your config out of the
+  administrator's hands. It is elevated; mshell is not. It has no config, no
+  Lua, no rules, no layout and no keyboard hook: it accepts "put this window at
+  this rectangle" and performs it. 19 KB. Entirely opt-in — without it, mshell
+  behaves exactly as before and elevated windows float. See INSTALL.md.
+- **Sticky windows** (`toggle_sticky`) — a window that follows you to every
+  desktop.
+- **A scratchpad** — mark a window (`mark_scratchpad`), then summon and dismiss
+  it from anywhere (`toggle_scratchpad`).
+- **`zoom`** — dwm's swap-with-master, which unlike the existing
+  `promote_master` is a toggle.
+- **Session persistence.** Layouts, master ratios and master counts survive a
+  restart, keyed by desktop name, and you come back to the desktop you left.
+  Saved eagerly rather than at shutdown, because the case this exists for —
+  `install.bat` upgrading by `taskkill /F` — never reaches a shutdown path.
+- **`mshell.exe --check`** validates a config and reports what it produced,
+  without starting a shell. A config error is atomic and the fallback keymap has
+  six bindings, so sign-in is a bad moment to discover a typo.
+- **Mouse drags swap tiles.** A tiled window cannot really be moved — the layout
+  owns its geometry — so a drag is interpreted: dropped on another tile, the two
+  swap; dropped anywhere else, it snaps back. `mshell.set_mouse(false)` disables
+  it.
+- **A crash no longer loses your windows.** Desktops and monocle are implemented
+  by hiding, so an unclean death used to strand every hidden window exactly the
+  way an unclean exit did before 0.8.0. The handler gives them back and saves
+  the session before letting the process die.
+- **CI** — cross-compiles, runs the host tests, and builds the release zip, all
+  on Linux, with warnings as errors.
+
+### Decided
+
+**Desktops span every monitor**, and dwm-style per-monitor tags were considered
+and declined. A desktop here is a name you invent rather than a slot you own, so
+per-monitor tags would layer a second, differently-shaped namespace over an
+already-dynamic set and make `switch_desktop "web"` mean different things
+depending on which display had focus. `desktop_rule("name", { monitor = 1 })`
+covers the case that motivates it. Recorded in the README so it reads as a
+choice rather than an omission.
+
+### Notes on the privilege split
+
+The keyboard hook stays in mshell, deliberately. A low-level hook must return
+its verdict inside `LowLevelHooksTimeout`, which a per-keystroke pipe round-trip
+cannot promise — and a hook that misses the deadline leaks the swallowed Win
+key, the exact failure the dedicated hook thread exists to prevent. The
+alternative, compiling the submap state machine into the helper, would put a
+config-derived automaton behind the privilege boundary and defeat the point of
+keeping the elevated half dumb.
+
+So keybinds while an elevated window *has focus* remain the one reason left to
+elevate mshell, and INSTALL.md says so plainly. Everything else — including
+tiling those windows — now works from an unelevated shell.
+
 ## 0.10.0 — 2026-07-26
 
 Two things you could not do before: see what mshell is doing, and tell it what
