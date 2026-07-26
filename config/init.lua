@@ -548,6 +548,21 @@ mshell.bind({mod}, "o", "enter_submap", "launch")
 mshell.bind({mod, shft}, "c", "close")
 mshell.bind({mod, shft}, "x", "kill")
 
+-- --- a key can also run a Lua function ---
+-- Anything the config can do, a binding can do. The function runs on mshell's
+-- main thread when you press the key, so keep it quick — and note that the
+-- config-BUILDING calls (bind, submap, rule, spawn, …) are refused from in
+-- here: rebuilding the keymaps while the keyboard hook is reading them is what
+-- a reload takes a lock for, and a binding holds no such lock. The query calls
+-- and mshell.log are fine.
+mshell.bind({mod, ctrl}, "i", function()
+    local d = mshell.get_current_desktop()
+    local w = mshell.get_focused_window()
+    mshell.log(("desktop '%s' (%s, %d windows) — focused: %s")
+        :format(d and d.name or "?", d and d.layout or "?",
+                d and d.windows or 0, w and w.process or "nothing"))
+end)
+
 -- --- reload config ---
 mshell.bind({mod, shft}, "r", "reload")
 

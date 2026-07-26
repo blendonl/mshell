@@ -381,6 +381,7 @@ void kb_reset_state(void) {
 
 typedef struct {
     unsigned seq;                  /* 0 = never written */
+    unsigned gen;                  /* g.config_gen when this was dispatched */
     Action   action;
     int      arg;
     wchar_t  command[MAX_PATH];
@@ -410,6 +411,7 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
 
     p->action = b->action;
     p->arg    = b->arg;
+    p->gen    = g.config_gen;
     pend_copy(p->command, MAX_PATH,        b->command);
     pend_copy(p->args,    SPAWN_ARGS_MAX,  b->args);
     p->seq = seq;   /* last: the slot is only valid once fully written */
@@ -432,16 +434,28 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
 
     kb_lock();
     PendingAction *p = &s_pending[seq & (KB_PENDING_N - 1)];
+    bool stale_lua = false;
     if (p->seq == seq) {
-        *action = p->action;
-        *arg    = p->arg;
-        pend_copy(cmd,  cmd_cap,  p->command);
-        pend_copy(args, args_cap, p->args);
-        ok = true;
+        /* A Lua binding carries a registry ref, which belongs to the lua_State
+         * that created it. If a reload landed between the keypress and now,
+         * that state is closed and the ref would index into a different one —
+         * so drop it. Everything else was copied by value and is still safe to
+         * run, so only Lua calls are gated on the generation. */
+        if (p->action == ACTION_LUA_CALL && p->gen != g.config_gen) {
+            stale_lua = true;
+        } else {
+            *action = p->action;
+            *arg    = p->arg;
+            pend_copy(cmd,  cmd_cap,  p->command);
+            pend_copy(args, args_cap, p->args);
+            ok = true;
+        }
     }
     kb_unlock();
 
-    if (!ok)
+    if (stale_lua)
+        log_w(L"input: dropped a Lua keybind queued before the config reload");
+    else if (!ok)
         log_err(L"input: dropped a keybind action — more than %d were queued "
                 L"before the main thread could run them", KB_PENDING_N);
     return ok;
@@ -810,6 +824,14 @@ void execute_action(Action action, int arg, const wchar_t *command,
     switch (action) {
 
     /* -- spawn a program ----------------------------------------------- */
+    /* -- run a Lua function from the config ----------------------------
+     * `arg` is a registry ref. It was checked against the config generation
+     * before we got here (kb_take_pending), so the VM it belongs to is the
+     * live one. */
+    case ACTION_LUA_CALL:
+        lua_run_ref(arg);
+        break;
+
     case ACTION_SPAWN:
         if (command && command[0]) {
             /* Launch detached; the WinEvent hook picks the new window up and
