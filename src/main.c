@@ -215,12 +215,18 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
          * word) ONLY so we can log the match here, on the main thread — the
          * hook must never do I/O (a slow hook gets dropped and leaves the
          * swallowed Win key stuck). */
-        KeyBinding *b = (KeyBinding *)lp;
-        if (b) {
+        /* lParam is a sequence number into the hook's pending-action ring, not
+         * a KeyBinding pointer: the binding it came from may already have been
+         * freed by a config reload queued ahead of us. */
+        Action  action;
+        int     arg;
+        wchar_t cmd[MAX_PATH];
+
+        if (kb_take_pending((unsigned)lp, &action, &arg, cmd, MAX_PATH)) {
             log_w(L"hook match: vk=0x%02X mods=0x%X -> action=%d",
                   (unsigned)(wp & 0xFFFF), (unsigned)((wp >> 16) & 0xFFFF),
-                  (int)b->action);
-            execute_action(b->action, b->arg, b->command);
+                  (int)action);
+            execute_action(action, arg, cmd[0] ? cmd : NULL);
         }
         return 0;
     }

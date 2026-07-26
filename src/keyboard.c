@@ -345,22 +345,92 @@ void kb_reset_state(void) {
     kb_unlock();
 }
 
-/* Post an action to the main thread. The hook must stay fast — doing
- * SetForegroundWindow / ShellExecute, or ANY logging / blocking call, inline
- * can blow LowLevelHooksTimeout, which makes Windows drop the hook for an event
- * and leaves the swallowed Win key stuck (Windows sees the Win-down but the
- * hook still eats the Win-up). So the hook ONLY posts here; all heavy work —
- * including logging the match — happens on the main thread.
+/* ===========================================================================
+ * Pending-action ring — how a keystroke reaches the main thread.
  *
- * wParam carries the triggering key (low word) + modifier mask (high word) so
- * the main thread can log the match without the hook ever touching I/O.
- * Binding pointers are stable until a config reload, which is itself a
- * deferred (FIFO-ordered) action, so the pointer is always valid on receipt. */
+ * The hook must stay fast: doing SetForegroundWindow / ShellExecute, or ANY
+ * logging or blocking call, inline can blow LowLevelHooksTimeout, which makes
+ * Windows drop the hook for an event and leaves the swallowed Win key stuck
+ * (the OS sees the Win-down but the hook still eats the Win-up). So the hook
+ * only records what to do and posts; all heavy work happens on the main thread.
+ *
+ * What is recorded is the action BY VALUE, not the KeyBinding it came from.
+ * Posting the pointer was a use-after-free: a config reload frees every
+ * binding (config_free_owned), and two keystrokes can sit in the queue at once
+ * — press Win+Shift+R and then any bound key before the main thread drains,
+ * and the reload runs first, freeing the second message's binding out from
+ * under it. Key autorepeat alone gets you there. FIFO ordering does not help,
+ * because the reload is itself one of the queued actions.
+ *
+ * The sequence number travels in lParam and is stored in the slot too, so a
+ * burst deep enough to lap the ring is detected on read rather than silently
+ * executing whatever overwrote it.
+ * =========================================================================== */
+#define KB_PENDING_N 64            /* power of two — index is seq & (N-1) */
+
+typedef struct {
+    unsigned seq;                  /* 0 = never written */
+    Action   action;
+    int      arg;
+    wchar_t  command[MAX_PATH];
+} PendingAction;
+
+static PendingAction s_pending[KB_PENDING_N];
+static unsigned      s_pend_seq = 1;   /* seq 0 is reserved for "empty slot" */
+
+/* Called from the hook, which already holds kb_lock (see kb_hook_proc). */
 static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
-    if (g.message_window)
-        PostMessageW(g.message_window, WM_MSHELL_ACTION,
-                     (WPARAM)((vk & 0xFFFF) | ((mods & 0xFFFF) << 16)),
-                     (LPARAM)b);
+    if (!g.message_window || !b) return;
+
+    unsigned       seq = s_pend_seq++;
+    PendingAction *p   = &s_pending[seq & (KB_PENDING_N - 1)];
+
+    p->action = b->action;
+    p->arg    = b->arg;
+    if (b->command) {
+        size_t n = wcslen(b->command);
+        if (n > MAX_PATH - 1) n = MAX_PATH - 1;
+        memcpy(p->command, b->command, n * sizeof(wchar_t));
+        p->command[n] = L'\0';
+    } else {
+        p->command[0] = L'\0';
+    }
+    p->seq = seq;   /* last: the slot is only valid once fully written */
+
+    /* wParam still carries the triggering key (low word) + modifiers (high
+     * word) purely so the main thread can log the match — the hook itself must
+     * never touch I/O. */
+    PostMessageW(g.message_window, WM_MSHELL_ACTION,
+                 (WPARAM)((vk & 0xFFFF) | ((mods & 0xFFFF) << 16)),
+                 (LPARAM)seq);
+}
+
+/* Main-thread side: copy out the action `seq` refers to. False when the ring
+ * lapped before we got here, which is the only way to lose a keystroke and is
+ * worth saying out loud. */
+bool kb_take_pending(unsigned seq, Action *action, int *arg,
+                     wchar_t *cmd, size_t cmd_cap) {
+    bool ok = false;
+
+    kb_lock();
+    PendingAction *p = &s_pending[seq & (KB_PENDING_N - 1)];
+    if (p->seq == seq) {
+        *action = p->action;
+        *arg    = p->arg;
+        if (cmd && cmd_cap) {
+            size_t n = wcslen(p->command);
+            if (n >= cmd_cap) n = cmd_cap - 1;
+            memcpy(cmd, p->command, n * sizeof(wchar_t));
+            cmd[n] = L'\0';
+        }
+        ok = true;
+    }
+    kb_unlock();
+
+    if (!ok)
+        log_err(L"input: dropped a keybind action — more than %d were queued "
+                L"before the main thread could run them", KB_PENDING_N);
+    return ok;
 }
 
 /* ===========================================================================
@@ -855,15 +925,11 @@ void execute_action(Action action, int arg, const wchar_t *command) {
         tile_current();
         break;
 
-    /* -- submap entry (handled by the hook; the binding's submap ptr
-     *    was set up by Lua's enter_submap action) --------------------- */
-    case ACTION_ENTER_SUBMAP:
-        /* The hook will move us to the submap on next keypress.
-         * We just need to find the submap by name (arg is the index). */
-        if (arg >= 0 && arg < g.keymap_count) {
-            g.current_map = &g.keymaps[arg];
-        }
-        break;
+    /* ACTION_ENTER_SUBMAP is deliberately absent: entering a submap is decided
+     * and applied by the hook itself (all three of its paths assign
+     * g.current_map directly), so it is never dispatched here. The case that
+     * used to sit here was unreachable — and wrote g.current_map from THIS
+     * thread with no kb_lock, racing the hook that owns it. */
 
     /* -- meta ---------------------------------------------------------- */
     case ACTION_RELOAD:
