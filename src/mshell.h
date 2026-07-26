@@ -526,7 +526,12 @@ typedef struct {
 
     /* --- hooks --- */
     HHOOK         kb_hook;
-    HWINEVENTHOOK win_event_hook;    /* EVENT_OBJECT_* (create/show/move/…)  */
+    /* Four narrow WinEvent hooks rather than one wide one. The ranges between
+     * them (REORDER, OBJECT_FOCUS, SELECTION*, STATECHANGE, and most of the
+     * system range) fire constantly across every process on the machine and
+     * nothing here handles them, so they are deliberately not subscribed to. */
+    HWINEVENTHOOK win_event_hook;    /* EVENT_OBJECT_CREATE..HIDE            */
+    HWINEVENTHOOK location_hook;     /* EVENT_OBJECT_LOCATIONCHANGE only     */
     HWINEVENTHOOK foreground_hook;   /* EVENT_SYSTEM_FOREGROUND (separate id
                                       * range — see events_init())           */
     HWINEVENTHOOK minimize_hook;     /* EVENT_SYSTEM_MINIMIZESTART/END — also
@@ -794,7 +799,13 @@ static inline void hwnd_swap(HWND *a, HWND *b) {
     HWND t = *a; *a = *b; *b = t;
 }
 
-/* find a ManagedWindow by HWND — returns index or -1 */
+/* Find a ManagedWindow by HWND — returns index or -1.
+ *
+ * Yes, this is a linear scan, and yes, it is called from inside loops. Leave it
+ * alone: at the window counts that actually occur (a few dozen) a whole tiling
+ * pass costs a few thousand integer comparisons, which is far below anything
+ * measurable. It would only be worth indexing if MAX_MANAGED_WINDOWS were
+ * raised by orders of magnitude. */
 static inline int window_index_of(HWND hwnd) {
     for (int i = 0; i < g.managed_count; i++) {
         if (g.managed[i].hwnd == hwnd) return i;

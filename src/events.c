@@ -215,11 +215,20 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
  * Set up WinEvent hooks
  * =========================================================================== */
 bool events_init(void) {
-    /* We care about object creation/destruction, show/hide, focus,
-     * and location changes for ALL top-level windows, out-of-context.  */
+    /* Window lifetime: create / destroy / show / hide (0x8000..0x8003).
+     *
+     * The range is deliberately tight. It used to run to
+     * EVENT_OBJECT_LOCATIONCHANGE (0x800B) in one hook, which silently included
+     * six event classes nothing here handles — REORDER, OBJECT_FOCUS, the four
+     * SELECTION events and STATECHANGE — for every process on the system. Those
+     * are not rare: OBJECT_FOCUS and SELECTION fire on every control focus and
+     * every text-selection change in every application, and each one still cost
+     * a cross-process marshal and a dispatch onto THIS thread, which is the
+     * thread that also runs every keybind action. Typing in an editor was
+     * generating WinEvent traffic mshell paid for and threw away. */
     g.win_event_hook = SetWinEventHook(
         EVENT_OBJECT_CREATE,
-        EVENT_OBJECT_LOCATIONCHANGE,
+        EVENT_OBJECT_HIDE,
         NULL,                              /* our own module           */
         events_win_event_proc,             /* callback                 */
         0, 0,                              /* all processes, all threads */
@@ -229,6 +238,22 @@ bool events_init(void) {
     if (!g.win_event_hook) {
         log_w(L"SetWinEventHook failed: %lu", GetLastError());
         return false;
+    }
+
+    /* Geometry drift: LOCATIONCHANGE only (0x800B), as its own hook so the gap
+     * between it and the lifetime range above is not subscribed to. */
+    g.location_hook = SetWinEventHook(
+        EVENT_OBJECT_LOCATIONCHANGE,
+        EVENT_OBJECT_LOCATIONCHANGE,
+        NULL,
+        events_win_event_proc,
+        0, 0,
+        WINEVENT_OUTOFCONTEXT
+    );
+
+    if (!g.location_hook) {
+        log_w(L"SetWinEventHook(LOCATIONCHANGE) failed: %lu — tiled windows "
+              L"dragged out of place won't snap back", GetLastError());
     }
 
     /* Focus changes need a SECOND hook. EVENT_SYSTEM_FOREGROUND is 0x0003 —
@@ -292,5 +317,9 @@ void events_shutdown(void) {
     if (g.minimize_hook) {
         UnhookWinEvent(g.minimize_hook);
         g.minimize_hook = NULL;
+    }
+    if (g.location_hook) {
+        UnhookWinEvent(g.location_hook);
+        g.location_hook = NULL;
     }
 }
