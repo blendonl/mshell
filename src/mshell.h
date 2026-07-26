@@ -79,6 +79,11 @@
 #define WM_MSHELL_SUBMAP  (WM_APP + 2)
 #define WM_MSHELL_CONFIG_CHANGED  (WM_APP + 3)
 
+/* Posted by the IPC pipe thread with an IpcRequest*. The command runs on the
+ * main thread because everything it can touch is main-thread state; the pipe
+ * thread waits on the request's event and then writes the reply. */
+#define WM_MSHELL_IPC             (WM_APP + 4)
+
 /* ---------------------------------------------------------------------------
  * Constants
  * --------------------------------------------------------------------------- */
@@ -901,6 +906,21 @@ void     config_shutdown(void);
 void     config_watch_sync(void);
 void     config_watch_stop(void);
 void     config_on_file_changed(unsigned generation);
+
+/* ===========================================================================
+ * Prototypes — ipc.c (control a running mshell from the command line)
+ * =========================================================================== */
+
+/* Handle --msg / --query. True if this invocation was a client command, in
+ * which case the shell must not start. Call first in WinMain. */
+bool     ipc_client_try(int *exit_code);
+
+void     ipc_start(void);   /* begin serving the per-session named pipe */
+void     ipc_stop(void);
+void     ipc_handle_request(void *req);   /* WM_MSHELL_IPC — main thread only */
+
+/* Canonical name of a layout — the same spelling set_layout accepts. */
+const char *layout_to_name(Layout l);
 
 void     lua_register_api(lua_State *L);
 

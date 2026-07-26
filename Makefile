@@ -32,7 +32,10 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
 # ole32 + uuid are for SHGetKnownFolderPath/FOLDERID_RoamingAppData (config
 # path resolution in main.c): CoTaskMemFree lives in ole32, the FOLDERID_* GUID
 # symbols in uuid.
-LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 -lm
+# advapi32: the IPC pipe's DACL (ConvertSidToStringSid,
+# ConvertStringSecurityDescriptorToSecurityDescriptor).
+LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
+           -ladvapi32 -lm
 
 # --- Paths ---
 SRC_DIR  = src
@@ -51,6 +54,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/background.c \
               $(SRC_DIR)/whichkey.c   \
               $(SRC_DIR)/bar.c        \
+              $(SRC_DIR)/ipc.c        \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c
 
