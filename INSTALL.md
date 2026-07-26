@@ -132,11 +132,35 @@ elevated. In order of preference:
   ```
   Reboot. Undo with `EnableLUA=1` + reboot (see Uninstall).
 
-> Why not self-elevate? When mshell is the shell, the process exiting ends
-> your session. The old "relaunch elevated, then exit" trick would exit the
-> shell → log you out → repeat. The `--shell` flag disables that relaunch, so
-> mshell runs with whatever token login gave it. Elevate the login token
-> instead (above).
+> Why not self-elevate? mshell never elevates itself — it is manifested
+> `asInvoker` and runs with whatever token it was given. Besides the logoff loop
+> that a self-elevating *shell* would cause (exiting ends your session, so
+> "relaunch elevated, then exit" would log you straight out), elevation changes
+> what your config file is. Elevate the login token instead, if you must (above).
+
+### What elevation does to `init.lua`
+
+**If you run mshell elevated, treat `init.lua` as administrator-level code.**
+
+The config is a Lua script executed with the full standard library —
+`os.execute`, `io`, `package.loadlib` — and it lives in `%APPDATA%\mshell\`,
+which your *normal, unelevated* account can write to. So an elevated mshell
+means anything running as you at ordinary privilege can edit that file and have
+it run with administrator rights.
+
+Two things follow:
+
+- **Auto-reload is disabled when mshell is elevated.** Normally the config
+  folder is watched and a save applies ~250 ms later; that would make the above
+  automatic and silent, so the watcher simply does not start. `Win+Shift+R`
+  still reloads, which keeps a deliberate keypress in the loop. mshell logs
+  that it is elevated at startup.
+- **If you elevate, restrict the folder.** Keep `%APPDATA%\mshell\` from being
+  writable by anything you would not trust with admin.
+
+The recommended option above — leave UAC on, let elevated windows float — avoids
+all of this. A future release moves the privileged work into a small helper with
+no config and no scripting, which removes the trade-off entirely.
 
 ## 5. Turn off the rest of Windows (optional, recommended)
 
