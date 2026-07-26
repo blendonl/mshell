@@ -1,0 +1,95 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+;  mshell debloat.reg — turns off the visual chrome, animations, snap
+;  behaviour, notifications and sounds that Windows layers on top of a
+;  session. Everything here is per-user (HKCU): no admin, affects only this
+;  account, and every value is reverted by debloat-undo.reg.
+;
+;  This is the cosmetic counterpart to harden.reg (which handles keyboard
+;  shortcuts) and to the DWM square-corners / no-animation code baked into
+;  mshell.exe itself (see window.c).
+;
+;  Apply:  double-click, or  reg import debloat.reg
+;  Undo:   run debloat-undo.reg
+;  Most take effect immediately; a few settle on the next sign-in.
+; ============================================================================
+
+; ---------------------------------------------------------------------------
+;  Animations & visual effects  ("Adjust for best performance")
+; ---------------------------------------------------------------------------
+; Radio-button state in the Performance Options UI (2 = best performance).
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects]
+"VisualFXSetting"=dword:00000002
+
+; The master animation/fade mask. This one value governs menu/tooltip/combo-
+; box fade & slide, selection fade, list-box smooth scrolling, cursor shadow,
+; gradient title bars and the "shadows under windows" effect. The bytes below
+; are exactly what "Adjust for best performance" writes.
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"UserPreferencesMask"=hex:90,12,03,80,10,00,00,00
+"DragFullWindows"="0"
+"MenuShowDelay"="0"
+; Aero Snap: drag a window to a screen edge to auto-arrange it. Fights a tiler.
+"WindowArrangementActive"="0"
+
+; Minimise / maximise / restore window animation.
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"MinAnimate"="0"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+"TaskbarAnimations"=dword:00000000
+"ListviewAlphaSelect"=dword:00000000
+"ListviewShadow"=dword:00000000
+; Snap Assist (the "pick a window for the other half" flyout) + snap layouts.
+"SnapAssist"=dword:00000000
+"EnableSnapAssistFlyout"=dword:00000000
+"JointResize"=dword:00000000
+; Aero Shake — grab a title bar, shake, and every other window minimises.
+"DisallowShaking"=dword:00000001
+
+; ---------------------------------------------------------------------------
+;  DWM: transparency, accent colour on borders, desktop peek
+; ---------------------------------------------------------------------------
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM]
+"EnableAeroPeek"=dword:00000000
+"ColorPrevalence"=dword:00000000
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize]
+"EnableTransparency"=dword:00000000
+
+; ---------------------------------------------------------------------------
+;  Notifications, toasts and "suggested content"
+; ---------------------------------------------------------------------------
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\PushNotifications]
+"ToastEnabled"=dword:00000000
+
+[HKEY_CURRENT_USER\Software\Policies\Microsoft\Windows\Explorer]
+"DisableNotificationCenter"=dword:00000001
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager]
+"SystemPaneSuggestionsEnabled"=dword:00000000
+"SilentInstalledAppsEnabled"=dword:00000000
+"SoftLandingEnabled"=dword:00000000
+"RotatingLockScreenOverlayEnabled"=dword:00000000
+"SubscribedContent-310093Enabled"=dword:00000000
+"SubscribedContent-338389Enabled"=dword:00000000
+"SubscribedContent-338393Enabled"=dword:00000000
+"SubscribedContent-353694Enabled"=dword:00000000
+"SubscribedContent-353696Enabled"=dword:00000000
+
+; ---------------------------------------------------------------------------
+;  Sounds
+; ---------------------------------------------------------------------------
+; The error "ding" Windows plays on an invalid / blocked keystroke. A keyboard
+; shell that swallows keys would otherwise beep on every unbound Win+<key>.
+; (Startup jingle lives in services.reg — it's a machine-wide HKLM value.)
+[HKEY_CURRENT_USER\Control Panel\Sound]
+"Beep"="no"
+
+; ---------------------------------------------------------------------------
+;  Pointer
+; ---------------------------------------------------------------------------
+; Pointer trails off. (Pointer shadow is already covered by the mask above.)
+[HKEY_CURRENT_USER\Control Panel\Mouse]
+"MouseTrails"="0"

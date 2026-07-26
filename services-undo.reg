@@ -1,0 +1,66 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+;  Reverts services.reg — restores default service start types and the two
+;  machine UI toggles. Elevated + reboot, same as services.reg.
+;
+;  Re-enables every service the tweak could have touched, including the
+;  AGGRESSIVE set, so this is a safe full revert even if you uncommented some.
+;  Values are Windows' default start types (2 = automatic, 3 = manual).
+; ============================================================================
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Personalization]
+"NoLockScreen"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation]
+"DisableStartupSound"=dword:00000000
+
+; --- telemetry / diagnostics ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DiagTrack]
+"Start"=dword:00000002
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\dmwappushservice]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WerSvc]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wisvc]
+"Start"=dword:00000003
+
+; --- xbox ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XblAuthManager]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XblGameSave]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XboxNetApiSvc]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XboxGipSvc]
+"Start"=dword:00000003
+
+; --- features ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\MapsBroker]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\lfsvc]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WbioSrvc]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\TabletInputService]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Fax]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\RetailDemo]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SEMgrSvc]
+"Start"=dword:00000003
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WpcMonSvc]
+"Start"=dword:00000003
+
+; --- aggressive set (restored to default in case you enabled them) ---
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WSearch]
+"Start"=dword:00000002
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain]
+"Start"=dword:00000002
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Spooler]
+"Start"=dword:00000002
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PcaSvc]
+"Start"=dword:00000002
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\CDPSvc]
+"Start"=dword:00000002

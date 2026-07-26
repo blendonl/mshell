@@ -1,0 +1,115 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+;  mshell services.reg — machine-wide tweaks that need ADMIN and a REBOOT.
+;
+;  Two parts:
+;    1. A couple of machine UI toggles (lock screen, startup sound) that are
+;       HKLM, so they couldn't live in the per-user debloat.reg.
+;    2. Disabling background services a minimal keyboard-driven tiling shell
+;       has no use for. "Start"=dword:4 means DISABLED; it applies next boot.
+;
+;  IMPORTANT — read before importing:
+;    * This is system-wide, unlike the per-user shell install and debloat.reg.
+;    * Some of these may matter to YOUR machine (printing, search, biometric
+;      sign-in, location). Delete any block you want to keep BEFORE importing.
+;    * A service that doesn't exist on your edition will just create a stray
+;      key with a Start value and no effect — harmless, remove it if you like.
+;    * I can't see your box from here: dump what's actually running first with
+;        powershell -c "Get-Service | ? Status -eq 'Running' | sort DisplayName | ft -Auto"
+;      and tell me if you want the list tuned.
+;
+;  Apply:  right-click > Merge (accept the UAC prompt), or from an ELEVATED
+;          prompt:  reg import services.reg
+;  Undo:   services-undo.reg  (also elevated)
+; ============================================================================
+
+; ---------------------------------------------------------------------------
+;  Machine UI  (HKLM, admin)
+; ---------------------------------------------------------------------------
+; Lock screen — the wallpaper/clock shade shown before the sign-in box. Win+L
+; is already dead (hook + harden.reg); this removes the screen itself.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Personalization]
+"NoLockScreen"=dword:00000001
+
+; The logon / startup jingle.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation]
+"DisableStartupSound"=dword:00000001
+
+; ---------------------------------------------------------------------------
+;  Telemetry / diagnostics
+; ---------------------------------------------------------------------------
+; Connected User Experiences and Telemetry
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DiagTrack]
+"Start"=dword:00000004
+; WAP Push routing (device-management telemetry; absent on newest Win11)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\dmwappushservice]
+"Start"=dword:00000004
+; Windows Error Reporting
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WerSvc]
+"Start"=dword:00000004
+; Windows Insider (flight sign-up)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wisvc]
+"Start"=dword:00000004
+
+; ---------------------------------------------------------------------------
+;  Xbox / gaming
+; ---------------------------------------------------------------------------
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XblAuthManager]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XblGameSave]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XboxNetApiSvc]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\XboxGipSvc]
+"Start"=dword:00000004
+
+; ---------------------------------------------------------------------------
+;  Features a headless tiling shell has no UI for
+; ---------------------------------------------------------------------------
+; Downloaded Maps Manager
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\MapsBroker]
+"Start"=dword:00000004
+; Geolocation  (KEEP — set back to 3 — if you use location/weather)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\lfsvc]
+"Start"=dword:00000004
+; Windows Biometric  (KEEP if you use fingerprint / face sign-in)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WbioSrvc]
+"Start"=dword:00000004
+; Touch Keyboard and Handwriting Panel  (KEEP on a touchscreen / pen device)
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\TabletInputService]
+"Start"=dword:00000004
+; Fax
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Fax]
+"Start"=dword:00000004
+; Retail demo content
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\RetailDemo]
+"Start"=dword:00000004
+; Payments / NFC
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SEMgrSvc]
+"Start"=dword:00000004
+; Parental Controls
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WpcMonSvc]
+"Start"=dword:00000004
+
+; ---------------------------------------------------------------------------
+;  AGGRESSIVE — these break real features. Remove the leading ';' on BOTH
+;  lines of a block to actually disable it.
+; ---------------------------------------------------------------------------
+; Windows Search / indexing. No Start-menu or Explorer search here anyway, but
+; some mail clients (Outlook) lean on it.
+;[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WSearch]
+;"Start"=dword:00000004
+; SysMain (prefetch / superfetch). Safe to drop on an SSD.
+;[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain]
+;"Start"=dword:00000004
+; Print Spooler. Disable if you never print (also closes a common exploit
+; surface).
+;[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Spooler]
+;"Start"=dword:00000004
+; Program Compatibility Assistant.
+;[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\PcaSvc]
+;"Start"=dword:00000004
+; Connected Devices Platform (Nearby Share / cross-device).
+;[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\CDPSvc]
+;"Start"=dword:00000004
