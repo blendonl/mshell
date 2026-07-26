@@ -563,6 +563,33 @@ mshell.bind({mod, ctrl}, "i", function()
                 d and d.windows or 0, w and w.process or "nothing"))
 end)
 
+----------------------------------------------------------------------
+-- Event handlers
+----------------------------------------------------------------------
+-- mshell.on(event, fn) runs fn when something happens:
+--
+--   "window_open"     a window came under management
+--   "window_close"    one is about to leave it
+--   "desktop_switch"  the visible desktop changed
+--   "focus"           the focused window changed
+--
+-- The handler gets one table: the window for the window/focus events, the
+-- desktop (plus `from`) for a switch. Handlers run on mshell's main thread,
+-- between your keypress and the screen updating, so keep them fast — and the
+-- config-BUILDING calls are refused in here, same as in a function binding.
+--
+-- Commented out because it writes a line to %TEMP%\mshell.log for every window
+-- you open; uncomment when you want to see what mshell is seeing.
+--
+-- mshell.on("window_open", function(w)
+--     mshell.log(("opened %s [%s] on '%s'"):format(w.process, w.class, w.desktop))
+-- end)
+--
+-- mshell.on("desktop_switch", function(d)
+--     mshell.log(("%s -> %s (%d windows, %s)")
+--         :format(d.from or "?", d.name, d.windows, d.layout))
+-- end)
+
 -- --- reload config ---
 mshell.bind({mod, shft}, "r", "reload")
 

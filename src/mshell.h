@@ -416,6 +416,30 @@ typedef struct {
 } DesktopRule;
 
 /* ---------------------------------------------------------------------------
+ * Events a config can hook with mshell.on(name, fn).
+ *
+ * Deliberately few. Each one fires from inside window or desktop bookkeeping,
+ * so every handler is main-thread work happening between the user pressing a
+ * key and the screen updating — a slow one is felt directly. These are the
+ * points where a config plausibly needs to react to something it did not do
+ * itself; anything more fine-grained belongs behind the IPC channel instead.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    LUA_EVENT_WINDOW_OPEN = 0,   /* a window came under management        */
+    LUA_EVENT_WINDOW_CLOSE,      /* one is about to leave it              */
+    LUA_EVENT_DESKTOP_SWITCH,    /* the visible desktop changed           */
+    LUA_EVENT_FOCUS,             /* the focused window changed            */
+    LUA_EVENT_COUNT
+} LuaEvent;
+
+#define MAX_LUA_HOOKS 32
+
+typedef struct {
+    LuaEvent event;
+    int      ref;    /* registry ref, owned by the current lua_State */
+} LuaHook;
+
+/* ---------------------------------------------------------------------------
  * StartupCommand — one mshell.spawn() from the config, run once at startup.
  *
  * The arguments are a separate string rather than part of the command because
@@ -580,6 +604,11 @@ typedef struct {
      * keystroke queued before a reload must not call a ref through the new one.
      * Actions carry the generation they were dispatched under. */
     unsigned  config_gen;
+
+    /* Handlers registered with mshell.on(). Refs belong to g.L and die with it,
+     * so a reload only has to reset the count. */
+    LuaHook   lua_hooks[MAX_LUA_HOOKS];
+    int       lua_hook_count;
 
     /* True while a Lua callback is running on the main thread. Guards against
      * re-entering Lua from inside itself, and marks the window in which the
@@ -830,6 +859,12 @@ void     lua_register_api(lua_State *L);
  * is logged rather than unwound through a WinEvent callback. No-op if no VM is
  * live. */
 void     lua_run_ref(int ref);
+
+/* Fire every handler registered for `ev`. `hwnd` is the window the event is
+ * about (NULL when it isn't about one) and `name` the desktop name for
+ * DESKTOP_SWITCH. Cheap and safe to call when no config registered anything —
+ * it returns immediately. Main thread only. */
+void     lua_fire(LuaEvent ev, HWND hwnd, const wchar_t *name);
 
 /* ===========================================================================
  * Prototypes — util (inline helpers defined below)

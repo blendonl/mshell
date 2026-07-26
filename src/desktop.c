@@ -416,6 +416,10 @@ void desktop_switch(const wchar_t *name) {
      *    launch it. Must happen after current_desktop_id is updated so the new
      *    window is managed onto THIS desktop. */
     desktop_launch_app_if_empty(desktop_slot_by_id(target_id));
+
+    /* 8. Tell the config, once everything above has settled — the handler gets
+     *    the desktop as it now is, plus `from` naming where we came from. */
+    lua_fire(LUA_EVENT_DESKTOP_SWITCH, NULL, from);
 }
 
 /* ===========================================================================
