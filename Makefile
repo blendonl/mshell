@@ -61,6 +61,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/bar.c        \
               $(SRC_DIR)/ipc.c        \
               $(SRC_DIR)/session.c    \
+              $(SRC_DIR)/helper.c     \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c
 
@@ -110,6 +111,13 @@ RES_OBJ  = $(SRC_DIR)/mshell.res.o
 
 TARGET   = mshell.exe
 
+# The privileged helper: a second, tiny binary with no Lua and no config. See
+# src/proto.h for why it exists and what was deliberately left out of it.
+HELPER        = mshelld.exe
+HELPER_SRCS   = $(SRC_DIR)/mshelld.c
+HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
+HELPER_LDLIBS = -luser32 -ladvapi32
+
 # --- Release packaging ---
 DISTNAME = mshell-$(VERSION)-win64
 DISTDIR  = dist/$(DISTNAME)
@@ -135,11 +143,21 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math
 # --- Rules ---
 .PHONY: all clean check-lua dist test
 
-all: check-lua $(TARGET)
+all: check-lua $(TARGET) $(HELPER)
 
 $(TARGET): $(ALL_OBJS) $(RES_OBJ)
 	@echo "  LINK  $@"
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(HELPER): $(HELPER_OBJS)
+	@echo "  LINK  $@"
+	$(CC) $(CFLAGS) -o $@ $^ $(HELPER_LDLIBS)
+
+# The helper deliberately does NOT depend on mshell.h — it shares only proto.h,
+# which is the point: it has no access to the shell's types or state.
+$(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h
+	@echo "  CC    $<"
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
@@ -178,6 +196,7 @@ dist: $(TARGET)
 	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip"
 	mkdir -p "$(DISTDIR)/config"
 	cp $(TARGET)          "$(DISTDIR)/"
+	cp $(HELPER)          "$(DISTDIR)/"
 	cp config/init.lua      "$(DISTDIR)/config/"
 	cp config/init.full.lua "$(DISTDIR)/config/"
 	cp $(DIST_FILES)      "$(DISTDIR)/"
@@ -199,7 +218,7 @@ test: $(TEST_BINS)
 	 echo "  all tests passed"
 
 clean:
-	rm -f $(TARGET) $(ALL_OBJS) $(RES_OBJ) $(TEST_BINS)
+	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS)
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
 	# vendor/lua can't poison our cross-compile link step.

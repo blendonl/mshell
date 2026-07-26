@@ -361,6 +361,11 @@ typedef struct {
     RECT      fs_prev_rect;          /* pre-fullscreen rect of a FLOATING
                                       * window (a tiled one is re-tiled)     */
     bool      fs_has_prev;           /* fs_prev_rect is valid                */
+    bool      needs_helper;          /* a placement for this window was refused
+                                      * locally and went via mshelld.exe. Kept
+                                      * so later passes skip the batch for it —
+                                      * one refused window would fail the whole
+                                      * DeferWindowPos group.                 */
     bool      sticky;                /* follows you to every desktop         */
     bool      scratchpad;            /* the scratchpad window (see ACTION_
                                       * TOGGLE_SCRATCHPAD); hidden when away  */
@@ -874,6 +879,23 @@ void     border_hide(void);
 bool     background_init(void);
 void     background_shutdown(void);
 void     background_update(void);         /* resize/repaint on display change      */
+
+/* ===========================================================================
+ * Prototypes — helper.c (the privileged helper, mshelld.exe)
+ *
+ * Optional and absent by default. mshell attempts every placement itself and
+ * only forwards the ones Windows refuses because the target belongs to a
+ * higher-integrity process (UIPI) — so with no helper running, behaviour is
+ * exactly what it was: such windows float instead of tiling.
+ * =========================================================================== */
+void     helper_init(void);
+void     helper_shutdown(void);
+bool     helper_available(void);
+bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
+
+/* SetWindowPos that falls back to the helper when the local call is refused.
+ * Use this for placement; the raw API is still right for our own overlays. */
+bool     window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
 
 /* ===========================================================================
  * Prototypes — session.c

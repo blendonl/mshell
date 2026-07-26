@@ -633,6 +633,37 @@ RECT window_adjust_for_frame(HWND hwnd, RECT want) {
 }
 
 /* ===========================================================================
+ * Place a window, falling back to the privileged helper when refused.
+ *
+ * UIPI stops a lower-integrity process from moving a higher-integrity window,
+ * so an unelevated mshell simply cannot place Task Manager or an elevated
+ * terminal. Rather than work out in advance which windows those are — a process
+ * open per window, on the busiest path, to answer a question the failing call
+ * answers for free — the call is attempted and the refusal is what triggers the
+ * fallback.
+ *
+ * With no mshelld.exe running this is exactly the old behaviour: the placement
+ * fails and the window is left where it is.
+ * =========================================================================== */
+bool window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
+    if (SetWindowPos(hwnd, NULL, x, y, w, h, flags)) return true;
+
+    DWORD err = GetLastError();
+    if (err != ERROR_ACCESS_DENIED) {
+        log_w(L"SetWindowPos(%p) failed: %lu", (void *)hwnd, err);
+        return false;
+    }
+
+    /* Remember it, so the next tiling pass keeps this window out of the
+     * DeferWindowPos batch: one window the batch cannot move fails the whole
+     * group, which would strand every other window on the desktop. */
+    ManagedWindow *mw = window_find(hwnd);
+    if (mw) mw->needs_helper = true;
+
+    return helper_set_window_pos(hwnd, x, y, w, h, flags);
+}
+
+/* ===========================================================================
  * Park a window over the whole monitor it lives on.
  *
  * Deliberately the monitor's *full* bounds, not its work area, and with no gap
@@ -654,9 +685,9 @@ void window_park_over_monitor(HWND hwnd) {
     if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
 
     RECT adj = window_adjust_for_frame(hwnd, want);
-    SetWindowPos(hwnd, NULL, adj.left, adj.top,
-                 adj.right - adj.left, adj.bottom - adj.top,
-                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    window_set_pos(hwnd, adj.left, adj.top,
+                   adj.right - adj.left, adj.bottom - adj.top,
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     events_suppress_end();
 

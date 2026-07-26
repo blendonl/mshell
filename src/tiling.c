@@ -369,17 +369,24 @@ static void flush_placements(void) {
          * move→LOCATIONCHANGE→re-tile feedback loop. */
         if (mw && mw->has_applied && rect_eq(mw->applied_rect, want)) continue;
 
+        /* A window we have already had to route through the helper stays on
+         * that path: batching it would fail the batch for everything else. */
+        bool mw_needs_helper = mw && mw->needs_helper;
+
         RECT adj = window_adjust_for_frame(hwnd, want);
         int x = adj.left, y = adj.top;
         int w = adj.right - adj.left, h = adj.bottom - adj.top;
         UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
 
-        if (hdwp) {
+        /* Windows owned by a higher-integrity process cannot go through our
+         * DeferWindowPos batch — the whole batch would fail — so they take the
+         * individual path, which falls back to the privileged helper. */
+        if (hdwp && !mw_needs_helper) {
             HDWP next = DeferWindowPos(hdwp, hwnd, NULL, x, y, w, h, flags);
             if (next) hdwp = next;
-            else      SetWindowPos(hwnd, NULL, x, y, w, h, flags);
+            else      window_set_pos(hwnd, x, y, w, h, flags);
         } else {
-            SetWindowPos(hwnd, NULL, x, y, w, h, flags);
+            window_set_pos(hwnd, x, y, w, h, flags);
         }
 
         if (mw) { mw->applied_rect = want; mw->has_applied = true; }
