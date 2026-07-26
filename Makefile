@@ -49,7 +49,9 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/lua_api.c    \
               $(SRC_DIR)/border.c     \
               $(SRC_DIR)/background.c \
-              $(SRC_DIR)/whichkey.c
+              $(SRC_DIR)/whichkey.c   \
+              $(SRC_DIR)/match.c      \
+              $(SRC_DIR)/layout_math.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:
@@ -109,8 +111,18 @@ DIST_FILES = install.bat uninstall.bat \
              services.reg services-undo.reg \
              INSTALL.md README.md CHANGELOG.md LICENSE
 
+# --- Host-side tests ---
+# mshell itself cross-compiles to Windows and cannot run here, but the logic
+# with no Windows in it can: match.c (rule patterns) and layout_math.c (the
+# proportional split). Those are built with the HOST compiler and run directly,
+# so `make test` needs no emulator and no Windows machine. Everything else is
+# covered by MANUAL-TESTS.md.
+HOST_CC   = cc
+TEST_DIR  = test
+TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math
+
 # --- Rules ---
-.PHONY: all clean check-lua dist
+.PHONY: all clean check-lua dist test
 
 all: check-lua $(TARGET)
 
@@ -160,8 +172,22 @@ dist: $(TARGET)
 	cd dist && python3 -m zipfile -c "$(DISTNAME).zip" "$(DISTNAME)"
 	@echo "  ->    dist/$(DISTNAME).zip"
 
+$(TEST_DIR)/test_match: $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c $(SRC_DIR)/match.h
+	@echo "  HOSTCC $@"
+	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c
+
+$(TEST_DIR)/test_layout_math: $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c $(SRC_DIR)/layout_math.h
+	@echo "  HOSTCC $@"
+	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c
+
+test: $(TEST_BINS)
+	@echo "  TEST"
+	@fail=0; for t in $(TEST_BINS); do ./$$t || fail=1; done; \
+	 if [ $$fail -ne 0 ]; then echo "  TESTS FAILED"; exit 1; fi; \
+	 echo "  all tests passed"
+
 clean:
-	rm -f $(TARGET) $(ALL_OBJS) $(RES_OBJ)
+	rm -f $(TARGET) $(ALL_OBJS) $(RES_OBJ) $(TEST_BINS)
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
 	# vendor/lua can't poison our cross-compile link step.

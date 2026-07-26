@@ -53,41 +53,8 @@ static const wchar_t *path_basename(const wchar_t *path) {
     return sep ? sep + 1 : path;
 }
 
-/* ===========================================================================
- * Case-insensitive wildcard match: `*` = any run, `?` = one character. `/` and
- * `\` fold together so a rule can spell a path either way. A pattern with no
- * wildcards is an exact match, which is what class/process rules were before
- * patterns existed — so old configs keep matching exactly what they used to.
- *
- * Iterative with a single backtrack point (no recursion): the greedy `*`
- * remembers where it started swallowing, and a later mismatch resumes from
- * there having eaten one more character.
- * =========================================================================== */
-static wchar_t fold_ch(wchar_t c) {
-    return (c == L'/') ? L'\\' : (wchar_t)towlower(c);
-}
-
-bool wildcard_match(const wchar_t *pat, const wchar_t *str) {
-    const wchar_t *star = NULL;   /* last '*' in the pattern, if any     */
-    const wchar_t *back = NULL;   /* where that '*' resumes from in str  */
-
-    while (*str) {
-        if (*pat == L'*') {
-            star = pat++;         /* match zero characters, for now */
-            back = str;
-        } else if (*pat == L'?' || (*pat && fold_ch(*pat) == fold_ch(*str))) {
-            pat++; str++;
-        } else if (star) {
-            pat = star + 1;       /* backtrack: let the '*' eat one more */
-            str = ++back;
-        } else {
-            return false;
-        }
-    }
-
-    while (*pat == L'*') pat++;   /* trailing '*'s can match nothing */
-    return *pat == L'\0';
-}
+/* wildcard_match now lives in match.c — it is pure C with no Windows
+ * dependency, which is what lets `make test` cover it on the host. */
 
 /* ===========================================================================
  * Helper: get window class name
