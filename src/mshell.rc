@@ -1,0 +1,75 @@
+/*
+ * mshell.rc — Win32 resources.
+ *
+ * Two things, both of which an executable that asks to become your Windows
+ * shell has no business shipping without:
+ *
+ *   1. The application manifest (mshell.exe.manifest), which is what makes
+ *      mshell DPI-aware. See the comments in that file for why it is declared
+ *      there rather than by calling SetProcessDpiAwarenessContext().
+ *
+ *   2. VERSIONINFO, so the binary carries a name and a version. Without it
+ *      Windows shows a blank publisher in every properties dialog and
+ *      SmartScreen has nothing to go on.
+ *
+ * VER_MAJOR/MINOR/PATCH are supplied by the Makefile, which derives them from
+ * the single VERSION variable — the version is still defined in exactly one
+ * place.
+ */
+
+#include <winver.h>
+
+/* Build the display string from the numbers rather than having the Makefile
+ * pass a quoted string. windres re-invokes a shell to run the preprocessor, so
+ * a -D containing quotes has them stripped twice and arrives as a bare token
+ * (0.8.0), which is a syntax error. Passing only integers has no quoting
+ * hazard at all. */
+#define VER_STR2(x) #x
+#define VER_STR(x)  VER_STR2(x)
+#define MSHELL_VERSION_STR \
+    VER_STR(VER_MAJOR) "." VER_STR(VER_MINOR) "." VER_STR(VER_PATCH)
+
+/* ---------------------------------------------------------------------------
+ * Application manifest
+ * --------------------------------------------------------------------------- */
+#ifndef RT_MANIFEST
+#define RT_MANIFEST 24
+#endif
+#ifndef CREATEPROCESS_MANIFEST_RESOURCE_ID
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
+#endif
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "mshell.exe.manifest"
+
+/* ---------------------------------------------------------------------------
+ * Version information
+ * --------------------------------------------------------------------------- */
+VS_VERSION_INFO VERSIONINFO
+    FILEVERSION    VER_MAJOR,VER_MINOR,VER_PATCH,0
+    PRODUCTVERSION VER_MAJOR,VER_MINOR,VER_PATCH,0
+    FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+    FILEFLAGS      0x0L
+    FILEOS         VOS_NT_WINDOWS32
+    FILETYPE       VFT_APP
+    FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        /* 0409 = US English, 04b0 = Unicode */
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "mshell"
+            VALUE "FileDescription",  "mshell - keyboard-driven tiling window manager and Windows shell replacement"
+            VALUE "FileVersion",      MSHELL_VERSION_STR
+            VALUE "InternalName",     "mshell"
+            VALUE "LegalCopyright",   "MIT licensed"
+            VALUE "OriginalFilename", "mshell.exe"
+            VALUE "ProductName",      "mshell"
+            VALUE "ProductVersion",   MSHELL_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

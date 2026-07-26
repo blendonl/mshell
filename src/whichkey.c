@@ -48,11 +48,40 @@ typedef struct {
 /* Prepared state: filled by whichkey_show, consumed by WM_PAINT. Only ever
  * touched on the main thread. */
 static HFONT   s_font;
+static UINT    s_font_dpi;      /* DPI s_font was built for (0 = no font yet) */
 static WkRow   s_rows[WK_MAX_ROWS];
 static int     s_count;
 static int     s_cols, s_per_col;
 static int     s_key_w, s_label_w, s_row_h, s_header_h;
 static wchar_t s_title[80];
+
+/* Metrics above are design pixels at 96 DPI; these are the same values scaled
+ * for the monitor the panel is about to appear on. mshell is per-monitor DPI
+ * aware, so nothing scales them for us — without this the panel renders at a
+ * third of its intended size on a 300% display. */
+static int     s_pad, s_key_gap, s_col_gap, s_row_vpad, s_hdr_gap;
+
+static int wk_dpi_scale(int px, UINT dpi) { return MulDiv(px, (int)dpi, 96); }
+
+/* Rebuild the font and the scaled metrics for `dpi`, if they aren't already. */
+static void wk_apply_dpi(UINT dpi) {
+    s_pad      = wk_dpi_scale(WK_PAD,      dpi);
+    s_key_gap  = wk_dpi_scale(WK_KEY_GAP,  dpi);
+    s_col_gap  = wk_dpi_scale(WK_COL_GAP,  dpi);
+    s_row_vpad = wk_dpi_scale(WK_ROW_VPAD, dpi);
+    s_hdr_gap  = wk_dpi_scale(WK_HDR_GAP,  dpi);
+
+    if (s_font && s_font_dpi == dpi) return;
+    if (s_font) DeleteObject(s_font);
+
+    /* Negative height == pixels, so this needs scaling like everything else. */
+    s_font = CreateFontW(-wk_dpi_scale(18, dpi), 0, 0, 0, FW_NORMAL,
+                         FALSE, FALSE, FALSE,
+                         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                         L"Segoe UI");
+    s_font_dpi = dpi;
+}
 
 /* The human-readable label for one binding. spawn shows its command, the
  * desktop actions show the desktop they go to, enter_submap shows "+name" (the
@@ -86,6 +115,13 @@ void whichkey_hide(void) {
  * it. Safe to call repeatedly (e.g. entering a nested submap). */
 static void whichkey_show(KeyMap *map) {
     if (!g.whichkey_window || !map) return;
+
+    /* --- which monitor, and therefore at what DPI ---
+     * Resolved first: the font and every metric below depend on it, and the
+     * text measuring further down has to happen with the final font. */
+    int mi = (g.focused_monitor >= 0 && g.focused_monitor < g.monitor_count)
+             ? g.focused_monitor : g.primary_monitor;
+    wk_apply_dpi(monitor_dpi(mi));
 
     /* --- gather the rows we can actually label --- */
     s_count = 0;
@@ -127,8 +163,8 @@ static void whichkey_show(KeyMap *map) {
 
     TEXTMETRICW tm;
     GetTextMetricsW(dc, &tm);
-    s_row_h    = tm.tmHeight + WK_ROW_VPAD;
-    s_header_h = tm.tmHeight + WK_HDR_GAP;
+    s_row_h    = tm.tmHeight + s_row_vpad;
+    s_header_h = tm.tmHeight + s_hdr_gap;
 
     s_key_w = s_label_w = 0;
     for (int i = 0; i < s_count; i++) {
@@ -146,15 +182,14 @@ static void whichkey_show(KeyMap *map) {
     SelectObject(dc, old);
     ReleaseDC(g.whichkey_window, dc);
 
-    int cell_w  = s_key_w + WK_KEY_GAP + s_label_w;
-    int inner_w = s_cols * cell_w + (s_cols - 1) * WK_COL_GAP;
+    int cell_w  = s_key_w + s_key_gap + s_label_w;
+    int inner_w = s_cols * cell_w + (s_cols - 1) * s_col_gap;
     if (hsz.cx > inner_w) inner_w = hsz.cx;       /* don't clip the header */
-    int w = inner_w + WK_PAD * 2;
-    int h = s_header_h + s_per_col * s_row_h + WK_PAD * 2;
+    int w = inner_w + s_pad * 2;
+    int h = s_header_h + s_per_col * s_row_h + s_pad * 2;
 
-    /* --- position: bottom-centre of the focused monitor --- */
-    int mi = (g.focused_monitor >= 0 && g.focused_monitor < g.monitor_count)
-             ? g.focused_monitor : g.primary_monitor;
+    /* --- position: bottom-centre of the focused monitor (`mi` resolved at the
+     *     top, since the DPI it implies drove everything measured above) --- */
     RECT mon   = g.monitors[mi].full;
     int  mon_w = mon.right - mon.left;
     int  mon_h = mon.bottom - mon.top;
@@ -234,15 +269,15 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         /* header */
         SetTextColor(mdc, g.whichkey_key_fg);
-        TextOutW(mdc, WK_PAD, WK_PAD, s_title, (int)wcslen(s_title));
+        TextOutW(mdc, s_pad, s_pad, s_title, (int)wcslen(s_title));
 
         /* rows, laid out column-major */
-        int cell_w = s_key_w + WK_KEY_GAP + s_label_w;
-        int y0     = WK_PAD + s_header_h;
+        int cell_w = s_key_w + s_key_gap + s_label_w;
+        int y0     = s_pad + s_header_h;
         for (int i = 0; i < s_count; i++) {
             int col = i / s_per_col;
             int row = i % s_per_col;
-            int cx  = WK_PAD + col * (cell_w + WK_COL_GAP);
+            int cx  = s_pad + col * (cell_w + s_col_gap);
             int cy  = y0 + row * s_row_h;
 
             /* key: right-aligned within the key column, in the accent colour */
@@ -255,7 +290,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
             /* label: left-aligned after the gap, in the normal text colour */
             SetTextColor(mdc, g.whichkey_fg);
-            TextOutW(mdc, cx + s_key_w + WK_KEY_GAP, cy,
+            TextOutW(mdc, cx + s_key_w + s_key_gap, cy,
                      s_rows[i].label, (int)wcslen(s_rows[i].label));
         }
 
@@ -299,11 +334,9 @@ bool whichkey_init(void) {
     DwmSetWindowAttribute(g.whichkey_window, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
 
-    /* One clean UI font for the whole panel (negative height == pixels). */
-    s_font = CreateFontW(-18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                         L"Segoe UI");
+    /* The font is built on first show, not here: it depends on the DPI of
+     * whichever monitor the panel appears on, and is rebuilt when that
+     * changes (wk_apply_dpi). */
     return true;
 }
 
@@ -313,6 +346,6 @@ void whichkey_shutdown(void) {
         DestroyWindow(g.whichkey_window);
         g.whichkey_window = NULL;
     }
-    if (s_font) { DeleteObject(s_font); s_font = NULL; }
+    if (s_font) { DeleteObject(s_font); s_font = NULL; s_font_dpi = 0; }
     UnregisterClassW(WK_CLASS, g.hinst);
 }

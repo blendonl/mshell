@@ -580,6 +580,11 @@ void     resolve_config_path(wchar_t *out, size_t out_len);
 void     monitors_update(void);           /* (re)enumerate physical displays */
 int      monitor_of_window(HWND hwnd);    /* index into g.monitors, or 0      */
 
+/* Effective DPI of a monitor (96 when unknown). mshell is per-monitor DPI
+ * aware, so coordinates are physical pixels and anything drawn at a fixed size
+ * must scale itself — MulDiv(px, monitor_dpi(m), 96). */
+UINT     monitor_dpi(int mon);
+
 /* ===========================================================================
  * Prototypes — keyboard.c
  * =========================================================================== */

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  mshell application manifest.
+
+  DPI AWARENESS is the reason this file exists. Without a declaration a GUI
+  process is DPI-unaware, and Windows then virtualises its coordinates: on a
+  scaled display GetMonitorInfo, GetSystemMetrics and GetWindowRect all report
+  logical rather than physical pixels, and DWM bitmap-stretches the result. For
+  a tiling WM that is fatal — every rect the tiler computes is wrong by the
+  scale factor, the focus ring lands off the window, and on a mixed-DPI
+  multi-monitor setup the secondary display's geometry is simply incorrect.
+
+  It is declared HERE rather than by calling SetProcessDpiAwarenessContext()
+  deliberately. That API needs Win10 1703; importing it statically would add a
+  load-time dependency on a user32 export that does not exist on Windows 8.1 or
+  early Win10, and an executable that fails to LOAD is, for a shell, an
+  unbootable session. A manifest has no load-time dependency at all: older
+  Windows ignores the element it does not understand and falls back to the
+  dpiAware sibling below. It also applies before the first window exists, which
+  a call from WinMain cannot guarantee.
+
+  requestedExecutionLevel is asInvoker on purpose. mshell must never
+  auto-elevate: an elevated shell auto-executes init.lua from a user-writable
+  directory, which turns the config into an elevation path. See INSTALL.md.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <!-- Side-by-side identity only. The product version users see lives in the
+       VERSIONINFO resource (mshell.rc), fed from VERSION in the Makefile. -->
+  <assemblyIdentity type="win32" name="mshell.mshell" version="1.0.0.0"
+                    processorArchitecture="amd64"/>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- Win10 1703+. "PerMonitorV2, PerMonitor, system" is a fallback chain:
+           the OS takes the first term it recognises. -->
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor, system</dpiAwareness>
+      <!-- Win8.1 and earlier understand only this one. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+
+  <!-- Declaring OS support is not cosmetic: an app that does not claim Win10
+       is given legacy behaviour by several compatibility shims, and the
+       dpiAwareness element above is only honoured for a Win10-manifested app. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/> <!-- Vista   -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/> <!-- 7       -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/> <!-- 8       -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/> <!-- 8.1     -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/> <!-- 10 / 11 -->
+    </application>
+  </compatibility>
+
+</assembly>
