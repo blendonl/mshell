@@ -35,6 +35,33 @@ static wchar_t *u8_to_w_dup(const char *s) {
     return w;
 }
 
+/* Push a wide string onto the Lua stack as UTF-8. */
+static void push_wstr(lua_State *L, const wchar_t *w) {
+    if (!w || !w[0]) { lua_pushstring(L, ""); return; }
+
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    if (n <= 0) { lua_pushstring(L, ""); return; }
+
+    char stack_buf[512];
+    char *buf = (n <= (int)sizeof stack_buf) ? stack_buf : (char *)malloc((size_t)n);
+    if (!buf) { lua_pushstring(L, ""); return; }
+
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, n, NULL, NULL);
+    lua_pushstring(L, buf);
+    if (buf != stack_buf) free(buf);
+}
+
+/* t[key] = <string>, t[key] = <int>, t[key] = <bool> on the table at the top. */
+static void set_str (lua_State *L, const char *k, const wchar_t *v) {
+    push_wstr(L, v);            lua_setfield(L, -2, k);
+}
+static void set_int (lua_State *L, const char *k, lua_Integer v) {
+    lua_pushinteger(L, v);      lua_setfield(L, -2, k);
+}
+static void set_bool(lua_State *L, const char *k, bool v) {
+    lua_pushboolean(L, v);      lua_setfield(L, -2, k);
+}
+
 /* ===========================================================================
  * Helper: find a keymap by name
  * =========================================================================== */
@@ -82,6 +109,21 @@ static wchar_t *desktop_arg_name(lua_State *L, const char *ctx, bool has_num,
     wchar_t *out = _wcsdup(wname);
     if (!out) luaL_error(L, "out of memory");
     return out;
+}
+
+/* Enum → layout name; the exact spellings layout_from_name accepts. */
+static const char *layout_to_name(Layout l) {
+    switch (l) {
+    case LAYOUT_TILING:   return "tiling";
+    case LAYOUT_MONOCLE:  return "monocle";
+    case LAYOUT_GRID:     return "grid";
+    case LAYOUT_SPIRAL:   return "spiral";
+    case LAYOUT_CENTERED: return "centered";
+    case LAYOUT_BSTACK:   return "bstack";
+    case LAYOUT_COLUMNS:  return "columns";
+    case LAYOUT_COUNT:    break;
+    }
+    return "tiling";
 }
 
 /* Layout name → enum. Shared by set_layout and desktop_rule so both spell the
@@ -840,6 +882,123 @@ static int lua_mshell_spawn(lua_State *L) {
 }
 
 /* ===========================================================================
+ * State queries — what mshell can tell the config about right now.
+ *
+ * WHEN THESE ARE USEFUL matters, because the config normally runs exactly once,
+ * at startup, in this order:
+ *
+ *     monitors enumerated  ->  config loaded  ->  first desktop created
+ *
+ * So mshell.get_monitors() is populated during the initial load, but the
+ * desktop and window queries are not — no desktop exists yet, and nothing is
+ * managed. They return an empty table / nil rather than inventing anything.
+ *
+ * They come into their own on a RELOAD (Win+Shift+R, or saving the file), when
+ * the full runtime state is live — and from a keybinding bound to a Lua
+ * function, which runs whenever you press it.
+ * =========================================================================== */
+
+/* mshell.get_monitors() -> array of
+ *   { x, y, width, height, work_x, work_y, work_width, work_height,
+ *     dpi, scale, primary, focused }
+ * Geometry is in physical pixels (mshell is per-monitor DPI aware); `scale` is
+ * the convenience form of dpi/96. */
+static int lua_mshell_get_monitors(lua_State *L) {
+    lua_createtable(L, g.monitor_count, 0);
+
+    for (int i = 0; i < g.monitor_count; i++) {
+        const Monitor *m   = &g.monitors[i];
+        UINT           dpi = monitor_dpi(i);
+
+        lua_createtable(L, 0, 12);
+        set_int (L, "x",           m->full.left);
+        set_int (L, "y",           m->full.top);
+        set_int (L, "width",       m->full.right  - m->full.left);
+        set_int (L, "height",      m->full.bottom - m->full.top);
+        set_int (L, "work_x",      m->work_area.left);
+        set_int (L, "work_y",      m->work_area.top);
+        set_int (L, "work_width",  m->work_area.right  - m->work_area.left);
+        set_int (L, "work_height", m->work_area.bottom - m->work_area.top);
+        set_int (L, "dpi",         (lua_Integer)dpi);
+        lua_pushnumber(L, (lua_Number)dpi / 96.0); lua_setfield(L, -2, "scale");
+        set_bool(L, "primary",     i == g.primary_monitor);
+        set_bool(L, "focused",     i == g.focused_monitor);
+
+        lua_rawseti(L, -2, i + 1);   /* Lua arrays are 1-based */
+    }
+    return 1;
+}
+
+/* Fill in one desktop's table (assumed on top of the stack). */
+static void push_desktop_fields(lua_State *L, const Desktop *d) {
+    set_str (L, "name",         d->name);
+    set_bool(L, "current",      d->id == g.current_desktop_id);
+    set_int (L, "windows",      d->count);
+    lua_pushstring(L, layout_to_name(d->layout)); lua_setfield(L, -2, "layout");
+    lua_pushnumber(L, d->master_ratio); lua_setfield(L, -2, "master_ratio");
+    set_int (L, "nmaster",      d->n_master);
+    set_bool(L, "float",        d->float_all);
+    if (d->monitor >= 0) set_int(L, "monitor", d->monitor);   /* nil = unpinned */
+    if (d->app[0])       set_str(L, "app",     d->app);
+}
+
+/* mshell.get_desktops() -> array of desktop tables, in the order the cycling
+ * actions step through them (numeric names first, then alphabetical). Empty
+ * during the initial config load — see the note above. */
+static int lua_mshell_get_desktops(lua_State *L) {
+    lua_createtable(L, g.desktop_count, 0);
+    for (int i = 0; i < g.desktop_count; i++) {
+        lua_createtable(L, 0, 9);
+        push_desktop_fields(L, &g.desktops[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+/* mshell.get_current_desktop() -> desktop table, or nil if none exists yet. */
+static int lua_mshell_get_current_desktop(lua_State *L) {
+    int slot = desktop_slot_by_id(g.current_desktop_id);
+    if (slot < 0) { lua_pushnil(L); return 1; }
+
+    lua_createtable(L, 0, 9);
+    push_desktop_fields(L, &g.desktops[slot]);
+    return 1;
+}
+
+/* mshell.get_focused_window() -> table or nil:
+ *   { title, class, process, path, floating, fullscreen, monitor, desktop }
+ * `process` is the bare exe name, the same thing a rule's `process` matches. */
+static int lua_mshell_get_focused_window(lua_State *L) {
+    HWND hwnd = desktop_get_focused();
+    if (!hwnd || !IsWindow(hwnd)) { lua_pushnil(L); return 1; }
+
+    wchar_t title[256] = {0}, cls[256] = {0}, path[MAX_PATH] = {0};
+    GetWindowTextW(hwnd, title, 256);
+    GetClassNameW(hwnd, cls, 256);
+    window_process_path(hwnd, path, MAX_PATH);
+
+    const wchar_t *proc = path;
+    for (const wchar_t *p = path; *p; p++)
+        if (*p == L'\\' || *p == L'/') proc = p + 1;
+
+    lua_createtable(L, 0, 8);
+    set_str(L, "title",   title);
+    set_str(L, "class",   cls);
+    set_str(L, "process", proc);
+    set_str(L, "path",    path);
+
+    const ManagedWindow *mw = window_find(hwnd);
+    if (mw) {
+        set_bool(L, "floating",   mw->is_floating);
+        set_bool(L, "fullscreen", window_is_screen_fullscreen(mw));
+        set_int (L, "monitor",    mw->monitor);
+        const Desktop *d = desktop_by_id(mw->desktop_id);
+        if (d) set_str(L, "desktop", d->name);
+    }
+    return 1;
+}
+
+/* ===========================================================================
  * mshell.log(message)
  *   prints to stderr / DebugView
  * =========================================================================== */
@@ -923,6 +1082,14 @@ void lua_register_api(lua_State *L) {
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
         {"log",             lua_mshell_log},
+
+        /* --- state queries (see the note above their definitions: only the
+         *     monitor list is populated during the FIRST config load) --- */
+        {"get_monitors",        lua_mshell_get_monitors},
+        {"get_desktops",        lua_mshell_get_desktops},
+        {"get_current_desktop", lua_mshell_get_current_desktop},
+        {"get_focused_window",  lua_mshell_get_focused_window},
+
         {NULL, NULL}
     };
 

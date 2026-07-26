@@ -661,6 +661,9 @@ void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
  * Prototypes — window.c
  * =========================================================================== */
 bool     window_is_manageable(HWND hwnd);
+
+/* Full image path of the process owning a window ("" if it can't be read). */
+void     window_process_path(HWND hwnd, wchar_t *out, size_t out_len);
 bool     window_is_dialog(HWND hwnd);   /* file picker, message box, prompt … */
 const WindowRule *window_rule_lookup(HWND hwnd);  /* matched rule, or NULL */
 

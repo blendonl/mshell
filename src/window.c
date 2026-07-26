@@ -45,6 +45,12 @@ static void get_process_path(HWND hwnd, wchar_t *out, size_t out_len) {
     CloseHandle(hp);
 }
 
+/* Exposed for the Lua state queries (lua_api.c), which need to describe a
+ * window to the config without duplicating the process-handle dance. */
+void window_process_path(HWND hwnd, wchar_t *out, size_t out_len) {
+    get_process_path(hwnd, out, out_len);
+}
+
 /* The file name inside a path, or the whole string when there is no separator. */
 static const wchar_t *path_basename(const wchar_t *path) {
     const wchar_t *back = wcsrchr(path, L'\\');
