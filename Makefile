@@ -20,7 +20,12 @@ CFLAGS   = -O2 -s -flto -mwindows \
            -DUNICODE -D_UNICODE \
            -DMSHELL_VERSION='"$(VERSION)"' \
            -Wall -Wextra -Wno-unused-parameter \
-           -Ivendor/lua/src
+           -Ivendor/lua/src \
+           $(CFLAGS_EXTRA)
+
+# CI passes -Werror through here. Kept out of CFLAGS proper so that a warning
+# fails the build in CI without making a local tree unbuildable mid-edit.
+CFLAGS_EXTRA ?=
 
 # Only integers are passed to windres. It re-invokes a shell to run the
 # preprocessor, so a -D carrying a quoted string has its quotes stripped twice
