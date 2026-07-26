@@ -3,6 +3,48 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## 0.10.0 — 2026-07-26
+
+Two things you could not do before: see what mshell is doing, and tell it what
+to do from outside.
+
+### Added
+
+- **A status bar**, one per monitor. mshell removes the taskbar and previously
+  put nothing in its place — which matters more here than in most tiling WMs,
+  because desktops are created and destroyed as you work, so the *set* of them
+  was invisible too. It shows the live desktop list with the current one marked,
+  the active layout, the focused window's title, and a clock.
+
+  It reserves its strip from each monitor's work area, so tiled windows sit
+  below it and a fullscreen window still covers it — that needed no new concept,
+  since the tiler already lays out into the work area while the fullscreen paths
+  use the monitor's full bounds.
+
+  Configured with `mshell.set_bar{}`: `enabled`, `position` (`"top"`/`"bottom"`),
+  `height`, `bg`/`fg`/`accent`/`dim`, and `modules`. The module list *replaces*
+  the default set, so naming a subset turns the rest off.
+
+- **A control channel.** `mshell.exe --msg "switch_desktop web"` runs any action
+  in the already-running shell, and `mshell.exe --query` prints its state as
+  JSON (desktops, monitors, focused window) — enough to drive a third-party
+  status bar or script a workflow.
+
+  The command vocabulary is the same action table the config uses rather than a
+  second set of names, so the two cannot drift and the surface is exactly what a
+  keybinding can already do. The pipe is per-session and its DACL is built from
+  the process token's own SID, admitting only that user and SYSTEM; if the
+  descriptor cannot be built, the server refuses to start rather than falling
+  back to a pipe every local account can open.
+
+### Notes
+
+The IPC command surface is deliberately narrow because the next release puts a
+privilege boundary on it: the elevated work (the keyboard hook, UIPI-privileged
+`SetWindowPos`) moves into a small helper with no config and no scripting, which
+removes the elevated-config trade-off documented in 0.8.0 rather than mitigating
+it.
+
 ## 0.9.0 — 2026-07-26
 
 The config stops being a list of settings and becomes something you can program.
