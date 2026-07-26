@@ -50,6 +50,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/border.c     \
               $(SRC_DIR)/background.c \
               $(SRC_DIR)/whichkey.c   \
+              $(SRC_DIR)/bar.c        \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c
 

@@ -134,6 +134,24 @@ mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
 mshell.set_background(0x000000)     -- solid desktop backdrop color
 mshell.set_master_ratio(0.60)
 
+-- Status bar — one per monitor, along the top by default. It reserves its
+-- strip out of each monitor's work area, so tiled windows sit below it and a
+-- fullscreen window still covers it.
+--
+-- `modules` REPLACES the default set rather than adding to it, so listing only
+-- some of them turns the rest off: modules = {"desktops"} gives a bar with
+-- nothing but the desktop list.
+mshell.set_bar({
+    enabled  = true,
+    position = "top",        -- or "bottom"
+    height   = 28,           -- design pixels at 96 DPI; scaled per monitor
+    bg       = 0x1e1e2e,
+    fg       = 0xcdd6f4,
+    accent   = 0x7aa2f7,     -- the current desktop
+    dim      = 0x6c7086,     -- the other desktops
+    modules  = { "desktops", "layout", "title", "clock" },
+})
+
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call
 -- just shows the knobs (values below are the defaults).

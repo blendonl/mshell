@@ -420,6 +420,10 @@ void tile_desktop(int slot) {
  * =========================================================================== */
 void tile_current(void) {
     tile_desktop(desktop_current_slot());
-    /* Window geometry just changed — move the focus ring to match. */
+    /* Window geometry just changed — move the focus ring to match, and let the
+     * bar re-read the layout and window counts. bar_refresh() compares against
+     * what is already drawn, so calling it from here (which is often) is
+     * cheap. */
     border_refresh();
+    bar_refresh();
 }

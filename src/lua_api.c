@@ -1036,6 +1036,86 @@ static int lua_mshell_log(lua_State *L) {
 }
 
 /* ===========================================================================
+ * mshell.set_bar(opts) — the status bar.
+ *   opts — table, any subset of:
+ *     enabled  = true|false      show it at all                  (default true)
+ *     position = "top"|"bottom"                                  (default top)
+ *     height   = 28              design pixels at 96 DPI, scaled per monitor
+ *     bg / fg / accent / dim = 0xRRGGBB
+ *     modules  = {"desktops", "layout", "title", "clock"}   drawn left to right
+ *
+ * One bar per monitor, all showing the same thing — a desktop in mshell spans
+ * every display, so there is no per-monitor desktop list to show. The bar
+ * reserves its strip out of each monitor's work area, so tiled windows sit
+ * below it while a fullscreen window still covers it.
+ * =========================================================================== */
+static int lua_mshell_set_bar(lua_State *L) {
+    reject_at_runtime(L, "set_bar");
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    lua_getfield(L, 1, "enabled");
+    if (!lua_isnil(L, -1)) g.bar_enabled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "position");
+    if (lua_isstring(L, -1)) {
+        const char *s = lua_tostring(L, -1);
+        if      (strcmp(s, "top")    == 0) g.bar_bottom = false;
+        else if (strcmp(s, "bottom") == 0) g.bar_bottom = true;
+        else return luaL_error(L, "set_bar: position must be 'top' or 'bottom'");
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "height");
+    if (lua_isnumber(L, -1))
+        g.bar_height = clamp_i((int)lua_tointeger(L, -1), 12, 200);
+    lua_pop(L, 1);
+
+    const struct { const char *field; COLORREF *dst; } colors[] = {
+        {"bg",     &g.bar_bg},
+        {"fg",     &g.bar_fg},
+        {"accent", &g.bar_accent},
+        {"dim",    &g.bar_dim},
+    };
+    for (size_t i = 0; i < sizeof colors / sizeof colors[0]; i++) {
+        lua_getfield(L, 1, colors[i].field);
+        if (lua_isnumber(L, -1)) {
+            unsigned c = (unsigned)lua_tointeger(L, -1);
+            *colors[i].dst = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+        }
+        lua_pop(L, 1);
+    }
+
+    /* An explicit list REPLACES the default set, so leaving one out turns it
+     * off — `modules = {"desktops"}` is how you get a bar with nothing else. */
+    lua_getfield(L, 1, "modules");
+    if (lua_istable(L, -1)) {
+        unsigned mods = 0;
+        int      t    = lua_absindex(L, -1);
+        int      n    = (int)lua_rawlen(L, t);
+        for (int i = 1; i <= n; i++) {
+            lua_rawgeti(L, t, i);
+            const char *m = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+            if      (m && strcmp(m, "desktops") == 0) mods |= BAR_MOD_DESKTOPS;
+            else if (m && strcmp(m, "layout")   == 0) mods |= BAR_MOD_LAYOUT;
+            else if (m && strcmp(m, "title")    == 0) mods |= BAR_MOD_TITLE;
+            else if (m && strcmp(m, "clock")    == 0) mods |= BAR_MOD_CLOCK;
+            else {
+                lua_pop(L, 2);
+                return luaL_error(L, "set_bar: unknown module '%s' (expected "
+                                     "desktops, layout, title or clock)",
+                                  m ? m : "?");
+            }
+            lua_pop(L, 1);
+        }
+        g.bar_modules = mods;
+    }
+    lua_pop(L, 1);
+
+    return 0;
+}
+
+/* ===========================================================================
  * mshell.set_whichkey(opts) — the submap hint ("which-key") panel.
  *   opts — table, any subset of:
  *     enabled = true|false   show the hint at all         (default true)
@@ -1262,7 +1342,8 @@ void lua_register_api(lua_State *L) {
         {"set_smart_gaps",  lua_mshell_set_smart_gaps},
         {"set_border",      lua_mshell_set_border},
         {"set_background",  lua_mshell_set_background},
-        {"set_whichkey",    lua_mshell_set_whichkey},
+                {"set_bar",         lua_mshell_set_bar},
+{"set_whichkey",    lua_mshell_set_whichkey},
         {"set_start_desktop", lua_mshell_set_start_desktop},
         {"desktop_rule",    lua_mshell_desktop_rule},
         {"set_master_ratio",lua_mshell_set_master_ratio},

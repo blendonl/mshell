@@ -32,6 +32,21 @@ mshell.set_background(0x1e1e2e)  -- desktop backdrop (there is no wallpaper)
 mshell.set_layout("tiling")      -- tiling|monocle|grid|spiral|centered|bstack|columns
 mshell.set_master_ratio(0.60)
 
+-- Status bar. There is no taskbar, and because desktops are created and
+-- destroyed as you use them, this is the only thing telling you which ones
+-- exist and which you are on. One per monitor; it reserves its strip so tiled
+-- windows sit below it, while a fullscreen window still covers it.
+mshell.set_bar({
+    enabled  = true,
+    position = "top",        -- or "bottom"
+    height   = 28,           -- scaled per monitor for DPI
+    bg       = 0x1e1e2e,
+    fg       = 0xcdd6f4,
+    accent   = 0x7aa2f7,     -- the desktop you're on
+    dim      = 0x6c7086,     -- the others
+    modules  = { "desktops", "layout", "title", "clock" },
+})
+
 ----------------------------------------------------------------------
 -- Window rules
 ----------------------------------------------------------------------
