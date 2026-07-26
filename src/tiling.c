@@ -13,6 +13,7 @@
  */
 
 #include "mshell.h"
+#include "layout_math.h"
 
 /* DWM's "real" visible frame (excludes the invisible resize border DWM keeps
  * around top-level windows). Positioning against these bounds makes gaps
@@ -96,43 +97,44 @@ static int collect_clients(Desktop *dt, int mon, Client *out) {
  * proportionally to each client's cfact. The last client absorbs any rounding
  * remainder so cells always tile the axis exactly (no seams, no overlap).
  * =========================================================================== */
-static void stack_vertical(Client *cs, int from, int to, RECT rect) {
-    int count = to - from;
-    if (count <= 0) return;
+/* Gather the cfacts of clients [from, to) into `facts`. */
+static int collect_facts(Client *cs, int from, int to, float *facts) {
+    int n = 0;
+    for (int i = from; i < to; i++) facts[n++] = cs[i].mw->cfact;
+    return n;
+}
 
-    float total = 0.f;
-    for (int i = from; i < to; i++) {
-        float c = cs[i].mw->cfact; if (c <= 0.f) c = 1.f;
-        total += c;
-    }
-    int span = rect.bottom - rect.top;
-    int used = 0, y = rect.top;
-    for (int i = from; i < to; i++) {
-        float c = cs[i].mw->cfact; if (c <= 0.f) c = 1.f;
-        int h = (i == to - 1) ? (span - used) : (int)((float)span * (c / total));
-        RECT cell = { rect.left, y, rect.right, y + h };
-        emit(cs[i].hwnd, cell);
-        y += h; used += h;
+static void stack_vertical(Client *cs, int from, int to, RECT rect) {
+    float facts[MAX_WINDOWS_PER_DESKTOP];
+    int   sizes[MAX_WINDOWS_PER_DESKTOP];
+
+    int n = collect_facts(cs, from, to, facts);
+    if (n <= 0) return;
+
+    split_span(rect.bottom - rect.top, facts, n, sizes);
+
+    int y = rect.top;
+    for (int i = 0; i < n; i++) {
+        RECT cell = { rect.left, y, rect.right, y + sizes[i] };
+        emit(cs[from + i].hwnd, cell);
+        y += sizes[i];
     }
 }
 
 static void stack_horizontal(Client *cs, int from, int to, RECT rect) {
-    int count = to - from;
-    if (count <= 0) return;
+    float facts[MAX_WINDOWS_PER_DESKTOP];
+    int   sizes[MAX_WINDOWS_PER_DESKTOP];
 
-    float total = 0.f;
-    for (int i = from; i < to; i++) {
-        float c = cs[i].mw->cfact; if (c <= 0.f) c = 1.f;
-        total += c;
-    }
-    int span = rect.right - rect.left;
-    int used = 0, x = rect.left;
-    for (int i = from; i < to; i++) {
-        float c = cs[i].mw->cfact; if (c <= 0.f) c = 1.f;
-        int w = (i == to - 1) ? (span - used) : (int)((float)span * (c / total));
-        RECT cell = { x, rect.top, x + w, rect.bottom };
-        emit(cs[i].hwnd, cell);
-        x += w; used += w;
+    int n = collect_facts(cs, from, to, facts);
+    if (n <= 0) return;
+
+    split_span(rect.right - rect.left, facts, n, sizes);
+
+    int x = rect.left;
+    for (int i = 0; i < n; i++) {
+        RECT cell = { x, rect.top, x + sizes[i], rect.bottom };
+        emit(cs[from + i].hwnd, cell);
+        x += sizes[i];
     }
 }
 

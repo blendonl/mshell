@@ -21,3 +21,7 @@ mshell.log
 *.swp
 .DS_Store
 Thumbs.db
+
+# Host-built test binaries
+/test/test_match
+/test/test_layout_math
