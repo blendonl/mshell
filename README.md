@@ -523,6 +523,31 @@ destroyed behind you for being empty — it is simply re-created.
 The keyboard hook only mutates state and **defers** heavy work to the message
 pump (`PostMessage`), keeping it well under `LowLevelHooksTimeout`.
 
+## Design decisions
+
+### Desktops span every monitor
+
+A desktop in mshell is a set of windows, and each monitor tiles that desktop's
+windows independently. Switching desktops changes what is on **all** displays at
+once.
+
+The alternative — dwm's model, where every monitor owns its own tag set and
+switching affects only the focused one — was considered and deliberately not
+taken. Two reasons:
+
+1. **A desktop here is a name you invent, not a slot you own.** Desktops are
+   created by going to them and destroyed when you leave them empty, so "the
+   tags on monitor 2" would be a second, differently-shaped namespace layered
+   over a set that is already dynamic. `switch_desktop "web"` would have to mean
+   something different depending on which monitor had focus.
+2. **It matches how the desktops are actually used.** A desktop that *is* your
+   browser, or your chat app, is a context you move between — and a context
+   spanning your whole desk is usually what you want when you switch into it.
+
+If you want a display to hold one thing permanently, pin a desktop to it with
+`desktop_rule("name", { monitor = 1 })`; its windows tile there and switching to
+it moves the focus there.
+
 ## Known limitations
 
 - **Layout is per-desktop, not per-monitor.** All monitors on a desktop share

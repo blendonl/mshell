@@ -34,6 +34,40 @@ static bool is_elevated(void) {
 static UINT g_prev_fg_lock_timeout = 0;
 
 /* ---------------------------------------------------------------------------
+ * Last-gasp crash handler.
+ *
+ * mshell hides windows to implement virtual desktops and monocle, so at any
+ * moment most managed windows are invisible. If the process dies without
+ * un-hiding them they are unreachable — no taskbar button, no Alt+Tab entry —
+ * and as the shell there is nothing left to reveal them. The orderly shutdown
+ * path handles that; a crash does not reach it.
+ *
+ * So the very least this can do is give the windows back before the process
+ * goes. It does not attempt to continue: the state that produced the fault is
+ * not state worth carrying on with, and Winlogon's AutoRestartShell brings a
+ * fresh mshell up behind us.
+ *
+ * Deliberately minimal, because it runs in a process that is already broken:
+ * no allocation, no locks, no Lua.
+ * --------------------------------------------------------------------------- */
+static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
+    static LONG entered = 0;
+    if (InterlockedExchange(&entered, 1)) return EXCEPTION_CONTINUE_SEARCH;
+
+    log_err(L"FATAL: unhandled exception 0x%08lX at %p — restoring hidden "
+            L"windows before exiting",
+            ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0,
+            ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress
+                                      : NULL);
+
+    window_restore_all_visibility();
+    session_save();
+
+    if (g.logfile) { fflush(g.logfile); fclose(g.logfile); g.logfile = NULL; }
+    return EXCEPTION_CONTINUE_SEARCH;   /* let it crash properly / be reported */
+}
+
+/* ---------------------------------------------------------------------------
  * Config file location
  *
  * The user's config lives where Windows keeps per-user application settings:
@@ -487,6 +521,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         }
     }
     log_err(L"=== mshell v%hs starting ===", MSHELL_VERSION);
+
+    /* Armed as early as the log exists: a crash before this point has nothing
+     * to restore anyway (no window is hidden until a desktop switch). */
+    SetUnhandledExceptionFilter(mshell_crash_handler);
 
     /* --- single instance ---
      * A second mshell installs a second WH_KEYBOARD_LL hook, a second set of
