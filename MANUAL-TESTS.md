@@ -24,6 +24,33 @@ exists, so they are worth re-running before any release.
 | 7 | Run elevated. | The log says so and names the config path; editing `init.lua` does **not** auto-reload. `Win+Shift+R` still works. |
 | 8 | Minimize a window, switch desktops, come back. | It is still minimized — not silently restored. |
 
+## Status bar (0.10.0)
+
+- It appears on **every** monitor, at the top, and tiled windows start below it
+  rather than underneath it.
+- The desktop list updates as desktops are created and destroyed; the current
+  one is both coloured and marked with `*`.
+- The layout indicator follows `Win+Space`; the title follows the focus; the
+  clock advances.
+- A **fullscreen** window covers the bar. A **floating** window does not.
+- `position = "bottom"` moves it and the reserved strip together.
+- On a scaled display the bar is proportionate, not tiny or huge.
+- `modules = {"desktops"}` leaves only the desktop list.
+- `enabled = false`, save: the bar disappears and windows reclaim the space.
+
+## Control channel (0.10.0)
+
+From a normal terminal, with mshell running:
+
+- `mshell.exe --query` prints JSON and does not start a second shell.
+- `mshell.exe --msg "switch_desktop web"` switches the running shell.
+- `mshell.exe --msg "layout_monocle"`, `--msg "focus_next"` behave as the
+  keybindings do.
+- `mshell.exe --msg "nonsense"` prints an error naming the problem.
+- With mshell **not** running, `--query` reports that rather than hanging.
+- Signed in as a second user, that user's `--query` reaches their own mshell,
+  not yours.
+
 ## DPI
 
 Needs a scaled display; this is the fix most likely to regress silently.
