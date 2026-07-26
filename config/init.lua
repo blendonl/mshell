@@ -116,6 +116,13 @@ mshell.bind({mod, shft}, "c", "close")
 mshell.bind({mod, shft}, "x", "kill")
 mshell.bind({mod},       "n", "minimize")
 mshell.bind({mod, shft}, "n", "restore")
+mshell.bind({mod},       "s", "toggle_sticky")   -- follow me to every desktop
+mshell.bind({mod},       "z", "zoom")            -- swap with master, and back
+
+-- Scratchpad: one window you can summon anywhere and dismiss again. Mark a
+-- window once (Win+Shift+s), then Win+grave toggles it wherever you are.
+mshell.bind({mod, shft}, "s", "mark_scratchpad")
+mshell.bind({mod, ctrl}, "Space", "toggle_scratchpad")
 
 -- programs
 mshell.bind({mod, shft}, "Return", "spawn", TERMINAL)

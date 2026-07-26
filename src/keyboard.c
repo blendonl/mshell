@@ -165,6 +165,9 @@ static const ActionNameEntry action_names[] = {
     {"kill",             ACTION_KILL},
     {"minimize",         ACTION_MINIMIZE},
     {"restore",          ACTION_RESTORE},
+    {"toggle_sticky",    ACTION_TOGGLE_STICKY},
+    {"mark_scratchpad",  ACTION_MARK_SCRATCHPAD},
+    {"toggle_scratchpad",ACTION_TOGGLE_SCRATCHPAD},
     {"toggle_float",     ACTION_TOGGLE_FLOAT},
     {"fullscreen",         ACTION_FULLSCREEN},
     {"fullscreen_content", ACTION_FULLSCREEN_CONTENT},
@@ -178,6 +181,7 @@ static const ActionNameEntry action_names[] = {
     {"layout_columns",   ACTION_LAYOUT_COLUMNS},
     {"cycle_layout",     ACTION_CYCLE_LAYOUT},
     {"promote_master",   ACTION_PROMOTE_MASTER},
+    {"zoom",             ACTION_ZOOM},
     {"inc_master",       ACTION_INC_MASTER},
     {"dec_master",       ACTION_DEC_MASTER},
     {"inc_nmaster",      ACTION_INC_NMASTER},
@@ -954,6 +958,85 @@ void execute_action(Action action, int arg, const wchar_t *command,
                 window_focus(h);
                 break;
             }
+        }
+        break;
+
+    /* -- sticky: follow me to every desktop ---------------------------- */
+    case ACTION_TOGGLE_STICKY: {
+        ManagedWindow *mw = window_find(focus);
+        if (!mw) break;
+        mw->sticky = !mw->sticky;
+        log_err(L"sticky: %p is %ls", (void *)focus,
+                mw->sticky ? L"now on every desktop" : L"back on one desktop");
+        bar_refresh();
+        break;
+    }
+
+    /* -- scratchpad ----------------------------------------------------
+     * A single window you summon anywhere and dismiss again — a terminal, a
+     * notes app. There is no spawn-and-track magic: you mark a window you
+     * already have, which is predictable and needs no guessing about which
+     * window a launch produced. */
+    case ACTION_MARK_SCRATCHPAD: {
+        ManagedWindow *mw = window_find(focus);
+        if (!mw) break;
+        /* Only one at a time — a second mark moves the role. */
+        for (int i = 0; i < g.managed_count; i++) g.managed[i].scratchpad = false;
+        mw->scratchpad  = true;
+        mw->is_floating = true;   /* it overlays, it does not join the grid */
+        window_set_floating(focus, true);
+        log_err(L"scratchpad: %p is now the scratchpad window", (void *)focus);
+        tile_current();
+        break;
+    }
+
+    case ACTION_TOGGLE_SCRATCHPAD: {
+        ManagedWindow *sp = NULL;
+        for (int i = 0; i < g.managed_count; i++)
+            if (g.managed[i].scratchpad) { sp = &g.managed[i]; break; }
+
+        if (!sp) {
+            log_err(L"scratchpad: none marked yet — focus a window and use "
+                    L"the 'mark_scratchpad' action first");
+            break;
+        }
+        if (!IsWindow(sp->hwnd)) { sp->scratchpad = false; break; }
+
+        bool here    = (sp->desktop_id == g.current_desktop_id);
+        bool showing = here && IsWindowVisible(sp->hwnd) && !sp->app_hidden;
+
+        events_suppress_begin();
+        if (showing) {
+            ShowWindow(sp->hwnd, SW_HIDE);
+        } else {
+            /* Summon it onto the desktop you are looking at, rather than
+             * making you go to where it happens to live. */
+            sp->desktop_id = g.current_desktop_id;
+            sp->app_hidden = false;
+            ShowWindow(sp->hwnd, SW_SHOWNOACTIVATE);
+        }
+        events_suppress_end();
+
+        if (!showing) {
+            SetWindowPos(sp->hwnd, HWND_TOP, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            window_focus(sp->hwnd);
+        }
+        tile_current();
+        break;
+    }
+
+    /* -- zoom: dwm's swap-with-master ----------------------------------
+     * Unlike promote_master, this is a TOGGLE. From the stack it swaps you into
+     * the master slot; pressed again from master it swaps you back out to where
+     * the old master went, so the pair alternates. */
+    case ACTION_ZOOM:
+        if (dt->count > 1 && focus) {
+            int other = (fi == 0) ? 1 : 0;
+            hwnd_swap(&dt->windows[fi], &dt->windows[other]);
+            dt->focused = other;
+            tile_current();
+            window_focus(dt->windows[other]);
         }
         break;
 
