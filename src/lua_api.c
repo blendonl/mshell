@@ -1,0 +1,829 @@
+/*
+ * lua_api.c — C functions exposed to the Lua config.
+ *
+ * Every function follows the Lua C API convention:
+ *   static int func(lua_State *L)
+ * Returns the number of values pushed onto the Lua stack.
+ *
+ * These are called DURING config loading only; the hot path never
+ * touches Lua.
+ */
+
+#include "mshell.h"
+
+/* ===========================================================================
+ * UTF-8 → wide conversion.
+ *
+ * Lua strings reach us as UTF-8 bytes. mbstowcs() would interpret them in the
+ * process's (C) locale and mangle anything non-ASCII, so we go through
+ * MultiByteToWideChar with CP_UTF8 everywhere instead.
+ * =========================================================================== */
+static void u8_to_w(const char *s, wchar_t *out, int out_count) {
+    if (!s || out_count <= 0) { if (out_count > 0) out[0] = L'\0'; return; }
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, out, out_count);
+    if (n <= 0) out[out_count - 1] = L'\0', out[0] = L'\0';
+}
+
+/* Allocate a wide copy of a UTF-8 string (caller frees). NULL on OOM. */
+static wchar_t *u8_to_w_dup(const char *s) {
+    if (!s) return NULL;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    if (n <= 0) return _wcsdup(L"");
+    wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
+    if (!w) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n);
+    return w;
+}
+
+/* ===========================================================================
+ * Helper: find a keymap by name
+ * =========================================================================== */
+static KeyMap *find_keymap(const char *name) {
+    wchar_t wname[256];
+    u8_to_w(name, wname, 256);
+    for (int i = 0; i < g.keymap_count; i++) {
+        if (_wcsicmp(g.keymaps[i].name, wname) == 0) {
+            return &g.keymaps[i];
+        }
+    }
+    return NULL;
+}
+
+/* ===========================================================================
+ * A desktop argument is a NAME.
+ *
+ * Desktops are created on demand, so there is nothing to resolve against and
+ * no such thing as an unknown desktop: whatever name a binding carries either
+ * already exists or comes into being the moment the key is pressed. All this
+ * does is normalise and validate — a number is accepted and used as the name it
+ * spells, so `switch_desktop 3` means the desktop called "3" (which is what
+ * Win+3 lands on) rather than an index into anything.
+ *
+ * Returns a fresh wide string the caller owns.
+ * =========================================================================== */
+static wchar_t *desktop_arg_name(lua_State *L, const char *ctx, bool has_num,
+                                 int num_arg, const char *str_arg) {
+    char buf[32];
+    if (has_num) {
+        snprintf(buf, sizeof buf, "%d", num_arg);
+        str_arg = buf;
+    }
+    if (!str_arg || !str_arg[0])
+        luaL_error(L, "%s: needs a desktop name, e.g. %s \"web\" or %s \"1\"",
+                   ctx, ctx, ctx);
+
+    wchar_t wname[DESKTOP_NAME_MAX];
+    u8_to_w(str_arg, wname, DESKTOP_NAME_MAX);
+    if (!desktop_name_ok(wname))
+        luaL_error(L, "%s: '%s' is not a usable desktop name — it must be "
+                      "non-empty, contain no spaces, and be under %d characters",
+                   ctx, str_arg, DESKTOP_NAME_MAX);
+
+    wchar_t *out = _wcsdup(wname);
+    if (!out) luaL_error(L, "out of memory");
+    return out;
+}
+
+/* Layout name → enum. Shared by set_layout and desktop_rule so both spell the
+ * layouts identically. Returns false (leaving *out alone) on an unknown name. */
+static bool layout_from_name(const char *s, Layout *out) {
+    if      (strcmp(s, "tiling")   == 0) *out = LAYOUT_TILING;
+    else if (strcmp(s, "monocle")  == 0) *out = LAYOUT_MONOCLE;
+    else if (strcmp(s, "grid")     == 0) *out = LAYOUT_GRID;
+    else if (strcmp(s, "spiral")   == 0) *out = LAYOUT_SPIRAL;
+    else if (strcmp(s, "centered") == 0) *out = LAYOUT_CENTERED;
+    else if (strcmp(s, "bstack")   == 0) *out = LAYOUT_BSTACK;
+    else if (strcmp(s, "columns")  == 0) *out = LAYOUT_COLUMNS;
+    else return false;
+    return true;
+}
+
+/* ===========================================================================
+ * Resolve an action name (+ optional numeric/string payload) into a full
+ * binding and append it to `map`. Shared by mshell.bind and mshell.submap so
+ * submaps are as expressive as root bindings (spawn, switch_desktop, nesting).
+ *
+ * Raises a Lua error (longjmp) on bad input; never returns in that case.
+ * =========================================================================== */
+static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
+                                 const char *action_str, bool has_num, int num_arg,
+                                 const char *str_arg, bool default_terminal) {
+    int      arg      = 0;
+    KeyMap  *submap   = NULL;
+    wchar_t *command  = NULL;
+    bool     terminal = default_terminal;
+    Action   action;
+
+    if (strcmp(action_str, "enter_submap") == 0) {
+        action = ACTION_ENTER_SUBMAP;
+        if (!str_arg) luaL_error(L, "enter_submap requires a submap name");
+        submap = find_keymap(str_arg);
+        if (!submap)
+            luaL_error(L, "submap not found: %s (define it before entering it)",
+                       str_arg);
+        arg = (int)(submap - g.keymaps);
+        terminal = false;   /* entering a submap is never terminal */
+    } else if (strcmp(action_str, "spawn") == 0) {
+        action = ACTION_SPAWN;
+        if (!str_arg) luaL_error(L, "spawn requires a command string");
+        command = u8_to_w_dup(str_arg);
+    } else {
+        action = action_name_to_enum(action_str);
+        if (action == ACTION_NONE) luaL_error(L, "unknown action: %s", action_str);
+
+        if (action == ACTION_SWITCH_DESKTOP || action == ACTION_MOVE_TO_DESKTOP) {
+            /* Desktop actions carry a NAME, not an index — in `command`, the
+             * same slot spawn uses, since a name is a string and there is no
+             * number to put in `arg`. */
+            command = desktop_arg_name(L, action_str, has_num, num_arg, str_arg);
+        } else if (has_num) {
+            arg = num_arg;
+        } else if (str_arg) {
+            arg = atoi(str_arg);
+        }
+    }
+
+    keymap_add_binding(map, mods, vk, action, arg, submap, command, terminal);
+    free(command);   /* keymap_add_binding takes its own copy */
+}
+
+/* Parse a {"LWin", "Shift"} style modifier table at `idx` into a flag mask. */
+static DWORD parse_mods(lua_State *L, int idx) {
+    DWORD mods = 0;
+    if (!lua_istable(L, idx)) return 0;
+    lua_pushnil(L);
+    while (lua_next(L, idx)) {
+        if (lua_isstring(L, -1)) mods |= mod_name_to_flag(lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+    return mods;
+}
+
+/* ===========================================================================
+ * mshell.bind(mods, key, action [, arg [, terminal]])
+ *
+ *   mods   — table of modifier strings, e.g. {"LWin", "Shift"}
+ *   key    — key name string, e.g. "h", "Return"
+ *   action — action name string, e.g. "focus_left", "spawn", "enter_submap"
+ *   arg    — optional int (switch_desktop) or string (command / submap name)
+ * =========================================================================== */
+static int lua_mshell_bind(lua_State *L) {
+    int nargs = lua_gettop(L);
+
+    DWORD mods = parse_mods(L, 1);
+
+    const char *key_str = luaL_checkstring(L, 2);
+    DWORD vk = key_name_to_vk(key_str);
+    if (vk == 0) return luaL_error(L, "unknown key: %s", key_str);
+
+    const char *action_str = luaL_checkstring(L, 3);
+
+    bool        has_num = (nargs >= 4 && lua_isnumber(L, 4));
+    int         num_arg = has_num ? (int)lua_tointeger(L, 4) : 0;
+    const char *str_arg = (!has_num && nargs >= 4 && lua_isstring(L, 4))
+                            ? lua_tostring(L, 4) : NULL;
+
+    bool terminal = true;   /* most actions return to root after firing */
+    if (nargs >= 5 && lua_isboolean(L, 5)) terminal = (bool)lua_toboolean(L, 5);
+
+    if (!g.root_map) return luaL_error(L, "root keymap not initialized");
+
+    add_resolved_binding(L, g.root_map, mods, vk, action_str,
+                         has_num, num_arg, str_arg, terminal);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.submap(name, bindings [, opts])
+ *
+ *   name      — submap name. Pass it to mshell.set_leader to make a bare Win tap
+ *               enter this map (nothing is special about any particular name).
+ *   bindings  — table of key → action strings
+ *   opts      — optional table:
+ *                 persist = true   stay in the map; leave only via the exit key
+ *                                  (default false = one-shot: the next key,
+ *                                  bound or not, drops you back to root)
+ *                 exit    = "q"    persisting map's exit key; REPLACES Escape
+ *                                  (Escape is the exit only when this is omitted)
+ *                 sticky  = true   backward-compatible alias for persist = true
+ * =========================================================================== */
+static int lua_mshell_submap(lua_State *L) {
+    const char *name    = luaL_checkstring(L, 1);
+    bool        persist = false;
+    DWORD       exit_vk = 0;
+
+    /* Parse opts (table at index 3, optional).
+     *   persist = true|false  choose the flavour (default false = one-shot)
+     *   sticky  = true        backward-compatible alias for persist = true
+     *   exit    = "q"         key that leaves a persisting map; it REPLACES
+     *                         Escape (Escape stays special only when omitted) */
+    if (lua_gettop(L) >= 3 && lua_istable(L, 3)) {
+        lua_getfield(L, 3, "persist");
+        if (lua_isboolean(L, -1)) persist = (bool)lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "sticky");   /* alias, checked after persist */
+        if (lua_isboolean(L, -1)) persist = (bool)lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "exit");
+        if (lua_isstring(L, -1)) {
+            const char *ek = lua_tostring(L, -1);
+            exit_vk = key_name_to_vk(ek);
+            if (exit_vk == 0)
+                return luaL_error(L, "submap '%s': unknown exit key '%s'",
+                                  name, ek);
+        }
+        lua_pop(L, 1);
+    }
+
+    /* An exit key only means something for a persisting map (an unpersisting one
+     * leaves on the very next key). Flag the mismatch rather than ignore it. */
+    if (exit_vk && !persist)
+        return luaL_error(L, "submap '%s': 'exit' needs a persisting submap "
+                             "(set persist = true)", name);
+
+    /* Convert name to wide */
+    wchar_t wname[256];
+    u8_to_w(name, wname, 256);
+
+    KeyMap *km = keymap_new(wname, persist);
+    if (!km) return luaL_error(L, "too many keymaps");
+    km->exit_vk = exit_vk;
+
+    /* Submap bindings carry no modifier: a submap is modal, matched on bare keys
+     * (the hook strips Win before matching). Terminal semantics: an unpersisting
+     * map's actions return to root after one keypress; a persisting map's stay
+     * in the submap (its exit key leaves). */
+    bool term = !persist;
+
+    /* Parse bindings table (index 2). Each value is either:
+     *   key = "action"                 — simple action
+     *   key = {"action", arg|command}  — action with a payload (spawn, desktop,
+     *                                     enter_submap, …) */
+    luaL_checktype(L, 2, LUA_TTABLE);
+    lua_pushnil(L);
+    while (lua_next(L, 2)) {
+        const char *key_str = lua_tostring(L, -2);
+        DWORD vk = key_str ? key_name_to_vk(key_str) : 0;
+        if (vk == 0) { lua_pop(L, 1); continue; }
+
+        if (lua_isstring(L, -1)) {
+            add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
+                                 false, 0, NULL, term);
+        } else if (lua_istable(L, -1)) {
+            lua_rawgeti(L, -1, 1);   /* action string */
+            const char *action_str = lua_tostring(L, -1);
+            lua_rawgeti(L, -2, 2);   /* payload (number or string) */
+            bool        has_num = lua_isnumber(L, -1);
+            int         num_arg = has_num ? (int)lua_tointeger(L, -1) : 0;
+            const char *str_arg = (!has_num && lua_isstring(L, -1))
+                                    ? lua_tostring(L, -1) : NULL;
+            if (action_str)
+                add_resolved_binding(L, km, 0, vk, action_str,
+                                     has_num, num_arg, str_arg, term);
+            lua_pop(L, 2);           /* payload + action string */
+        }
+
+        lua_pop(L, 1);  /* pop value, keep key for lua_next */
+    }
+
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_leader(name) — choose the submap a bare Win tap enters.
+ *
+ * There is no built-in leader map: without this call a Win tap does nothing, and
+ * the name is entirely the config's choice. The named submap must already be
+ * defined (define it with mshell.submap first, exactly like enter_submap), and
+ * a persisting map is the usual choice so the leader stays until Escape.
+ * =========================================================================== */
+static int lua_mshell_set_leader(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    KeyMap *km = find_keymap(name);
+    if (!km)
+        return luaL_error(L, "set_leader: submap '%s' not found "
+                             "(define it with mshell.submap before set_leader)",
+                          name);
+    if (km == g.root_map)
+        return luaL_error(L, "set_leader: the leader must be a submap, not root");
+    g.leader_map = km;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_gap(pixels) — set inner and outer gaps to the same value
+ * =========================================================================== */
+static int lua_mshell_set_gap(lua_State *L) {
+    int gap = (int)luaL_checkinteger(L, 1);
+    gap = clamp_i(gap, 0, 100);
+    g.inner_gap = gap;
+    g.outer_gap = gap;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_gaps(inner [, outer]) — independent inner/outer gaps.
+ *   inner: gap between adjacent tiled windows
+ *   outer: margin between the screen edge and the outermost windows
+ *          (defaults to inner if omitted)
+ * =========================================================================== */
+static int lua_mshell_set_gaps(lua_State *L) {
+    int inner = (int)luaL_checkinteger(L, 1);
+    int outer = (int)luaL_optinteger(L, 2, inner);
+    g.inner_gap = clamp_i(inner, 0, 100);
+    g.outer_gap = clamp_i(outer, 0, 100);
+    return 0;
+}
+
+/* mshell.set_smart_gaps(enabled) — drop gaps when a monitor holds one window */
+static int lua_mshell_set_smart_gaps(lua_State *L) {
+    g.smart_gaps = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.block_system_keys(enabled)
+ *   true  (default) — swallow Alt+Tab, Alt+Esc, Alt+Space, Ctrl+Esc.
+ *   false           — let those Windows shortcuts through.
+ *   (Win+* is always blocked; Ctrl+Alt+Del can never be blocked.)
+ * =========================================================================== */
+static int lua_mshell_block_system_keys(lua_State *L) {
+    g.block_system_keys = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_border(width, color)
+ *   color is an integer, e.g. 0x333333
+ * =========================================================================== */
+static int lua_mshell_set_border(lua_State *L) {
+    int width = (int)luaL_checkinteger(L, 1);
+    if (width < 0) width = 0;
+    if (width > 10) width = 10;
+    g.border_width = width;
+
+    if (lua_gettop(L) >= 2) {
+        unsigned c = (unsigned)luaL_checkinteger(L, 2);   /* 0xRRGGBB */
+        g.border_color = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+    }
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_background(color)
+ *   color is an integer 0xRRGGBB — the solid desktop backdrop color
+ * =========================================================================== */
+static int lua_mshell_set_background(lua_State *L) {
+    unsigned c = (unsigned)luaL_checkinteger(L, 1);
+    /* Accept 0xRRGGBB and store as COLORREF (0x00BBGGRR). */
+    g.background_color = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_auto_reload(enabled)
+ *   true (default) — watch this config's folder and reload when you save it.
+ *   false          — reload only on the "reload" action (Win+Shift+R).
+ *   Takes effect at the end of the load that sets it, so flipping it off and
+ *   saving is the last thing auto-reload does.
+ * =========================================================================== */
+static int lua_mshell_set_auto_reload(lua_State *L) {
+    g.auto_reload = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_verbose(enabled)
+ *   Toggle debug logging (OutputDebugString / DebugView) at runtime.
+ * =========================================================================== */
+static int lua_mshell_set_verbose(lua_State *L) {
+    g.verbose = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_start_desktop(name) — the desktop you land on at startup.
+ *
+ * There is no desktop count to configure: desktops are created when you switch
+ * to them and destroyed when you leave them empty, so at startup exactly one
+ * exists and this names it. Defaults to "1".
+ * =========================================================================== */
+static int lua_mshell_set_start_desktop(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+
+    wchar_t wname[DESKTOP_NAME_MAX];
+    u8_to_w(name, wname, DESKTOP_NAME_MAX);
+    if (!desktop_name_ok(wname))
+        return luaL_error(L, "set_start_desktop: '%s' is not a usable desktop "
+                             "name — it must be non-empty, contain no spaces, "
+                             "and be under %d characters", name, DESKTOP_NAME_MAX);
+
+    wcscpy(g.start_desktop, wname);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.desktop_rule(pattern, opts) — what a desktop does.
+ *
+ *   pattern — the desktop NAME this applies to, as a case-insensitive wildcard
+ *             pattern: "web" for one desktop, "game-*" for a family, "*" for
+ *             every desktop.
+ *   opts    — table, any subset of:
+ *               app          = "firefox.exe"  open this when you enter the
+ *                              desktop and it has no windows (and again after
+ *                              you close the last one and come back)
+ *               float        = true           windows opened here start
+ *                              floating instead of tiled
+ *               layout       = "monocle"      this desktop's layout, overriding
+ *                              set_layout — same names set_layout takes
+ *               master_ratio = 0.6            master area size, 0.2 .. 0.9
+ *               nmaster      = 1              windows in the master area
+ *               monitor      = 1              pin the desktop to a display
+ *                              (0-based); its windows tile there and switching
+ *                              to it takes the focus there
+ *
+ * Rules LAYER: every rule whose pattern matches is applied in declaration
+ * order, each overriding only the fields it names. So a "*" rule sets the house
+ * style and specific ones adjust a field or two:
+ *
+ *   mshell.desktop_rule("*",    { layout = "tiling" })
+ *   mshell.desktop_rule("chat", { layout = "monocle", app = "discord.exe" })
+ *
+ * Rules are matched when a desktop is created and re-applied on config reload,
+ * so editing one takes effect on desktops that already exist — including a
+ * layout you changed at runtime, which goes back to what the rule says.
+ * =========================================================================== */
+static int lua_mshell_desktop_rule(lua_State *L) {
+    const char *pattern = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    if (g.desktop_rule_count >= MAX_DESKTOP_RULES)
+        return luaL_error(L, "desktop_rule: too many rules (max %d)",
+                          MAX_DESKTOP_RULES);
+
+    DesktopRule *r = &g.desktop_rules[g.desktop_rule_count];
+    memset(r, 0, sizeof(*r));
+    u8_to_w(pattern, r->name_match, DESKTOP_NAME_MAX);
+    if (!r->name_match[0])
+        return luaL_error(L, "desktop_rule: the pattern is empty — use \"*\" to "
+                             "match every desktop");
+
+    lua_getfield(L, 2, "app");
+    if (lua_isstring(L, -1)) u8_to_w(lua_tostring(L, -1), r->app, MAX_PATH);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "float");
+    if (!lua_isnil(L, -1)) { r->set_float = true;
+                             r->float_all = (bool)lua_toboolean(L, -1); }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "layout");
+    if (lua_isstring(L, -1)) {
+        const char *s = lua_tostring(L, -1);
+        if (!layout_from_name(s, &r->layout))
+            return luaL_error(L, "desktop_rule '%s': unknown layout '%s'",
+                              pattern, s);
+        r->set_layout = true;
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "master_ratio");
+    if (lua_isnumber(L, -1)) {
+        r->set_ratio    = true;
+        r->master_ratio = clamp_f((float)lua_tonumber(L, -1), 0.2f, 0.9f);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "nmaster");
+    if (lua_isnumber(L, -1)) {
+        r->set_nmaster = true;
+        r->n_master    = clamp_i((int)lua_tointeger(L, -1), 1, 20);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "monitor");
+    if (lua_isnumber(L, -1)) {
+        int m = (int)lua_tointeger(L, -1);
+        if (m < 0 || m >= MAX_MONITORS)
+            return luaL_error(L, "desktop_rule '%s': monitor %d is out of range "
+                                 "(0..%d)", pattern, m, MAX_MONITORS - 1);
+        r->set_monitor = true;
+        r->monitor     = m;
+    }
+    lua_pop(L, 1);
+
+    g.desktop_rule_count++;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_master_ratio(ratio)
+ *   ratio is a float between 0.2 and 0.9
+ *
+ * The default for every desktop; a desktop_rule's master_ratio overrides it.
+ * Live desktops pick it up on the reapply that follows a reload, so there is
+ * nothing to update here.
+ * =========================================================================== */
+static int lua_mshell_set_master_ratio(lua_State *L) {
+    g.default_master_ratio = clamp_f((float)luaL_checknumber(L, 1), 0.2f, 0.9f);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_nmaster(n) — default windows in the master area (>= 1)
+ * =========================================================================== */
+static int lua_mshell_set_nmaster(lua_State *L) {
+    g.default_nmaster = clamp_i((int)luaL_checkinteger(L, 1), 1, 20);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_layout(name) — default layout for every desktop.
+ *   "tiling" | "monocle" | "grid" | "spiral" | "centered" | "bstack" | "columns"
+ * =========================================================================== */
+static int lua_mshell_set_layout(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if (!layout_from_name(s, &g.default_layout))
+        return luaL_error(L, "unknown layout: %s", s);
+    return 0;
+}
+
+/* ===========================================================================
+ * Tiling policy knobs
+ * =========================================================================== */
+
+/* mshell.set_float_policy("rules" | "never") */
+static int lua_mshell_set_float_policy(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "never") == 0) g.float_policy = FLOAT_NEVER;
+    else if (strcmp(s, "rules") == 0) g.float_policy = FLOAT_RULES;
+    else return luaL_error(L, "float_policy must be 'rules' or 'never'");
+    return 0;
+}
+
+/* mshell.set_fullscreen_policy("contain" | "monitor")
+ *
+ * What an app that fullscreens ITSELF gets — YouTube's fullscreen button, F11
+ * in a browser — when the window has no explicit mode from a keybinding:
+ *   "contain" (default) keeps the window in its tile, so the app's fullscreen
+ *             content fills the window instead of the screen;
+ *   "monitor" lets it cover the display, dropping it out of the layout until it
+ *             leaves fullscreen again.
+ * The per-window actions (fullscreen_content / fullscreen_both) override this. */
+static int lua_mshell_set_fullscreen_policy(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "contain") == 0) g.fullscreen_policy = FS_CONTENT;
+    else if (strcmp(s, "monitor") == 0) g.fullscreen_policy = FS_BOTH;
+    else return luaL_error(L, "fullscreen_policy must be 'contain' or 'monitor'");
+    return 0;
+}
+
+/* mshell.set_attach("end" | "master" | "after") */
+static int lua_mshell_set_attach(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "end")    == 0) g.attach_policy = ATTACH_END;
+    else if (strcmp(s, "master") == 0) g.attach_policy = ATTACH_MASTER;
+    else if (strcmp(s, "after")  == 0) g.attach_policy = ATTACH_AFTER;
+    else return luaL_error(L, "attach must be 'end', 'master', or 'after'");
+    return 0;
+}
+
+/* mshell.set_manage_owned(enabled) — also tile owned/dialog windows (risky) */
+static int lua_mshell_set_manage_owned(lua_State *L) {
+    g.manage_owned = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* mshell.set_float_on_top(enabled) — keep floating windows above tiled ones */
+static int lua_mshell_set_float_on_top(lua_State *L) {
+    g.float_on_top = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* mshell.set_min_window_size(w, h) — windows smaller than this are ignored */
+static int lua_mshell_set_min_window_size(lua_State *L) {
+    g.min_win_w = clamp_i((int)luaL_checkinteger(L, 1), 0, 100000);
+    g.min_win_h = clamp_i((int)luaL_checkinteger(L, 2), 0, 100000);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.rule(match, action [, opts])
+ *
+ *   match  — table with optional "class", "process" and/or "path" keys. Each is
+ *            a case-insensitive wildcard pattern (`*` any run, `?` one char,
+ *            `/` == `\`), so one rule can cover a whole game library:
+ *              class   = "UnityWndClass"
+ *              process = "eldenring.exe"
+ *              path    = [[C:\SteamLibrary\steamapps\common\*]]
+ *            A pattern with no wildcard is an exact match, as before. All the
+ *            keys given must match; rules are tried in declaration order and
+ *            the first match wins, so put specific rules above broad ones.
+ *
+ *            "dialog" is the one key that is not a pattern:
+ *              dialog = true    match only windows Windows itself treats as a
+ *                               dialog — file pickers (Open / Save As / Select
+ *                               Folder), message boxes, print and properties
+ *                               sheets, permission and credential prompts
+ *              dialog = false   match only windows that are NOT one of those
+ *            A file picker carries no class or process of its own — it is the
+ *            host app's process wearing a common-dialog class — so this is the
+ *            only way to name one. It is also the only match that can pull in
+ *            an *owned* window, which mshell otherwise leaves untouched: a
+ *            `dialog` rule is the config saying "manage these, floating", so
+ *            the picker hides with its desktop instead of hovering over every
+ *            desktop you switch to.
+ *   action — "manage", "float", or "ignore"
+ *   opts   — optional table of extra behavior:
+ *              ring       = false  don't draw the focus ring around the window
+ *                                  (see set_border)
+ *              decorate   = false  strip the frame and add no border at all —
+ *                                  floating windows normally keep their own
+ *                                  chrome, this makes them borderless
+ *              fullscreen = true   park it over the whole monitor it opened on
+ *                                  (full bounds, no gaps); floating only
+ *            The three together are the game preset: never tiled, borderless,
+ *            covering the display, with no ring painted over its edges.
+ * =========================================================================== */
+static int lua_mshell_rule(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    const char *action_str = luaL_checkstring(L, 2);
+
+    RuleAction action;
+    if      (strcmp(action_str, "float")  == 0) action = RULE_FLOAT;
+    else if (strcmp(action_str, "ignore") == 0) action = RULE_IGNORE;
+    else if (strcmp(action_str, "manage") == 0) action = RULE_MANAGE;
+    else return luaL_error(L, "rule: unknown action '%s' "
+                              "(expected 'manage', 'float' or 'ignore')",
+                           action_str);
+
+    if (g.rule_count >= MAX_RULES) {
+        luaL_error(L, "too many rules");
+        return 0;
+    }
+
+    WindowRule *r = &g.rules[g.rule_count++];
+    memset(r, 0, sizeof(*r));
+    r->action = action;
+
+    lua_getfield(L, 1, "class");
+    if (lua_isstring(L, -1)) {
+        u8_to_w(lua_tostring(L, -1), r->class_match, 256);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "process");
+    if (lua_isstring(L, -1)) {
+        u8_to_w(lua_tostring(L, -1), r->process_match, 256);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "path");
+    if (lua_isstring(L, -1)) {
+        u8_to_w(lua_tostring(L, -1), r->path_match, MAX_PATH);
+    }
+    lua_pop(L, 1);
+
+    /* Only an actual boolean opts in — a missing key means "don't care", which
+     * is not the same as `dialog = false` ("match everything that isn't one"). */
+    lua_getfield(L, 1, "dialog");
+    if (lua_isboolean(L, -1)) {
+        r->set_dialog = true;
+        r->dialog     = lua_toboolean(L, -1);
+    }
+    lua_pop(L, 1);
+
+    /* Optional opts table (arg 3). Absent fields keep their zeroed defaults, so
+     * `ring`/`decorate` only take effect when the config explicitly passes
+     * false, and `fullscreen` only when it explicitly passes true. */
+    if (lua_gettop(L) >= 3 && lua_istable(L, 3)) {
+        lua_getfield(L, 3, "ring");
+        if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
+            r->no_ring = true;
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "decorate");
+        if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
+            r->no_decor = true;
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "fullscreen");
+        if (lua_toboolean(L, -1))
+            r->fullscreen = true;
+        lua_pop(L, 1);
+    }
+
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.spawn(command)
+ *   command is executed at startup
+ * =========================================================================== */
+static int lua_mshell_spawn(lua_State *L) {
+    const char *cmd = luaL_checkstring(L, 1);
+
+    if (g.startup_count >= MAX_STARTUP_COMMANDS) {
+        return luaL_error(L, "too many startup commands");
+    }
+
+    wchar_t *wcmd = u8_to_w_dup(cmd);
+    if (!wcmd) return luaL_error(L, "out of memory");
+
+    g.startup_commands[g.startup_count++] = wcmd;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.log(message)
+ *   prints to stderr / DebugView
+ * =========================================================================== */
+static int lua_mshell_log(lua_State *L) {
+    const char *msg = luaL_checkstring(L, 1);
+    /* log_err, not log_w: a config that calls mshell.log() is deliberately
+     * reporting something (a skipped optional app, a branch it took), and those
+     * notes are worth nothing if they only appear under --verbose. */
+    log_err(L"[lua] %hs", msg);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_whichkey(opts) — the submap hint ("which-key") panel.
+ *   opts — table, any subset of:
+ *     enabled = true|false   show the hint at all         (default true)
+ *     delay   = <ms>         pause before it appears; 0 = instant (default 150)
+ *     bg      = 0xRRGGBB     panel background
+ *     fg      = 0xRRGGBB     action-label text
+ *     key_fg  = 0xRRGGBB     key + header accent
+ *     border  = 0xRRGGBB     panel outline
+ * =========================================================================== */
+static int lua_mshell_set_whichkey(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    lua_getfield(L, 1, "enabled");
+    if (!lua_isnil(L, -1)) g.whichkey_enabled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "delay");
+    if (lua_isnumber(L, -1))
+        g.whichkey_delay = clamp_i((int)lua_tointeger(L, -1), 0, 5000);
+    lua_pop(L, 1);
+
+    /* 0xRRGGBB → COLORREF, for each color field that is present. */
+    const struct { const char *field; COLORREF *dst; } colors[] = {
+        {"bg",     &g.whichkey_bg},
+        {"fg",     &g.whichkey_fg},
+        {"key_fg", &g.whichkey_key_fg},
+        {"border", &g.whichkey_border},
+    };
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        lua_getfield(L, 1, colors[i].field);
+        if (lua_isnumber(L, -1)) {
+            unsigned c = (unsigned)lua_tointeger(L, -1);
+            *colors[i].dst = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+        }
+        lua_pop(L, 1);
+    }
+    return 0;
+}
+
+/* ===========================================================================
+ * Register all functions into the Lua VM
+ * =========================================================================== */
+void lua_register_api(lua_State *L) {
+    static const luaL_Reg api[] = {
+        {"bind",            lua_mshell_bind},
+        {"submap",          lua_mshell_submap},
+        {"set_leader",      lua_mshell_set_leader},
+        {"set_gap",         lua_mshell_set_gap},
+        {"set_gaps",        lua_mshell_set_gaps},
+        {"set_smart_gaps",  lua_mshell_set_smart_gaps},
+        {"set_border",      lua_mshell_set_border},
+        {"set_background",  lua_mshell_set_background},
+        {"set_whichkey",    lua_mshell_set_whichkey},
+        {"set_start_desktop", lua_mshell_set_start_desktop},
+        {"desktop_rule",    lua_mshell_desktop_rule},
+        {"set_master_ratio",lua_mshell_set_master_ratio},
+        {"set_nmaster",     lua_mshell_set_nmaster},
+        {"set_layout",      lua_mshell_set_layout},
+        {"set_float_policy",lua_mshell_set_float_policy},
+        {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
+        {"set_attach",      lua_mshell_set_attach},
+        {"set_manage_owned",lua_mshell_set_manage_owned},
+        {"set_float_on_top",lua_mshell_set_float_on_top},
+        {"set_min_window_size",lua_mshell_set_min_window_size},
+        {"set_auto_reload", lua_mshell_set_auto_reload},
+        {"set_verbose",     lua_mshell_set_verbose},
+        {"block_system_keys",lua_mshell_block_system_keys},
+        {"rule",            lua_mshell_rule},
+        {"spawn",           lua_mshell_spawn},
+        {"log",             lua_mshell_log},
+        {NULL, NULL}
+    };
+
+    /* Register all functions into the global "mshell" table */
+    luaL_newlib(L, api);
+    lua_setglobal(L, "mshell");
+}
