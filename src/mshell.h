@@ -619,6 +619,12 @@ HWND     window_get_focused(void);
 ManagedWindow *window_find(HWND hwnd);
 void     window_manage_existing(void);
 void     window_restore_all_decorations(void);
+
+/* Re-show everything mshell hid (other desktops, monocle's non-focused
+ * windows). A hidden window has no taskbar button and no Alt+Tab entry, so
+ * without this they are unreachable once mshell exits. Call it before
+ * window_restore_all_decorations(). */
+void     window_restore_all_visibility(void);
 void     window_set_floating(HWND hwnd, bool floating);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 bool     window_frame_rect(HWND hwnd, RECT *out);  /* DWM visible-frame bounds  */

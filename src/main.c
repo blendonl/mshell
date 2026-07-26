@@ -534,6 +534,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     kb_shutdown();
     config_shutdown();
 
+    /* Un-hide everything we hid FIRST — every window on a desktop you are not
+     * looking at, and monocle's stack. They have no taskbar button and no
+     * Alt+Tab entry, so leaving them hidden strands them for good.
+     *
+     * This also covers logoff: WM_ENDSESSION posts a quit, the message loop
+     * above drops out, and we arrive here. */
+    window_restore_all_visibility();
+
     /* restore window decorations so apps look normal again */
     window_restore_all_decorations();
 
