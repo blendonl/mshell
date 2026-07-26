@@ -42,22 +42,45 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_OBJECT_SHOW:
-        /* Window was hidden and is now shown.
-         * It might be a window moving between our virtual desktops,
-         * or a new popup. If it's not already managed, manage it. */
-        if (IsWindow(hwnd) && window_index_of(hwnd) < 0) {
-            window_manage(hwnd);
+        /* Window was hidden and is now shown. Either something we already
+         * manage came back, or it's a window we've never seen. */
+        if (IsWindow(hwnd)) {
+            ManagedWindow *mw = window_find(hwnd);
+            if (!mw) {
+                window_manage(hwnd);
+            } else if (mw->app_hidden) {
+                /* The app put it back (tray icon clicked). It rejoins the
+                 * layout. */
+                mw->app_hidden  = false;
+                mw->has_applied = false;
+                if (mw->desktop_id == g.current_desktop_id) tile_current();
+            }
         }
         break;
 
     case EVENT_OBJECT_HIDE:
-        /* Window hidden. If it was managed, it might need re-tiling
-         * (to fill the hole it left). But only if it was on the
-         * *current* desktop — otherwise it's already hidden.         */
+        /* A managed window was hidden and it wasn't us.
+         *
+         * Every hide mshell performs — desktop switches, monocle, moving a
+         * window to another desktop — runs inside events_suppress_begin(), and
+         * this callback returns early while suppressed. So reaching here means
+         * the APP hid its own window: minimise-to-tray, which Discord, Slack,
+         * Telegram and Steam all do.
+         *
+         * That has to be recorded, not just re-tiled around. The window stays
+         * managed (it is still the app's window, on this desktop, and will come
+         * back), but it leaves the layout — otherwise collect_clients keeps
+         * handing it a tile and flush_placements, which shows anything in the
+         * placement list that isn't visible, drags it straight back onto the
+         * screen. */
         {
             ManagedWindow *mw = window_find(hwnd);
-            if (mw && mw->desktop_id == g.current_desktop_id && !mw->is_floating) {
-                tile_current();
+            if (mw && !mw->app_hidden) {
+                mw->app_hidden  = true;
+                mw->has_applied = false;
+                log_w(L"app hid its own window: %p — leaving the layout",
+                      (void *)hwnd);
+                if (mw->desktop_id == g.current_desktop_id) tile_current();
             }
         }
         break;

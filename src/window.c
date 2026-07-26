@@ -428,6 +428,9 @@ void window_restore_all_visibility(void) {
     for (int i = 0; i < g.managed_count; i++) {
         ManagedWindow *mw = &g.managed[i];
         if (!IsWindow(mw->hwnd) || IsWindowVisible(mw->hwnd)) continue;
+        /* Undo mshell's hiding, not the app's: a window sitting in the tray
+         * because the user closed it there should stay there. */
+        if (mw->app_hidden) continue;
 
         /* SW_SHOWNA reveals without activating: we are tearing down and have no
          * business deciding which window ends up focused.

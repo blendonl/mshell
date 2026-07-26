@@ -309,6 +309,10 @@ void desktop_reapply(void) {
         for (int i = 0; i < dt->count; i++) {
             HWND h = dt->windows[i];
             if (!h || !IsWindow(h)) continue;
+            /* A window the app hid itself stays hidden wherever it lives —
+             * a reload must not drag every tray-minimised app back on screen. */
+            ManagedWindow *mw = window_find(h);
+            if (mw && mw->app_hidden) continue;
             if (d == cur) ShowWindow(h, SW_SHOWNOACTIVATE);
             else          ShowWindow(h, SW_HIDE);
         }
@@ -362,10 +366,15 @@ void desktop_switch(const wchar_t *name) {
         }
     }
 
-    /* 2. Show all windows on the target desktop */
+    /* 2. Show all windows on the target desktop — except the ones their own
+     *    app hid (minimise-to-tray). Those are not ours to reveal; switching
+     *    to a desktop must not un-tray everything parked on it. */
     for (int i = 0; i < new_dt->count; i++) {
         HWND h = new_dt->windows[i];
-        if (h && IsWindow(h)) ShowWindow(h, SW_SHOWNOACTIVATE);
+        if (!h || !IsWindow(h)) continue;
+        ManagedWindow *mw = window_find(h);
+        if (mw && mw->app_hidden) continue;
+        ShowWindow(h, SW_SHOWNOACTIVATE);
     }
 
     g.current_desktop_id = target_id;
@@ -471,8 +480,16 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
         }
     }
 
+    /* Suppressed like every other hide mshell performs: an unsuppressed
+     * EVENT_OBJECT_HIDE is how we recognise an app minimising itself to the
+     * tray, so hiding a window ourselves without the guard would flag it as
+     * app-hidden and it would never be shown on the desktop it just moved to. */
     bool was_visible = (old_id == g.current_desktop_id);
-    if (was_visible) ShowWindow(hwnd, SW_HIDE);
+    if (was_visible) {
+        events_suppress_begin();
+        ShowWindow(hwnd, SW_HIDE);
+        events_suppress_end();
+    }
 
     /* Add to the target desktop. Note this bypasses the attach policy on
      * purpose: a window you deliberately threw at a desktop goes to the end,
