@@ -1105,8 +1105,10 @@ void lua_run_ref(int ref) {
     if (!g.L || ref == LUA_NOREF || ref == LUA_REFNIL) return;
 
     if (g.lua_running) {
-        log_err(L"config: a Lua callback tried to run while one was already "
-                L"running — ignored (it would re-enter the VM)");
+        /* log_w, not log_err: nesting is legitimate to attempt — a handler that
+         * switches desktops would fire the desktop event — and being refused is
+         * the protection working, not a mistake the user has to fix. */
+        log_w(L"config: Lua is already running; nested call ignored");
         return;
     }
 
@@ -1122,6 +1124,129 @@ void lua_run_ref(int ref) {
     } else {
         lua_pop(g.L, 1);
         log_err(L"config: Lua binding ref %d is not a function", ref);
+    }
+
+    g.lua_running = false;
+}
+
+/* ===========================================================================
+ * mshell.on(event, fn) — run fn when something happens.
+ *
+ *   "window_open"    a window came under management
+ *   "window_close"   one is about to leave it
+ *   "desktop_switch" the visible desktop changed
+ *   "focus"          the focused window changed
+ *
+ * The handler receives one table describing the event: the window for the
+ * window and focus events, the desktop for a switch. Several handlers may be
+ * registered for the same event and run in registration order.
+ * =========================================================================== */
+static const struct { const char *name; LuaEvent ev; } lua_event_names[] = {
+    {"window_open",    LUA_EVENT_WINDOW_OPEN},
+    {"window_close",   LUA_EVENT_WINDOW_CLOSE},
+    {"desktop_switch", LUA_EVENT_DESKTOP_SWITCH},
+    {"focus",          LUA_EVENT_FOCUS},
+    {NULL,             LUA_EVENT_COUNT}
+};
+
+static int lua_mshell_on(lua_State *L) {
+    reject_at_runtime(L, "on");
+
+    const char *ev_name = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+
+    LuaEvent ev = LUA_EVENT_COUNT;
+    for (int i = 0; lua_event_names[i].name; i++)
+        if (strcmp(ev_name, lua_event_names[i].name) == 0)
+            ev = lua_event_names[i].ev;
+
+    if (ev == LUA_EVENT_COUNT) {
+        /* Name every valid option: a typo here otherwise reads as "my handler
+         * never runs", with nothing to compare against. */
+        luaL_Buffer b;
+        luaL_buffinit(L, &b);
+        for (int i = 0; lua_event_names[i].name; i++) {
+            if (i) luaL_addstring(&b, ", ");
+            luaL_addstring(&b, lua_event_names[i].name);
+        }
+        luaL_pushresult(&b);
+        return luaL_error(L, "mshell.on: unknown event '%s' (expected one of: "
+                             "%s)", ev_name, lua_tostring(L, -1));
+    }
+
+    if (g.lua_hook_count >= MAX_LUA_HOOKS)
+        return luaL_error(L, "mshell.on: too many handlers (max %d)",
+                          MAX_LUA_HOOKS);
+
+    lua_pushvalue(L, 2);
+    g.lua_hooks[g.lua_hook_count].event = ev;
+    g.lua_hooks[g.lua_hook_count].ref   = luaL_ref(L, LUA_REGISTRYINDEX);
+    g.lua_hook_count++;
+    return 0;
+}
+
+/* Push the argument table an event handler receives. */
+static void push_event_arg(lua_State *L, LuaEvent ev, HWND hwnd,
+                           const wchar_t *name) {
+    if (ev == LUA_EVENT_DESKTOP_SWITCH) {
+        int slot = desktop_slot_by_id(g.current_desktop_id);
+        lua_createtable(L, 0, 10);
+        if (slot >= 0) push_desktop_fields(L, &g.desktops[slot]);
+        if (name && name[0]) { push_wstr(L, name); lua_setfield(L, -2, "from"); }
+        return;
+    }
+
+    /* Window events. Described the same way get_focused_window() does, so a
+     * handler can be written once and used for either. */
+    if (!hwnd || !IsWindow(hwnd)) { lua_pushnil(L); return; }
+
+    wchar_t title[256] = {0}, cls[256] = {0}, path[MAX_PATH] = {0};
+    GetWindowTextW(hwnd, title, 256);
+    GetClassNameW(hwnd, cls, 256);
+    window_process_path(hwnd, path, MAX_PATH);
+
+    const wchar_t *proc = path;
+    for (const wchar_t *p = path; *p; p++)
+        if (*p == L'\\' || *p == L'/') proc = p + 1;
+
+    lua_createtable(L, 0, 8);
+    set_str(L, "title",   title);
+    set_str(L, "class",   cls);
+    set_str(L, "process", proc);
+    set_str(L, "path",    path);
+
+    const ManagedWindow *mw = window_find(hwnd);
+    if (mw) {
+        set_bool(L, "floating",   mw->is_floating);
+        set_bool(L, "fullscreen", window_is_screen_fullscreen(mw));
+        set_int (L, "monitor",    mw->monitor);
+        const Desktop *d = desktop_by_id(mw->desktop_id);
+        if (d) set_str(L, "desktop", d->name);
+    }
+}
+
+void lua_fire(LuaEvent ev, HWND hwnd, const wchar_t *name) {
+    if (!g.L || g.lua_hook_count == 0) return;   /* the overwhelmingly common case */
+    if (g.lua_running) {
+        log_w(L"config: event %d fired while Lua was running — skipped", (int)ev);
+        return;
+    }
+
+    g.lua_running = true;
+
+    for (int i = 0; i < g.lua_hook_count; i++) {
+        if (g.lua_hooks[i].event != ev) continue;
+
+        lua_rawgeti(g.L, LUA_REGISTRYINDEX, g.lua_hooks[i].ref);
+        if (!lua_isfunction(g.L, -1)) { lua_pop(g.L, 1); continue; }
+
+        push_event_arg(g.L, ev, hwnd, name);
+        if (lua_pcall(g.L, 1, 0, 0) != LUA_OK) {
+            log_err(L"config: error in '%hs' handler: %hs",
+                    lua_event_names[ev].name,
+                    lua_tostring(g.L, -1) ? lua_tostring(g.L, -1) : "?");
+            lua_pop(g.L, 1);
+        }
     }
 
     g.lua_running = false;
@@ -1167,6 +1292,7 @@ void lua_register_api(lua_State *L) {
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
         {"log",             lua_mshell_log},
+        {"on",              lua_mshell_on},
 
         /* --- state queries (see the note above their definitions: only the
          *     monitor list is populated during the FIRST config load) --- */

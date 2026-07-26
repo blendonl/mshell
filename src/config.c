@@ -82,6 +82,10 @@ typedef struct {
     int       startup_count;
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
     int       desktop_rule_count;
+    /* mshell.on() handlers. The refs belong to the old lua_State, which a
+     * failed load leaves open — so restoring them restores working handlers. */
+    LuaHook   lua_hooks[MAX_LUA_HOOKS];
+    int       lua_hook_count;
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
     int       inner_gap, outer_gap, border_width;
     bool      smart_gaps;
@@ -111,6 +115,8 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->startup_count = g.startup_count;
     memcpy(s->desktop_rules, g.desktop_rules, sizeof(g.desktop_rules));
     s->desktop_rule_count = g.desktop_rule_count;
+    memcpy(s->lua_hooks, g.lua_hooks, sizeof(g.lua_hooks));
+    s->lua_hook_count = g.lua_hook_count;
     wcscpy(s->start_desktop, g.start_desktop);
     s->inner_gap         = g.inner_gap;
     s->outer_gap         = g.outer_gap;
@@ -153,6 +159,7 @@ static void config_detach(void) {
      * whole teardown — the live desktops they describe are runtime state and
      * deliberately survive a reload (desktop_reapply re-resolves them). */
     g.desktop_rule_count = 0;
+    g.lua_hook_count     = 0;   /* refs die with the lua_State */
     g.start_desktop[0]   = L'\0';
     g.root_map      = NULL;
     g.current_map   = NULL;
@@ -175,6 +182,8 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.startup_count = s->startup_count;
     memcpy(g.desktop_rules, s->desktop_rules, sizeof(g.desktop_rules));
     g.desktop_rule_count = s->desktop_rule_count;
+    memcpy(g.lua_hooks, s->lua_hooks, sizeof(g.lua_hooks));
+    g.lua_hook_count = s->lua_hook_count;
     wcscpy(g.start_desktop, s->start_desktop);
     g.inner_gap         = s->inner_gap;
     g.outer_gap         = s->outer_gap;

@@ -513,6 +513,10 @@ void window_manage(HWND hwnd) {
     log_w(L"Managed: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
           (void *)hwnd, dt->name, mw->is_floating, mw->no_decor,
           mw->fullscreen);
+
+    /* Last, once the window is fully set up, so a handler sees its final
+     * state (desktop, floating, monitor) rather than a half-built record. */
+    lua_fire(LUA_EVENT_WINDOW_OPEN, hwnd, NULL);
 }
 
 /* ===========================================================================
@@ -520,6 +524,19 @@ void window_manage(HWND hwnd) {
  * =========================================================================== */
 void window_unmanage(HWND hwnd) {
     int idx = window_index_of(hwnd);
+    if (idx < 0) return;
+
+    /* Fired FIRST, while the window is still managed, so a handler can still
+     * ask which desktop it was on and what it was. By the time we return it is
+     * gone from every list. The HWND may already be destroyed — the describe
+     * path tolerates that and reports what it can. */
+    lua_fire(LUA_EVENT_WINDOW_CLOSE, hwnd, NULL);
+
+    /* Re-resolve: `idx` is used below to compact the managed array, and it was
+     * read before the handler ran. Nothing the config can call from a handler
+     * mutates that array today, but "today" is doing a lot of work in a line
+     * that would otherwise corrupt memory. */
+    idx = window_index_of(hwnd);
     if (idx < 0) return;
 
     int desk_id = g.managed[idx].desktop_id;
@@ -980,6 +997,18 @@ void window_focus(HWND hwnd) {
 
     /* Keep the focus ring on the newly-focused window. */
     border_refresh();
+
+    /* Only when the focus actually moved. window_focus is also called to
+     * re-assert focus that is already correct — after a re-tile, on a desktop
+     * switch that lands on the same window — and firing on those would make a
+     * handler see a stream of events for something that never changed. */
+    {
+        static HWND s_last_fired = NULL;
+        if (hwnd != s_last_fired) {
+            s_last_fired = hwnd;
+            lua_fire(LUA_EVENT_FOCUS, hwnd, NULL);
+        }
+    }
 
     /* Name what won instead of just "FAILED" — the window that kept the
      * foreground identifies the cause (a UIPI-protected elevated app, an app
