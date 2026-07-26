@@ -264,9 +264,21 @@ static int lua_mshell_submap(lua_State *L) {
     luaL_checktype(L, 2, LUA_TTABLE);
     lua_pushnil(L);
     while (lua_next(L, 2)) {
+        /* lua_tostring on the KEY would be undefined behaviour here: it
+         * converts the value in place, and mutating a key mid-traversal can
+         * corrupt lua_next's iteration. Numeric keys — an array-style table, or
+         * an explicit [1] = ... — are the case that would hit it, so check the
+         * type instead of coercing, and say so rather than skipping silently. */
+        if (lua_type(L, -2) != LUA_TSTRING)
+            return luaL_error(L, "submap '%s': keys must be key-name strings "
+                                 "(e.g. h = \"focus_left\"); got a %s key",
+                              name, luaL_typename(L, -2));
+
         const char *key_str = lua_tostring(L, -2);
         DWORD vk = key_str ? key_name_to_vk(key_str) : 0;
-        if (vk == 0) { lua_pop(L, 1); continue; }
+        if (vk == 0)
+            return luaL_error(L, "submap '%s': unknown key '%s'", name,
+                              key_str ? key_str : "?");
 
         if (lua_isstring(L, -1)) {
             add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),

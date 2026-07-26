@@ -472,6 +472,20 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     if (slot < 0) return;
     int new_id = g.desktops[slot].id;
 
+    /* Check there is ROOM before dismantling anything.
+     *
+     * This used to be checked further down, after the window had already been
+     * unlinked from its old desktop and hidden — so a full target left the
+     * window hidden, owned by a desktop whose window list did not contain it,
+     * and therefore never shown by anything again. Refusing up front leaves it
+     * exactly where it was. */
+    if (g.desktops[slot].count >= MAX_WINDOWS_PER_DESKTOP) {
+        log_err(L"desktop: '%ls' already holds %d windows, which is the maximum "
+                L"— leaving the window where it is", name,
+                MAX_WINDOWS_PER_DESKTOP);
+        return;
+    }
+
     /* Remove from the old desktop (desktop_ensure may have re-sorted). */
     old_dt = desktop_by_id(old_id);
     if (old_dt) {
@@ -500,13 +514,11 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     /* Add to the target desktop. Note this bypasses the attach policy on
      * purpose: a window you deliberately threw at a desktop goes to the end,
      * where you'll find it, rather than displacing that desktop's master. */
-    Desktop *new_dt = &g.desktops[slot];
-    if (new_dt->count < MAX_WINDOWS_PER_DESKTOP) {
-        new_dt->windows[new_dt->count] = hwnd;
-        new_dt->focused = new_dt->count;
-        new_dt->count++;
-        new_dt->app_pending = false;   /* no longer empty — cancel auto-launch */
-    }
+    Desktop *new_dt = &g.desktops[slot];   /* capacity checked above */
+    new_dt->windows[new_dt->count] = hwnd;
+    new_dt->focused = new_dt->count;
+    new_dt->count++;
+    new_dt->app_pending = false;   /* no longer empty — cancel auto-launch */
 
     mw->desktop_id  = new_id;
     mw->has_applied = false;
@@ -648,9 +660,10 @@ HWND desktop_get_focused(void) {
  * not exist yet, so switching away and back before it appears must NOT spawn a
  * second copy. It is set here and cleared the instant a window lands on the
  * desktop (desktop_add_window), so closing the app and returning relaunches it.
- * It also holds the desktop open against desktop_gc for the same window —
- * without that the desktop would be destroyed the moment we switched away and
- * the app would arrive to find its home gone.
+ * It does NOT hold the desktop open against desktop_gc — see the note there.
+ * Leaving before the window appears is rare, and the window is managed onto
+ * whatever desktop is current when it arrives regardless, so waiting for it
+ * would strand an empty desktop permanently in exchange for nothing.
  *
  * Only the CURRENT desktop may auto-launch: window_manage assigns new windows
  * to the current desktop, so launching for a background one would misplace the
