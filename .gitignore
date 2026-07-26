@@ -1,0 +1,23 @@
+# Build objects
+*.o
+*.obj
+*.lto
+
+# Build output / release artifacts
+/mshell.exe
+/dist/
+
+# Vendored Lua build artifacts (source is tracked, objects are not)
+/vendor/lua/src/*.o
+/vendor/lua/src/lua
+/vendor/lua/src/luac
+/vendor/lua/src/liblua.a
+
+# Runtime logs
+mshell.log
+
+# Editor / OS cruft
+*~
+*.swp
+.DS_Store
+Thumbs.db
