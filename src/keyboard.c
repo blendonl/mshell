@@ -163,6 +163,8 @@ static const ActionNameEntry action_names[] = {
     {"move_to_monitor_prev", ACTION_MOVE_TO_MONITOR_PREV},
     {"close",            ACTION_CLOSE},
     {"kill",             ACTION_KILL},
+    {"minimize",         ACTION_MINIMIZE},
+    {"restore",          ACTION_RESTORE},
     {"toggle_float",     ACTION_TOGGLE_FLOAT},
     {"fullscreen",         ACTION_FULLSCREEN},
     {"fullscreen_content", ACTION_FULLSCREEN_CONTENT},
@@ -842,6 +844,42 @@ void execute_action(Action action, int arg, const wchar_t *command) {
 
     case ACTION_KILL:
         if (focus) window_kill(focus);
+        break;
+
+    case ACTION_MINIMIZE:
+        if (focus && dt->count > 0) {
+            ShowWindow(focus, SW_MINIMIZE);
+            /* dt->focused still names the window we just minimized. Hand the
+             * keyboard to the next sibling that is actually on screen —
+             * otherwise focus sits on something invisible and every
+             * directional keybind computes from the wrong place. */
+            for (int i = 1; i <= dt->count; i++) {
+                int  j = (fi + i) % dt->count;
+                HWND h = dt->windows[j];
+                if (h && IsWindow(h) && !IsIconic(h)) {
+                    dt->focused = j;
+                    window_focus(h);
+                    break;
+                }
+            }
+            tile_current();
+        }
+        break;
+
+    /* There is no taskbar under mshell, so a minimized window has nothing to
+     * click and this is the only way back. Takes the first one in the
+     * desktop's window order, so repeating it walks through them. */
+    case ACTION_RESTORE:
+        for (int i = 0; i < dt->count; i++) {
+            HWND h = dt->windows[i];
+            if (h && IsWindow(h) && IsIconic(h)) {
+                ShowWindow(h, SW_RESTORE);
+                dt->focused = i;
+                tile_current();
+                window_focus(h);
+                break;
+            }
+        }
         break;
 
     /* -- float --------------------------------------------------------- */

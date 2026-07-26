@@ -147,6 +147,8 @@ typedef enum {
     /* window lifetime */
     ACTION_CLOSE,
     ACTION_KILL,
+    ACTION_MINIMIZE,
+    ACTION_RESTORE,    /* un-minimize one — there is no taskbar to click */
 
     /* floating */
     ACTION_TOGGLE_FLOAT,
@@ -527,6 +529,8 @@ typedef struct {
     HWINEVENTHOOK win_event_hook;    /* EVENT_OBJECT_* (create/show/move/…)  */
     HWINEVENTHOOK foreground_hook;   /* EVENT_SYSTEM_FOREGROUND (separate id
                                       * range — see events_init())           */
+    HWINEVENTHOOK minimize_hook;     /* EVENT_SYSTEM_MINIMIZESTART/END — also
+                                      * in the system range, so also its own  */
 
     /* --- monitors (re-queried on display change) --- */
     Monitor  monitors[MAX_MONITORS];
