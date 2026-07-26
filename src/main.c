@@ -428,6 +428,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     log_err(L"=== mshell v%hs starting ===", MSHELL_VERSION);
 
+    /* --- single instance ---
+     * A second mshell installs a second WH_KEYBOARD_LL hook, a second set of
+     * WinEvent hooks, a second desktop backdrop and a second tiler, and the two
+     * then fight over the same windows — each undoing the other's placements.
+     * The most likely way to get there is double-clicking mshell.exe while it
+     * is already your shell, so the check deliberately covers --test as well:
+     * running a "test" instance alongside the real one is exactly the
+     * conflict, not an exception to it.
+     *
+     * Local\ rather than Global\ because the shell is per-session — a second
+     * user signed in at the same time runs their own mshell legitimately.
+     *
+     * The handle is intentionally not closed: it is released when the process
+     * exits, which is precisely the lifetime we want it to have. */
+    {
+        HANDLE once = CreateMutexW(NULL, TRUE, L"Local\\mshell_singleton");
+        if (!once || GetLastError() == ERROR_ALREADY_EXISTS) {
+            log_err(L"another mshell is already running in this session — "
+                    L"exiting. Two instances would fight over the keyboard hook "
+                    L"and the window layout.");
+            if (once) CloseHandle(once);
+            return 0;
+        }
+    }
+
     /* --- elevation ---
      * A normal double-click relaunches elevated for convenience, then exits.
      * But when we're the shell, exiting ENDS the session — so relaunch-and-exit
