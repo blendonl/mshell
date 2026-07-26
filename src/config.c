@@ -218,6 +218,42 @@ static void config_snapshot_free(ConfigSnapshot *s) {
  * UTF-8 clean (string literals reach our API as UTF-8, which lua_api converts
  * with CP_UTF8).
  * =========================================================================== */
+/* ===========================================================================
+ * Point package.path at the config's own folder.
+ *
+ * Lua's default search path covers directories relative to the EXECUTABLE and
+ * the current working directory — never %APPDATA%\mshell\. And a shell launched
+ * by Winlogon has a working directory of C:\Windows\system32, so `require` from
+ * init.lua resolved against a folder the user has never heard of and failed.
+ * Splitting a config across files is the obvious thing to reach for once it
+ * grows, so make it work: the config's folder goes to the FRONT of the path,
+ * ahead of the defaults.
+ * =========================================================================== */
+static bool config_dir_of(const wchar_t *path, wchar_t *out, size_t out_len);
+
+static void config_set_package_path(lua_State *L, const wchar_t *config_path) {
+    wchar_t dir[MAX_PATH];
+    if (!config_dir_of(config_path, dir, MAX_PATH)) return;
+
+    /* Wide -> UTF-8 for Lua. */
+    char u8[MAX_PATH * 3];
+    if (WideCharToMultiByte(CP_UTF8, 0, dir, -1, u8, (int)sizeof u8,
+                            NULL, NULL) <= 0)
+        return;
+
+    lua_getglobal(L, "package");
+    if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+
+    lua_getfield(L, -1, "path");
+    const char *existing = lua_tostring(L, -1);
+
+    lua_pushfstring(L, "%s\\?.lua;%s\\?\\init.lua;%s",
+                    u8, u8, existing ? existing : "");
+    lua_setfield(L, -3, "path");
+
+    lua_pop(L, 2);   /* old path string + package table */
+}
+
 static int load_config_bytes(lua_State *L, const wchar_t *wpath) {
     FILE *f = _wfopen(wpath, L"rb");
     if (!f) return LUA_ERRFILE;
@@ -259,6 +295,10 @@ bool config_load(const wchar_t *path) {
         return false;
     }
     luaL_openlibs(L);
+
+    /* Let init.lua require() modules kept beside it. Must come after
+     * luaL_openlibs, which is what creates the package table. */
+    config_set_package_path(L, (path && path[0]) ? path : L"config\\init.lua");
 
     /* The keyboard hook runs on its own thread and reads the keymaps; lock
      * while we tear them down and rebuild so a keystroke mid-reload can never

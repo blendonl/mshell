@@ -29,6 +29,10 @@ static bool is_elevated(void) {
 /* NB: there is deliberately no relaunch-as-administrator helper here any more.
  * mshell never elevates itself — see the elevation note in WinMain. */
 
+/* The machine's SPI_SETFOREGROUNDLOCKTIMEOUT before we zeroed it, so shutdown
+ * can put it back (see WinMain). */
+static UINT g_prev_fg_lock_timeout = 0;
+
 /* ---------------------------------------------------------------------------
  * Config file location
  *
@@ -517,6 +521,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * from our message thread with a plain SetForegroundWindow. That is what
      * lets it avoid AttachThreadInput, which otherwise leaves the held Win key
      * stuck "down" in the focused app after Win+h/l (the "Win acts held" bug). */
+    /* Remember what it was: this is a PERSISTED, system-wide user setting, and
+     * leaving it at zero after mshell exits means every application on the
+     * machine can steal the foreground at will, forever, with nothing to
+     * indicate why. Restored in the shutdown path below. */
+    if (!SystemParametersInfoW(SPI_GETFOREGROUNDLOCKTIMEOUT, 0,
+                               &g_prev_fg_lock_timeout, 0))
+        g_prev_fg_lock_timeout = 0;
+
     if (!SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
                                (PVOID)(UINT_PTR)0, SPIF_SENDCHANGE))
         log_w(L"SPI_SETFOREGROUNDLOCKTIMEOUT failed: %lu — window_focus() will "
@@ -644,6 +656,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     whichkey_shutdown();
     border_shutdown();
     background_shutdown();
+
+    /* Hand the foreground-lock timeout back. It is a persisted, system-wide
+     * setting; leaving it at zero would outlive mshell and let anything on the
+     * machine steal focus, with nothing left behind to explain why. */
+    SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
+                          (PVOID)(UINT_PTR)g_prev_fg_lock_timeout,
+                          SPIF_SENDCHANGE);
 
     /* destroy message window */
     if (g.message_window) {

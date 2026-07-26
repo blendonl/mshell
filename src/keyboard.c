@@ -299,6 +299,11 @@ static KeyBinding *keymap_find(KeyMap *map, DWORD mods, DWORD vk) {
  * =========================================================================== */
 static bool mod_lwin, mod_shift, mod_ctrl, mod_alt;
 
+/* Per-side state behind the three combined flags above. Held separately so
+ * that releasing one Shift while the other is still down doesn't report the
+ * modifier as released. */
+static bool mod_lshift, mod_rshift, mod_lctrl, mod_rctrl, mod_lalt, mod_ralt;
+
 /* Win-tap detection. Win is both a held modifier (Win+key chords, still live at
  * the root map) AND a leader: a *bare* tap — Win pressed and released with no
  * other key in between — enters the leader map (whichever submap the config
@@ -340,6 +345,8 @@ static void notify_submap(void) {
  * tracking. main.c calls this on WM_WTSSESSION_CHANGE. */
 void kb_reset_state(void) {
     mod_lwin = mod_shift = mod_ctrl = mod_alt = false;
+    mod_lshift = mod_rshift = mod_lctrl = mod_rctrl = false;
+    mod_lalt = mod_ralt = false;
     win_used = false;
     kb_lock();
     g.current_map = g.root_map;
@@ -498,15 +505,29 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
          * never opens the Start menu (that needs an OS-visible down + up with no
          * key between). */
         return CallNextHookEx(NULL, nCode, wParam, lParam);
-    case VK_LSHIFT: case VK_RSHIFT: case VK_SHIFT:
-        mod_shift = down;
-        return CallNextHookEx(NULL, nCode, wParam, lParam);  /* pass through */
-    case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
-        mod_ctrl = down;
-        return CallNextHookEx(NULL, nCode, wParam, lParam);
-    case VK_LMENU: case VK_RMENU: case VK_MENU:
-        mod_alt = down;
-        return CallNextHookEx(NULL, nCode, wParam, lParam);
+    /* Left and right are tracked separately and OR'd, so releasing one while
+     * the other is still held does not clear the modifier. A single flag made
+     * Shift+Shift+release read as "shift is up" while it was still down. */
+    case VK_LSHIFT:   mod_lshift = down; mod_shift = mod_lshift || mod_rshift;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_RSHIFT:   mod_rshift = down; mod_shift = mod_lshift || mod_rshift;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_SHIFT:    mod_shift = down;   /* synthetic/unsided */
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+    case VK_LCONTROL: mod_lctrl = down; mod_ctrl = mod_lctrl || mod_rctrl;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_RCONTROL: mod_rctrl = down; mod_ctrl = mod_lctrl || mod_rctrl;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_CONTROL:  mod_ctrl = down;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+    case VK_LMENU:    mod_lalt = down; mod_alt = mod_lalt || mod_ralt;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_RMENU:    mod_ralt = down; mod_alt = mod_lalt || mod_ralt;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
+    case VK_MENU:     mod_alt = down;
+                      return CallNextHookEx(NULL, nCode, wParam, lParam);
     }
 
     /* Only act on key-down for ordinary keys. */
