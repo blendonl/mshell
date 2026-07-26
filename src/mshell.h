@@ -553,6 +553,10 @@ typedef struct {
 
     /* --- run mode --- */
     bool     test_mode;       /* running alongside explorer, not as shell */
+    bool     elevated;        /* we hold an elevated token. The config is then
+                               * effectively administrator-level code, so
+                               * auto-reload (which would execute it silently on
+                               * any write) is disabled — see config_watch_sync */
 
     /* --- logging (DebugView + %TEMP%\mshell.log) --- */
     bool     verbose;

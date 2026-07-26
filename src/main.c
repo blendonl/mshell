@@ -26,14 +26,8 @@ static bool is_elevated(void) {
     return ok && elev.TokenIsElevated != 0;
 }
 
-/* ---------------------------------------------------------------------------
- * Relaunch self as administrator, then exit
- * --------------------------------------------------------------------------- */
-static void relaunch_elevated(void) {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(NULL, path, MAX_PATH);
-    ShellExecuteW(NULL, L"runas", path, NULL, NULL, SW_SHOW);
-}
+/* NB: there is deliberately no relaunch-as-administrator helper here any more.
+ * mshell never elevates itself — see the elevation note in WinMain. */
 
 /* ---------------------------------------------------------------------------
  * Config file location
@@ -454,24 +448,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     /* --- elevation ---
-     * A normal double-click relaunches elevated for convenience, then exits.
-     * But when we're the shell, exiting ENDS the session — so relaunch-and-exit
-     * at login would cause a logoff loop. In --shell (and --test) we therefore
-     * never relaunch: we run with whatever token we were given.
+     * mshell runs with whatever token it was given and NEVER elevates itself.
+     * It used to relaunch-as-admin on a plain double-click, which made elevated
+     * the normal way to run it; that is the wrong default, because an elevated
+     * mshell turns init.lua into elevated code.
      *
-     * To get admin rights as the shell, make the login token already elevated
-     * (disable UAC for the account, or launch mshell elevated). Without that,
-     * mshell still runs fine as the shell — it just can't move/resize windows
-     * owned by elevated processes (UIPI). */
-    if (!g.test_mode && !shell_mode && !is_elevated()) {
-        log_w(L"Not elevated — relaunching as administrator…");
-        relaunch_elevated();
-        return 0;
-    }
-    if (shell_mode && !is_elevated()) {
-        log_w(L"Shell mode at user level (UAC on) — elevated windows can't be "
-              L"managed. Disable UAC or launch elevated for full control.");
-    }
+     * The config lives in %APPDATA%\mshell\, which is writable by the
+     * unelevated user, and it is executed with the full Lua standard library
+     * (os.execute, io, package.loadlib). So when mshell is elevated, anything
+     * running as that user at medium integrity can write init.lua and get code
+     * execution at high integrity. Auto-reload made that automatic and silent —
+     * it fires about 250 ms after the file is written, with no user action at
+     * all — so config.c disables the watcher when we are elevated. Win+Shift+R
+     * still reloads, which keeps a deliberate keypress in the loop.
+     *
+     * The real fix is to stop needing elevation: the only thing it actually
+     * buys is a keyboard hook that keeps delivering while an elevated window
+     * has focus, plus UIPI-privileged SetWindowPos. Both belong in a small
+     * helper that has no config and no scripting. Until then this is
+     * mitigation, not a cure. */
+    g.elevated = is_elevated();   /* warned about below, once the config path
+                                   * is known and can be named */
+
+    if (!g.elevated && shell_mode)
+        log_w(L"Shell mode at user level (UAC on) — windows owned by elevated "
+              L"processes can't be managed (UIPI).");
 
     /* --- scheduling priority ---
      * A shell must keep answering its own keybinds even while a fullscreen game
@@ -538,6 +539,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* --- configuration (never fatal: falls back to a built-in keymap) --- */
     resolve_config_path(g.config_path, MAX_PATH);
     log_w(L"config: %ls", g.config_path);
+
+    /* Said out loud, and always — not under --verbose — because it changes what
+     * the config file IS. Running elevated makes init.lua administrator-level
+     * code living in a directory the unelevated user can write. */
+    if (g.elevated)
+        log_err(L"running ELEVATED: %ls executes with administrator rights — "
+                L"treat it as trusted code, and keep the folder it lives in from "
+                L"being writable by anything you don't trust. Auto-reload is "
+                L"disabled in this mode; reload with Win+Shift+R.",
+                g.config_path);
+
     config_init();
 
     /* --- the first desktop ---

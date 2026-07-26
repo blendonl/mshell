@@ -450,7 +450,14 @@ void config_watch_stop(void) {
  * instead of cycling the thread. */
 void config_watch_sync(void) {
     wchar_t dir[MAX_PATH];
-    bool want = g.auto_reload && g.message_window &&
+
+    /* Never watch while elevated. The config directory is writable by the
+     * unelevated user and the config is executed with the full Lua standard
+     * library, so auto-reload in an elevated mshell is a silent path from
+     * "anything running as this user can write a file" to "code runs with
+     * administrator rights", with no user action and a ~250 ms delay.
+     * Win+Shift+R still works, which keeps a deliberate keypress in the loop. */
+    bool want = g.auto_reload && g.message_window && !g.elevated &&
                 config_dir_of(g.config_path, dir, MAX_PATH);
 
     if (g_watch_thread) {
