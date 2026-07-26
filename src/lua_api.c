@@ -35,6 +35,10 @@ static wchar_t *u8_to_w_dup(const char *s) {
     return w;
 }
 
+/* Raises unless we are inside a config load — see its definition below. Every
+ * config-building entry point starts with it. */
+static void reject_at_runtime(lua_State *L, const char *fn);
+
 /* Push a wide string onto the Lua stack as UTF-8. */
 static void push_wstr(lua_State *L, const wchar_t *w) {
     if (!w || !w[0]) { lua_pushstring(L, ""); return; }
@@ -254,6 +258,7 @@ static DWORD parse_mods(lua_State *L, int idx) {
  *   arg    — optional int (switch_desktop) or string (command / submap name)
  * =========================================================================== */
 static int lua_mshell_bind(lua_State *L) {
+    reject_at_runtime(L, "bind");
     int nargs = lua_gettop(L);
 
     DWORD mods = parse_mods(L, 1);
@@ -261,6 +266,24 @@ static int lua_mshell_bind(lua_State *L) {
     const char *key_str = luaL_checkstring(L, 2);
     DWORD vk = key_name_to_vk(key_str);
     if (vk == 0) return luaL_error(L, "unknown key: %s", key_str);
+
+    /* A function instead of an action name: keep a reference to it and bind a
+     * call. The ref lives in the registry of the CURRENT lua_State, which is
+     * torn down wholesale on reload — so there is nothing to release by hand,
+     * and dispatch checks the config generation before ever using it. */
+    if (lua_isfunction(L, 3)) {
+        if (!g.root_map) return luaL_error(L, "root keymap not initialized");
+
+        bool terminal = true;
+        if (nargs >= 4 && lua_isboolean(L, 4)) terminal = (bool)lua_toboolean(L, 4);
+
+        lua_pushvalue(L, 3);
+        int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+        keymap_add_binding(g.root_map, mods, vk, ACTION_LUA_CALL, ref,
+                           NULL, NULL, NULL, terminal);
+        return 0;
+    }
 
     const char *action_str = luaL_checkstring(L, 3);
 
@@ -298,6 +321,7 @@ static int lua_mshell_bind(lua_State *L) {
  *                 sticky  = true   backward-compatible alias for persist = true
  * =========================================================================== */
 static int lua_mshell_submap(lua_State *L) {
+    reject_at_runtime(L, "submap");
     const char *name    = luaL_checkstring(L, 1);
     bool        persist = false;
     DWORD       exit_vk = 0;
@@ -370,7 +394,13 @@ static int lua_mshell_submap(lua_State *L) {
             return luaL_error(L, "submap '%s': unknown key '%s'", name,
                               key_str ? key_str : "?");
 
-        if (lua_isstring(L, -1)) {
+        if (lua_isfunction(L, -1)) {
+            /*  key = function() ... end  */
+            lua_pushvalue(L, -1);
+            int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+            keymap_add_binding(km, 0, vk, ACTION_LUA_CALL, ref,
+                               NULL, NULL, NULL, term);
+        } else if (lua_isstring(L, -1)) {
             /*  key = "action"  */
             add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
                                  false, 0, NULL, NULL, term);
@@ -397,7 +427,8 @@ static int lua_mshell_submap(lua_State *L) {
             lua_pop(L, pushed + 2);  /* payload parts + payload + action */
         } else {
             return luaL_error(L, "submap '%s': binding for '%s' must be an "
-                                 "action name or {action, payload}; got %s",
+                                 "action name, {action, payload}, or a "
+                                 "function; got %s",
                               name, key_str, luaL_typename(L, -1));
         }
 
@@ -416,6 +447,7 @@ static int lua_mshell_submap(lua_State *L) {
  * a persisting map is the usual choice so the leader stays until Escape.
  * =========================================================================== */
 static int lua_mshell_set_leader(lua_State *L) {
+    reject_at_runtime(L, "set_leader");
     const char *name = luaL_checkstring(L, 1);
     KeyMap *km = find_keymap(name);
     if (!km)
@@ -572,6 +604,7 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  * layout you changed at runtime, which goes back to what the rule says.
  * =========================================================================== */
 static int lua_mshell_desktop_rule(lua_State *L) {
+    reject_at_runtime(L, "desktop_rule");
     const char *pattern = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TTABLE);
 
@@ -776,6 +809,7 @@ static int lua_mshell_set_min_window_size(lua_State *L) {
  *            covering the display, with no ring painted over its edges.
  * =========================================================================== */
 static int lua_mshell_rule(lua_State *L) {
+    reject_at_runtime(L, "rule");
     luaL_checktype(L, 1, LUA_TTABLE);
     const char *action_str = luaL_checkstring(L, 2);
 
@@ -858,6 +892,7 @@ static int lua_mshell_rule(lua_State *L) {
  * resolved) and so does a .lnk shortcut.
  * =========================================================================== */
 static int lua_mshell_spawn(lua_State *L) {
+    reject_at_runtime(L, "spawn");
     const char *cmd  = luaL_checkstring(L, 1);
     const char *args = luaL_optstring(L, 2, NULL);
 
@@ -1049,6 +1084,56 @@ static int lua_mshell_set_whichkey(lua_State *L) {
         lua_pop(L, 1);
     }
     return 0;
+}
+
+/* ===========================================================================
+ * Call a config-supplied Lua function, by registry ref, on the main thread.
+ *
+ * Three things this has to get right:
+ *
+ *   - It must not unwind. These run from inside keybind dispatch and WinEvent
+ *     handling; a raw lua_error there would longjmp out through C frames that
+ *     own locks and suppression counters. lua_pcall keeps it contained and the
+ *     error becomes a log line, which is also what the user needs to see.
+ *   - It must not re-enter. A callback that switches desktops would fire the
+ *     desktop callback, and so on. The guard makes the inner call a no-op.
+ *   - It marks the window in which the config-building API is off limits:
+ *     rebuilding keymaps while the hook thread may be reading them is exactly
+ *     what config_load takes kb_lock for, and a callback holds no such lock.
+ * =========================================================================== */
+void lua_run_ref(int ref) {
+    if (!g.L || ref == LUA_NOREF || ref == LUA_REFNIL) return;
+
+    if (g.lua_running) {
+        log_err(L"config: a Lua callback tried to run while one was already "
+                L"running — ignored (it would re-enter the VM)");
+        return;
+    }
+
+    g.lua_running = true;
+
+    lua_rawgeti(g.L, LUA_REGISTRYINDEX, ref);
+    if (lua_isfunction(g.L, -1)) {
+        if (lua_pcall(g.L, 0, 0, 0) != LUA_OK) {
+            log_err(L"config: error in Lua binding: %hs",
+                    lua_tostring(g.L, -1) ? lua_tostring(g.L, -1) : "?");
+            lua_pop(g.L, 1);
+        }
+    } else {
+        lua_pop(g.L, 1);
+        log_err(L"config: Lua binding ref %d is not a function", ref);
+    }
+
+    g.lua_running = false;
+}
+
+/* The config-building calls are only meaningful while the config is loading.
+ * Called at the top of each of them; raises rather than corrupting live state
+ * if a callback tries to rebuild the configuration from underneath the hook. */
+static void reject_at_runtime(lua_State *L, const char *fn) {
+    if (g.lua_running)
+        luaL_error(L, "mshell.%s can only be called while the config is "
+                      "loading, not from a binding or callback", fn);
 }
 
 /* ===========================================================================

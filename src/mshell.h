@@ -183,6 +183,11 @@ typedef enum {
     /* spawn a program (command carried in KeyBinding.command) */
     ACTION_SPAWN,
 
+    /* call a Lua function from the config (registry ref carried in
+     * KeyBinding.arg — valid only for the lua_State that created it, which is
+     * why dispatch stamps the config generation alongside it) */
+    ACTION_LUA_CALL,
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -570,6 +575,17 @@ typedef struct {
     int       startup_count;
     lua_State *L;             /* live Lua VM (rebuilt on reload)      */
 
+    /* Bumped on every successful config load. A Lua registry ref belongs to the
+     * lua_State that created it, and a reload closes that state — so a
+     * keystroke queued before a reload must not call a ref through the new one.
+     * Actions carry the generation they were dispatched under. */
+    unsigned  config_gen;
+
+    /* True while a Lua callback is running on the main thread. Guards against
+     * re-entering Lua from inside itself, and marks the window in which the
+     * config-mutating API calls are not allowed. */
+    bool      lua_running;
+
     /* --- instance --- */
     HINSTANCE hinst;
 
@@ -808,6 +824,12 @@ void     config_watch_stop(void);
 void     config_on_file_changed(unsigned generation);
 
 void     lua_register_api(lua_State *L);
+
+/* Call a config-supplied Lua function by registry ref, on the main thread.
+ * Wrapped in lua_pcall and guarded against re-entry, so an error in the config
+ * is logged rather than unwound through a WinEvent callback. No-op if no VM is
+ * live. */
+void     lua_run_ref(int ref);
 
 /* ===========================================================================
  * Prototypes — util (inline helpers defined below)

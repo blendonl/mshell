@@ -345,7 +345,13 @@ bool config_load(const wchar_t *path) {
 
     /* Success: the new config is live (mshell.set_leader, if the config called
      * it, already pointed g.leader_map into the new keymaps). Free the old
-     * config and its Lua VM. */
+     * config and its Lua VM.
+     *
+     * The generation bump has to happen while the lock is still held and before
+     * the old VM is closed: any Lua binding queued under the old config is
+     * identified by its generation, and closing the state invalidates every
+     * registry ref that referred to it. */
+    g.config_gen++;
     config_snapshot_free(&snap);
     if (old_L) lua_close(old_L);
     kb_unlock();
