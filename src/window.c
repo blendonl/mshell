@@ -406,6 +406,44 @@ void window_restore_all_decorations(void) {
 }
 
 /* ===========================================================================
+ * Re-show every window mshell hid.
+ *
+ * Both virtual desktops (desktop.c) and monocle (tiling.c) are implemented by
+ * hiding windows, so at any moment most managed windows are invisible — every
+ * window on a desktop you are not looking at, plus every monocle window that
+ * is not the focused one.
+ *
+ * Nothing else ever brings those back. A hidden top-level window has no
+ * taskbar button and no Alt+Tab entry, so the instant mshell stops running it
+ * becomes unreachable: as the shell there is nothing left to reveal it, and in
+ * --test mode explorer comes back to a taskbar of buttons that do nothing.
+ * Quitting is a bound key, and a crash lands in the same place.
+ *
+ * Call this on the way out, BEFORE window_restore_all_decorations(), so the
+ * frames are handed back to windows the user can actually see.
+ * =========================================================================== */
+void window_restore_all_visibility(void) {
+    int shown = 0;
+
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+        if (!IsWindow(mw->hwnd) || IsWindowVisible(mw->hwnd)) continue;
+
+        /* SW_SHOWNA reveals without activating: we are tearing down and have no
+         * business deciding which window ends up focused.
+         *
+         * A window that was minimized when we hid it is shown minimized again
+         * rather than restored — that state is the USER's, not ours, and this
+         * function exists to undo mshell's hiding, not to override their
+         * choices on the way out. */
+        ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE : SW_SHOWNA);
+        shown++;
+    }
+
+    if (shown) log_err(L"shutdown: re-showed %d hidden window(s)", shown);
+}
+
+/* ===========================================================================
  * Manage a window — bring it under WM control
  * =========================================================================== */
 void window_manage(HWND hwnd) {
