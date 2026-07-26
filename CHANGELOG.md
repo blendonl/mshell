@@ -3,6 +3,69 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## 0.9.0 — 2026-07-26
+
+The config stops being a list of settings and becomes something you can program.
+Until now every function in the API was a setter: a config could describe the
+world but never ask about it and never react to it, and Lua sat idle between
+loads. Now a key can run a function, a function can ask what is going on, and
+mshell can call you back when something happens.
+
+**Upgrading from 0.8.0:** two breaking changes, both small.
+`mshell.set_gap(n)` is gone — use `mshell.set_gaps(n)`, which already did the
+same thing. And the shipped `config/init.lua` is now a ~130-line minimal
+default; the previous one is `config/init.full.lua`, installed alongside it. Your
+own `init.lua` is untouched, as always.
+
+### Added
+
+- **`mshell.spawn(cmd [, args])`** — programs can finally be given arguments.
+  Every launch went through `ShellExecuteW` with a NULL parameter string, which
+  is why the old default config had to start Discord and Valorant through
+  Start-menu `.lnk` files: a shortcut carries arguments a spawn could not. The
+  same `{command, arguments}` form works in a binding, in a submap, and in a
+  desktop rule's `app`.
+- **Lua functions as keybindings** — `mshell.bind({mod}, "x", function() … end)`,
+  and `h = function() … end` inside a submap.
+- **`mshell.on(event, fn)`** for `"window_open"`, `"window_close"`,
+  `"desktop_switch"` and `"focus"`. The handler gets a table describing what
+  happened.
+- **State queries**: `mshell.get_monitors()`, `get_desktops()`,
+  `get_current_desktop()`, `get_focused_window()`. Note that only the monitor
+  list is populated during the *first* config load — the config runs before the
+  first desktop exists. All of them are live on a reload and inside a handler.
+- `restore` joins `minimize` as a bindable action, and the default config binds
+  both — with no taskbar, `restore` is the only way back to a minimized window.
+
+### Changed
+
+- **BREAKING: `mshell.set_gap` removed.** It set both gaps to one value, which
+  is what `set_gaps(n)` does — its second argument defaults to the first.
+- **BREAKING: the default config is now minimal.** The old one was thoroughly
+  commented but hardcoded Alacritty, Firefox, Flow Launcher, Discord, Valorant,
+  Steam and Riot paths, so a new user's first boot produced a log full of launch
+  failures for software they did not have. The new default assumes nothing but
+  Windows and opens `cmd.exe`; one line at the top changes that. Everything else
+  moved to `config/init.full.lua`, which `install.bat` always installs beside it
+  and always refreshes.
+- The three launch sites (keybinding, startup, desktop auto-launch) share one
+  `spawn_command()`. They had three copies of the call and three different
+  failure messages, one of which was invisible without `--verbose`.
+- A malformed `{action, payload}` submap entry is now an error rather than being
+  skipped in silence, matching the key handling tightened in 0.8.0.
+
+### Notes on the Lua runtime
+
+Calling into Lua from a running window manager needs a few guarantees, all of
+which are in place: handlers run through `lua_pcall`, so a config error becomes a
+log line instead of a `longjmp` out through C frames that hold locks; a
+re-entrancy guard means an event raised from inside a handler is skipped rather
+than recursing; the config-*building* calls (`bind`, `submap`, `rule`, `spawn`,
+`on`, …) refuse to run from a handler, because rebuilding keymaps while the
+keyboard hook reads them is what a reload takes a lock for; and a Lua binding
+queued just before a reload is dropped rather than called, since its registry
+reference belongs to a `lua_State` the reload has closed.
+
 ## 0.8.0 — 2026-07-26
 
 The release that makes mshell safe to hand to somebody else. No new features to
