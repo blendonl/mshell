@@ -185,6 +185,46 @@ void monitors_update(void) {
             g.managed[i].monitor = g.primary_monitor;
 }
 
+/* ---------------------------------------------------------------------------
+ * Effective DPI of a monitor, or 96 when we can't tell.
+ *
+ * mshell is manifested per-monitor DPI aware (src/mshell.exe.manifest), so
+ * every coordinate the tiler sees is now a real physical pixel. That is what
+ * makes tiling correct on a scaled display — but it also means anything we draw
+ * at a fixed pixel size is no longer scaled for us, so the overlays have to do
+ * it themselves. This is where they get the factor.
+ *
+ * GetDpiForMonitor is resolved at RUNTIME rather than imported. shcore.dll
+ * exists from Windows 8.1, and a static import of a missing export stops the
+ * executable LOADING — which, for the program registered as the Windows shell,
+ * is a session that cannot start. Same reasoning as the manifest.
+ * --------------------------------------------------------------------------- */
+typedef HRESULT (WINAPI *GetDpiForMonitorFn)(HMONITOR, int, UINT *, UINT *);
+
+UINT monitor_dpi(int mon) {
+    static GetDpiForMonitorFn fn     = NULL;
+    static bool               probed = false;
+
+    if (!probed) {
+        probed = true;
+        HMODULE shcore = LoadLibraryW(L"shcore.dll");
+        if (shcore)
+            fn = (GetDpiForMonitorFn)(void *)
+                     GetProcAddress(shcore, "GetDpiForMonitor");
+        if (!fn)
+            log_w(L"GetDpiForMonitor unavailable — assuming 96 DPI everywhere");
+    }
+
+    if (!fn || mon < 0 || mon >= g.monitor_count || !g.monitors[mon].handle)
+        return 96;
+
+    UINT dpi_x = 96, dpi_y = 96;
+    if (FAILED(fn(g.monitors[mon].handle, 0 /* MDT_EFFECTIVE_DPI */,
+                  &dpi_x, &dpi_y)))
+        return 96;
+    return dpi_x ? dpi_x : 96;
+}
+
 /* Which monitor index a window currently sits on (nearest, so off-screen
  * windows still resolve). Falls back to the primary monitor. */
 int monitor_of_window(HWND hwnd) {
@@ -256,6 +296,18 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         update_work_area();
         desktop_monitors_changed();
         background_update();
+        tile_current();
+        return 0;
+
+    case WM_DPICHANGED:
+        /* A display's scale factor changed. Now that we are per-monitor DPI
+         * aware, Windows no longer silently rescales anything for us: the
+         * monitor rects we cached are stale in physical pixels, so re-read them
+         * and lay everything out again. The overlays pick the new DPI up on
+         * their next paint via monitor_dpi(). */
+        update_work_area();
+        background_update();
+        whichkey_hide();      /* its font was built for the old DPI */
         tile_current();
         return 0;
 

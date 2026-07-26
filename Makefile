@@ -4,9 +4,16 @@
 # Lua 5.4 source must be present in vendor/lua/ (or adjust LUA_DIR below).
 
 CC       = x86_64-w64-mingw32-gcc
+WINDRES  = x86_64-w64-mingw32-windres
 
 # --- Version (single source of truth; baked into the binary and the zip) ---
-VERSION  = 0.7.0
+VERSION  = 0.8.0
+
+# VERSIONINFO needs the parts as separate numbers, so split them out here
+# rather than making anyone maintain the version in two shapes.
+VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
+VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
+VER_PATCH := $(word 3,$(subst ., ,$(VERSION)))
 
 # --- Flags ---
 CFLAGS   = -O2 -s -flto -mwindows \
@@ -14,6 +21,14 @@ CFLAGS   = -O2 -s -flto -mwindows \
            -DMSHELL_VERSION='"$(VERSION)"' \
            -Wall -Wextra -Wno-unused-parameter \
            -Ivendor/lua/src
+
+# Only integers are passed to windres. It re-invokes a shell to run the
+# preprocessor, so a -D carrying a quoted string has its quotes stripped twice
+# and arrives as a bare token — mshell.rc builds the display string from these
+# three numbers itself instead.
+RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
+           -DVER_MINOR=$(VER_MINOR) \
+           -DVER_PATCH=$(VER_PATCH)
 # ole32 + uuid are for SHGetKnownFolderPath/FOLDERID_RoamingAppData (config
 # path resolution in main.c): CoTaskMemFree lives in ole32, the FOLDERID_* GUID
 # symbols in uuid.
@@ -77,6 +92,9 @@ LUA_SRCS  = $(LUA_DIR)/lapi.c       \
 ALL_SRCS = $(MSHELL_SRCS) $(LUA_SRCS)
 ALL_OBJS = $(ALL_SRCS:.c=.o)
 
+# Resources: the application manifest (DPI awareness) + VERSIONINFO.
+RES_OBJ  = $(SRC_DIR)/mshell.res.o
+
 TARGET   = mshell.exe
 
 # --- Release packaging ---
@@ -96,13 +114,19 @@ DIST_FILES = install.bat uninstall.bat \
 
 all: check-lua $(TARGET)
 
-$(TARGET): $(ALL_OBJS)
+$(TARGET): $(ALL_OBJS) $(RES_OBJ)
 	@echo "  LINK  $@"
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Resource script -> linkable object. Depends on the manifest too, so editing
+# the manifest alone still rebuilds.
+$(RES_OBJ): $(SRC_DIR)/mshell.rc $(SRC_DIR)/mshell.exe.manifest
+	@echo "  RC    $<"
+	$(WINDRES) $(RCFLAGS) -I$(SRC_DIR) -O coff -i $< -o $@
 
 $(LUA_DIR)/%.o: $(LUA_DIR)/%.c
 	@echo "  CC    $<"
@@ -137,7 +161,7 @@ dist: $(TARGET)
 	@echo "  ->    dist/$(DISTNAME).zip"
 
 clean:
-	rm -f $(TARGET) $(ALL_OBJS)
+	rm -f $(TARGET) $(ALL_OBJS) $(RES_OBJ)
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
 	# vendor/lua can't poison our cross-compile link step.
