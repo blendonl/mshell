@@ -328,6 +328,12 @@ typedef struct {
     RECT      fs_prev_rect;          /* pre-fullscreen rect of a FLOATING
                                       * window (a tiled one is re-tiled)     */
     bool      fs_has_prev;           /* fs_prev_rect is valid                */
+    bool      app_hidden;            /* the APP hid this window (minimise-to-
+                                      * tray), as opposed to mshell hiding it
+                                      * for a desktop switch or monocle. Such a
+                                      * window leaves the layout and must not be
+                                      * shown again until the app shows it —
+                                      * see the EVENT_OBJECT_HIDE handler.     */
     bool      made_topmost;          /* WE put it in the topmost band to keep
                                       * always-on-top windows off a fullscreen
                                       * one — so only WE take it back out. A
