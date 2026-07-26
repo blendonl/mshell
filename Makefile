@@ -109,7 +109,7 @@ DIST_FILES = install.bat uninstall.bat \
              harden.reg harden-undo.reg \
              debloat.reg debloat-undo.reg \
              services.reg services-undo.reg \
-             INSTALL.md README.md CHANGELOG.md LICENSE
+             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
 
 # --- Host-side tests ---
 # mshell itself cross-compiles to Windows and cannot run here, but the logic
