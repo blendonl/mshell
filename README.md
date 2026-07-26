@@ -63,6 +63,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   also match **what a window is** rather than what it's called: `dialog = true`
   catches every file picker, message box and permission prompt, whichever app
   raised it, so the default config floats them all in one line.
+- **Control it from a script**: `mshell.exe --msg "switch_desktop web"` runs any
+  action in the running shell, and `mshell.exe --query` prints its state as JSON
+  (desktops, monitors, focused window). The pipe is per-session and its DACL
+  admits only the owning user.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 

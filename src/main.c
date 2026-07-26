@@ -281,6 +281,15 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         whichkey_notify();
         return 0;
 
+    case WM_MSHELL_IPC:
+        /* An opaque IpcRequest* from the pipe thread, which is blocked waiting
+         * on it. ipc_handle_request runs the command AND signals completion —
+         * the request's layout is private to ipc.c, and more importantly the
+         * signal must happen on every path out, which is easier to guarantee in
+         * one place than at each caller. */
+        ipc_handle_request((void *)lp);
+        return 0;
+
     case WM_MSHELL_CONFIG_CHANGED:
         /* The config folder was written to and has gone quiet again (posted by
          * the watcher thread in config.c). wParam is its generation. */
@@ -400,6 +409,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     g.hinst   = hInstance;
     g.running = true;
+
+    /* --- --msg / --query ---
+     * Before ANYTHING else, including the single-instance mutex: this
+     * invocation is a client talking to the mshell that is already running, not
+     * a second shell trying to start. */
+    {
+        int code = 0;
+        if (ipc_client_try(&code)) return code;
+    }
 
     /* Init the keymap lock before ANY config load. The hook thread that shares
      * it is created later (kb_init), but config_init() runs first. */
@@ -600,6 +618,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             g.root_map ? g.root_map->count : -1, g.keymap_count,
             g.desktop_rule_count, g.startup_count, desktop_current()->name);
 
+    /* --- control channel (mshell.exe --msg / --query) --- */
+    ipc_start();
+
     /* --- WinEvent hooks --- */
     if (!events_init()) {
         log_w(L"FATAL: events_init failed");
@@ -643,6 +664,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* --- clean shutdown --- */
     log_w(L"Shutting down…");
 
+    ipc_stop();
     events_shutdown();
     kb_shutdown();
     config_shutdown();

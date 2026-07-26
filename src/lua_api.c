@@ -115,8 +115,10 @@ static wchar_t *desktop_arg_name(lua_State *L, const char *ctx, bool has_num,
     return out;
 }
 
-/* Enum → layout name; the exact spellings layout_from_name accepts. */
-static const char *layout_to_name(Layout l) {
+/* Enum → layout name; the exact spellings layout_from_name accepts.
+ * Non-static: ipc.c reports the same names, and two copies of this switch
+ * would drift the moment a layout is added. */
+const char *layout_to_name(Layout l) {
     switch (l) {
     case LAYOUT_TILING:   return "tiling";
     case LAYOUT_MONOCLE:  return "monocle";
