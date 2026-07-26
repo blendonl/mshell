@@ -3,6 +3,108 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## 0.8.0 — 2026-07-26
+
+The release that makes mshell safe to hand to somebody else. No new features to
+speak of — this is the bugs that made it unwise to install, the first tests the
+project has ever had, and DPI support, without which it simply does not work
+correctly on a modern laptop.
+
+**Upgrading from 0.7.0:** nothing in your `init.lua` has to change. Two
+behaviours differ and are deliberate: mshell no longer relaunches itself as
+administrator when you double-click it (it never elevates itself now), and if
+you *do* run it elevated, auto-reload is disabled — see "Elevation" below.
+`mshell.submap` is also stricter: a key it does not recognise is now an error
+instead of being skipped in silence, so a typo that used to cost you one binding
+now reports itself. If a submap key was quietly broken, this is where you find
+out.
+
+### Fixed
+
+- **Windows hidden by mshell are no longer stranded on exit.** Virtual desktops
+  and monocle are both implemented by hiding windows, and nothing ever brought
+  them back — quitting left every window on every other desktop invisible, with
+  no taskbar button and no Alt+Tab entry to reach it. Quit is a bound key, so
+  this was one keystroke away, and a crash did the same thing.
+- **A config reload could execute a freed keybinding.** The keyboard hook posted
+  the matched `KeyBinding *` to the main thread, and a reload frees every
+  binding — so `Win+Shift+R` followed by any other bound key before the queue
+  drained dereferenced freed memory. Key autorepeat alone got you there. Actions
+  are now copied by value into a ring buffer.
+- **Minimise-to-tray works.** Closing Discord, Slack, Telegram or Steam to the
+  tray put the window straight back on screen: the tiler kept it in the layout
+  and force-showed it. mshell now tells its own hiding apart from the app's and
+  leaves app-hidden windows alone until the app shows them again.
+- **Minimized windows release their tile.** Minimizing left an empty cell in the
+  layout, and with no taskbar there was no way to get the window back. The
+  layout now reflows, and there are `minimize` and `restore` actions.
+- **A second instance refuses to start.** The README claimed a single global
+  instance; nothing enforced it, so double-clicking `mshell.exe` while it was
+  already your shell gave you two keyboard hooks and two tilers fighting over
+  the same windows.
+- **Moving a window to a full desktop no longer strands it.** The capacity check
+  happened after the window had been unlinked and hidden, leaving it owned by a
+  desktop whose list did not contain it.
+- **The foreground-lock timeout is restored on exit.** mshell zeroes a
+  persisted, system-wide setting and never put it back, so uninstalling left
+  every application on the machine able to steal focus.
+- **`require` works from `init.lua`.** Lua searches only executable-relative
+  directories and the working directory, and a Winlogon-launched shell has a
+  working directory of `C:\Windows\system32`, so a module beside your config
+  could never be found. The config folder is now on `package.path`.
+- Left and right modifiers are tracked separately: releasing one Shift while
+  holding the other no longer clears the modifier.
+- `mshell.submap` no longer calls `lua_tostring` on a table key mid-iteration,
+  which is undefined behaviour and reachable with a numeric key.
+
+### Added
+
+- **DPI awareness**, via an application manifest. Without it mshell ran
+  DPI-unaware and Windows virtualised its coordinates, so on any scaled display
+  every rect the tiler computed was wrong by the scale factor, and on a
+  mixed-DPI multi-monitor setup the secondary display was simply incorrect. The
+  which-key panel scales its font and metrics per monitor.
+  Declared in the manifest rather than by calling `SetProcessDpiAwarenessContext`
+  on purpose: that API needs Win10 1703, and importing it would stop the
+  executable *loading* on older Windows — which, for the program registered as
+  your shell, is a session that cannot start.
+- **Version metadata.** The binary carries a name, description and version
+  instead of showing a blank publisher everywhere.
+- **`minimize` and `restore` actions.**
+- **A test suite** — `make test`. The logic with no Windows in it (rule pattern
+  matching, the tiling split arithmetic) is built with the host compiler and run
+  directly, so it needs no emulator and no Windows machine. `MANUAL-TESTS.md`
+  covers the rest, including a regression check for each fix above.
+
+### Changed
+
+- **mshell never elevates itself.** It used to relaunch as administrator on a
+  plain double-click, which made elevated the ordinary way to run it. It is
+  manifested `asInvoker` and runs with whatever token it was given.
+- **Auto-reload is disabled when running elevated.** An elevated mshell executes
+  `init.lua` — a Lua script with the full standard library — from
+  `%APPDATA%\mshell\`, which the unelevated user can write. With auto-reload on,
+  anything running as that user could write the file and get administrator-level
+  code execution about 250 ms later with no user action at all. `Win+Shift+R`
+  still reloads, keeping a deliberate keypress in the loop. This is a
+  mitigation; the fix is to stop needing elevation, which a later release does
+  by moving the privileged work into a small helper with no config and no
+  scripting. See INSTALL.md.
+- `mshell.submap` errors on an unknown or non-string key instead of skipping it.
+
+### Performance
+
+- **Far fewer WinEvents.** The object hook covered a range that silently
+  included `REORDER`, `OBJECT_FOCUS`, four `SELECTION` events and `STATECHANGE`
+  for every process on the system — events nothing handled, but which fire on
+  every control focus and text selection everywhere, each costing a
+  cross-process marshal onto the thread that also runs your keybinds.
+- **Window rules are resolved once, not three times.** Each lookup opens the
+  owning process and queries its image path, on the path that runs for every
+  window that appears anywhere — every menu, tooltip and dropdown.
+- The cloaked-window check (an RPC to dwm.exe) moved below the local checks that
+  reject most windows for free.
+
 ## 0.7.0 — 2026-07-25
 
 Desktops stop being a set you configure and become names you use: switch to one
