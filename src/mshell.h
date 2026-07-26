@@ -89,6 +89,7 @@
 #define MAX_RULES                 128
 #define MAX_DESKTOP_RULES         64
 #define MAX_STARTUP_COMMANDS      32
+#define SPAWN_ARGS_MAX            512   /* command-line arguments for a spawn */
 #define MAX_MANAGED_WINDOWS       512
 #define MAX_MONITORS              8
 #define DESKTOP_NAME_MAX          64    /* incl. NUL; a desktop is never unnamed */
@@ -278,6 +279,7 @@ typedef struct {
     int      arg;         /* desktop index, submap index, …                  */
     KeyMap  *submap;      /* target submap for ACTION_ENTER_SUBMAP           */
     wchar_t *command;     /* program to launch for ACTION_SPAWN (owned)      */
+    wchar_t *args;        /* its command-line arguments, or NULL (owned)     */
     bool     terminal;    /* return to root map after this action fires      */
 } KeyBinding;
 
@@ -376,6 +378,7 @@ typedef struct {
     bool    float_all;      /* windows opened here start floating         */
     int     monitor;        /* pinned display, or -1 for "wherever it opens" */
     wchar_t app[MAX_PATH];  /* auto-launch while empty; "" = none         */
+    wchar_t app_args[SPAWN_ARGS_MAX];  /* its arguments; "" = none        */
 
     bool   app_pending;     /* an `app` auto-launch is in flight          */
 } Desktop;
@@ -398,6 +401,7 @@ typedef struct {
     wchar_t name_match[DESKTOP_NAME_MAX];   /* "" matches every desktop      */
 
     wchar_t app[MAX_PATH];                  /* "" = don't touch the app      */
+    wchar_t app_args[SPAWN_ARGS_MAX];       /* arguments for it; "" = none   */
 
     bool    set_float;    bool   float_all;
     bool    set_layout;   Layout layout;
@@ -405,6 +409,19 @@ typedef struct {
     bool    set_nmaster;  int    n_master;
     bool    set_monitor;  int    monitor;
 } DesktopRule;
+
+/* ---------------------------------------------------------------------------
+ * StartupCommand — one mshell.spawn() from the config, run once at startup.
+ *
+ * The arguments are a separate string rather than part of the command because
+ * that is how ShellExecuteW takes them, and splitting a single string back
+ * apart is ambiguous the moment a path contains a space — which on Windows is
+ * most of them.
+ * --------------------------------------------------------------------------- */
+typedef struct {
+    wchar_t *cmd;    /* owned */
+    wchar_t *args;   /* owned; NULL when none were given */
+} StartupCommand;
 
 /* ---------------------------------------------------------------------------
  * Monitor — one physical display
@@ -549,7 +566,7 @@ typedef struct {
     /* --- config --- */
     wchar_t   config_path[MAX_PATH];
     bool      auto_reload;    /* reload when the config file is saved         */
-    wchar_t  *startup_commands[MAX_STARTUP_COMMANDS];
+    StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
     int       startup_count;
     lua_State *L;             /* live Lua VM (rebuilt on reload)      */
 
@@ -614,7 +631,17 @@ const char *vk_to_key_name(DWORD vk);       /* reverse of key_name_to_vk (or NUL
 DWORD    mod_name_to_flag(const char *name);
 Action   action_name_to_enum(const char *name);
 const char *action_enum_to_name(Action action); /* reverse lookup (or NULL)        */
-void     execute_action(Action action, int arg, const wchar_t *command);
+void     execute_action(Action action, int arg, const wchar_t *command,
+                        const wchar_t *args);
+
+/* Launch `cmd` with `args` (either may be NULL/empty). ShellExecuteW, so PATH
+ * is resolved and .lnk shortcuts work — which is why arguments have to be a
+ * separate string rather than baked into the command. `ctx` names the caller
+ * ("startup", "keybind", a desktop name) in the failure message, because a
+ * program that silently never appears is indistinguishable from mshell
+ * ignoring the request. Returns false and logs when the launch fails. */
+bool     spawn_command(const wchar_t *cmd, const wchar_t *args,
+                       const wchar_t *ctx);
 
 /* Copy out the action a WM_MSHELL_ACTION message refers to (its lParam is the
  * sequence number). The hook records actions BY VALUE rather than posting the
@@ -622,11 +649,13 @@ void     execute_action(Action action, int arg, const wchar_t *command);
  * keystroke may still be sitting in the queue behind it. False if the ring
  * lapped before the main thread drained it. */
 bool     kb_take_pending(unsigned seq, Action *action, int *arg,
-                         wchar_t *cmd, size_t cmd_cap);
+                         wchar_t *cmd, size_t cmd_cap,
+                         wchar_t *args, size_t args_cap);
 KeyMap  *keymap_new(const wchar_t *name, bool persist);
 void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                             Action action, int arg, KeyMap *submap,
-                            const wchar_t *command, bool terminal);
+                            const wchar_t *command, const wchar_t *args,
+                            bool terminal);
 
 /* ===========================================================================
  * Prototypes — window.c

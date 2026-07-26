@@ -240,7 +240,8 @@ KeyMap *keymap_new(const wchar_t *name, bool persist) {
 
 void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                         Action action, int arg, KeyMap *submap,
-                        const wchar_t *command, bool terminal) {
+                        const wchar_t *command, const wchar_t *args,
+                        bool terminal) {
     if (!map) return;
 
     /* grow the array if it's full */
@@ -274,6 +275,7 @@ void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
     kb->arg       = arg;
     kb->submap    = submap;
     kb->command   = command ? _wcsdup(command) : NULL;
+    kb->args      = (args && args[0]) ? _wcsdup(args) : NULL;
     kb->terminal  = terminal;
 }
 
@@ -382,7 +384,19 @@ typedef struct {
     Action   action;
     int      arg;
     wchar_t  command[MAX_PATH];
+    wchar_t  args[SPAWN_ARGS_MAX];
 } PendingAction;
+
+/* Bounded copy that does not zero-pad the destination (unlike wcsncpy). Used
+ * inside the hook, so it stays cheap: it writes exactly what is there. */
+static void pend_copy(wchar_t *dst, size_t cap, const wchar_t *src) {
+    if (!cap) return;
+    if (!src) { dst[0] = L'\0'; return; }
+    size_t n = wcslen(src);
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n * sizeof(wchar_t));
+    dst[n] = L'\0';
+}
 
 static PendingAction s_pending[KB_PENDING_N];
 static unsigned      s_pend_seq = 1;   /* seq 0 is reserved for "empty slot" */
@@ -396,14 +410,8 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
 
     p->action = b->action;
     p->arg    = b->arg;
-    if (b->command) {
-        size_t n = wcslen(b->command);
-        if (n > MAX_PATH - 1) n = MAX_PATH - 1;
-        memcpy(p->command, b->command, n * sizeof(wchar_t));
-        p->command[n] = L'\0';
-    } else {
-        p->command[0] = L'\0';
-    }
+    pend_copy(p->command, MAX_PATH,        b->command);
+    pend_copy(p->args,    SPAWN_ARGS_MAX,  b->args);
     p->seq = seq;   /* last: the slot is only valid once fully written */
 
     /* wParam still carries the triggering key (low word) + modifiers (high
@@ -418,7 +426,8 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
  * lapped before we got here, which is the only way to lose a keystroke and is
  * worth saying out loud. */
 bool kb_take_pending(unsigned seq, Action *action, int *arg,
-                     wchar_t *cmd, size_t cmd_cap) {
+                     wchar_t *cmd, size_t cmd_cap,
+                     wchar_t *args, size_t args_cap) {
     bool ok = false;
 
     kb_lock();
@@ -426,12 +435,8 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
     if (p->seq == seq) {
         *action = p->action;
         *arg    = p->arg;
-        if (cmd && cmd_cap) {
-            size_t n = wcslen(p->command);
-            if (n >= cmd_cap) n = cmd_cap - 1;
-            memcpy(cmd, p->command, n * sizeof(wchar_t));
-            cmd[n] = L'\0';
-        }
+        pend_copy(cmd,  cmd_cap,  p->command);
+        pend_copy(args, args_cap, p->args);
         ok = true;
     }
     kb_unlock();
@@ -760,7 +765,41 @@ static void adjust_cfact(HWND focus, float delta) {
 /* ===========================================================================
  * Action dispatch
  * =========================================================================== */
-void execute_action(Action action, int arg, const wchar_t *command) {
+/* ===========================================================================
+ * The one place mshell launches a program.
+ *
+ * ShellExecuteW rather than CreateProcessW on purpose: it resolves PATH (so a
+ * bare "firefox.exe" works) and it can start a .lnk shortcut, which several
+ * apps require because their real binary sits in a versioned folder and moves
+ * between updates. Arguments must therefore be a separate string — that is the
+ * shape of the API — which is exactly why they could not be expressed before.
+ * =========================================================================== */
+bool spawn_command(const wchar_t *cmd, const wchar_t *args, const wchar_t *ctx) {
+    if (!cmd || !cmd[0]) {
+        log_err(L"%ls: nothing to launch (empty command)", ctx ? ctx : L"spawn");
+        return false;
+    }
+
+    const wchar_t *params = (args && args[0]) ? args : NULL;
+
+    INT_PTR code = (INT_PTR)ShellExecuteW(NULL, L"open", cmd, params,
+                                          NULL, SW_SHOWNORMAL);
+    if (code <= 32) {   /* the documented failure range */
+        log_err(L"%ls: FAILED to launch '%ls'%ls%ls (code %lld) — not on PATH "
+                L"or not installed? Try a full path.",
+                ctx ? ctx : L"spawn", cmd,
+                params ? L" " : L"", params ? params : L"",
+                (long long)code);
+        return false;
+    }
+
+    log_w(L"%ls: launched '%ls'%ls%ls", ctx ? ctx : L"spawn", cmd,
+          params ? L" " : L"", params ? params : L"");
+    return true;
+}
+
+void execute_action(Action action, int arg, const wchar_t *command,
+                    const wchar_t *args) {
     Desktop *dt  = desktop_current();
     HWND     focus = desktop_get_focused();
     int      fi   = dt->focused;   /* focused index in desktop array */
@@ -773,16 +812,9 @@ void execute_action(Action action, int arg, const wchar_t *command) {
     /* -- spawn a program ----------------------------------------------- */
     case ACTION_SPAWN:
         if (command && command[0]) {
-            /* Launch detached; the WM's WinEvent hook will pick up and tile
-             * the new window when it appears. ShellExecute resolves PATH and
-             * lets you spawn by bare name ("alacritty.exe", "wt.exe"). */
-            HINSTANCE r = ShellExecuteW(NULL, L"open", command,
-                                        NULL, NULL, SW_SHOWNORMAL);
-            INT_PTR code = (INT_PTR)r;
-            log_w(L"spawn '%ls' -> %lld", command, (long long)code);
-            if (code <= 32)
-                log_w(L"  SPAWN FAILED (code %lld) — not on PATH / not installed?",
-                      (long long)code);
+            /* Launch detached; the WinEvent hook picks the new window up and
+             * tiles it when it appears. */
+            spawn_command(command, args, L"keybind");
         } else {
             log_w(L"spawn: no command set on binding");
         }

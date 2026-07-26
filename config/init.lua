@@ -100,15 +100,22 @@ local function first_existing(...)
 end
 
 -- Discord. Its Squirrel installer puts the real binary in a versioned
--- app-<version>\ folder and the top-level Update.exe only starts it when passed
--- `--processStart Discord.exe` — arguments spawn and a desktop rule's `app`
--- can't supply
--- (both go through ShellExecute with no parameters). The Start-menu shortcut
--- carries those arguments itself, so point at the .lnk. Per-user install comes
--- first; the machine-wide folder is the fallback.
-local discord = first_existing(
-    envpath("APPDATA",      [[\Microsoft\Windows\Start Menu\Programs\Discord Inc\Discord.lnk]]),
-    envpath("ProgramData",  [[\Microsoft\Windows\Start Menu\Programs\Discord Inc\Discord.lnk]]))
+-- app-<version>\ folder, and the top-level Update.exe only starts it when
+-- passed `--processStart Discord.exe`. Now that spawn and a desktop rule's
+-- `app` both take arguments, point at Update.exe and pass them — which also
+-- survives updates, since Update.exe picks the current app- folder itself.
+--
+-- The Start-menu .lnk still works and is the fallback: before arguments
+-- existed it was the only option, because a shortcut carries its own.
+local discord_update = envpath("LOCALAPPDATA", [[\Discord\Update.exe]])
+local discord, discord_args
+if discord_update and first_existing(discord_update) then
+    discord, discord_args = discord_update, "--processStart Discord.exe"
+else
+    discord = first_existing(
+        envpath("APPDATA",      [[\Microsoft\Windows\Start Menu\Programs\Discord Inc\Discord.lnk]]),
+        envpath("ProgramData",  [[\Microsoft\Windows\Start Menu\Programs\Discord Inc\Discord.lnk]]))
+end
 
 -- Valorant, for the same reason: it can't be launched as a bare exe (Vanguard +
 -- Riot Client), and the game binary moves between patches, so use the shortcut
@@ -233,7 +240,12 @@ local desktops = {
     -- whenever you close the last one and come back, which the spawn can't do.
     { name = "term",  key = "t" },                                  -- leader g t
     { name = "web",   key = "b", rule = { app = "firefox.exe"  } }, -- leader g b
-    { name = "chat",  key = "d", rule = { app = discord,
+    -- `app` takes a bare command, or {command, arguments} when the program
+    -- needs them — Discord's launcher does. Written as a table only when there
+    -- are arguments to pass, so both shapes are visible in one file.
+    { name = "chat",  key = "d", rule = { app = discord_args
+                                                and { discord, discord_args }
+                                                or  discord,
                                           layout = "monocle"   } }, -- leader g d
     -- The game desktop floats: Valorant is borderless-fullscreen and has no
     -- business in a tiling grid, and anything else you open here (a launcher, a
@@ -374,10 +386,16 @@ mshell.submap("desktop", {
 -- Built as a table so the Flow Launcher key can be left out entirely when Flow
 -- isn't locatable: {"spawn", nil} would fail the config load ("spawn requires a
 -- command string") and take every other binding down with it.
+-- A spawn payload is either a bare command or {command, arguments}:
+--     Return = {"spawn", "alacritty.exe"}
+--     t      = {"spawn", {"wt.exe", "-p Ubuntu"}}
+-- Arguments are a separate string because that is how Windows takes them;
+-- packing them into the command would be ambiguous for any path with a space.
 local launch_keys = {
     Return = {"spawn", "alacritty.exe"},
     b      = {"spawn", "firefox.exe"},
     e      = {"spawn", "explorer.exe"},   -- file manager on demand
+    t      = {"spawn", {"wt.exe", "-p Ubuntu"}},
 }
 if flow then
     launch_keys.a = {"spawn", flow}       -- Flow Launcher (pops its search box)

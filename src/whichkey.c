@@ -91,7 +91,12 @@ static void wk_label(const KeyBinding *b, wchar_t *out, int cap) {
     if (b->action == ACTION_ENTER_SUBMAP && b->submap && b->submap->name) {
         _snwprintf(out, cap, L"+%ls", b->submap->name);
     } else if (b->action == ACTION_SPAWN && b->command) {
-        _snwprintf(out, cap, L"%ls", b->command);
+        /* Show the arguments too — "wt.exe" and "wt.exe -p Ubuntu" on adjacent
+         * keys are otherwise indistinguishable in the hint. */
+        if (b->args && b->args[0])
+            _snwprintf(out, cap, L"%ls %ls", b->command, b->args);
+        else
+            _snwprintf(out, cap, L"%ls", b->command);
     } else if ((b->action == ACTION_SWITCH_DESKTOP ||
                 b->action == ACTION_MOVE_TO_DESKTOP) && b->command) {
         /* "web" reads better than "switch_desktop" in a map that is nothing but

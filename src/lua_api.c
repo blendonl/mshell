@@ -107,10 +107,12 @@ static bool layout_from_name(const char *s, Layout *out) {
  * =========================================================================== */
 static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
                                  const char *action_str, bool has_num, int num_arg,
-                                 const char *str_arg, bool default_terminal) {
+                                 const char *str_arg, const char *args_str,
+                                 bool default_terminal) {
     int      arg      = 0;
     KeyMap  *submap   = NULL;
     wchar_t *command  = NULL;
+    wchar_t *cmd_args = NULL;
     bool     terminal = default_terminal;
     Action   action;
 
@@ -127,7 +129,11 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
         action = ACTION_SPAWN;
         if (!str_arg) luaL_error(L, "spawn requires a command string");
         command = u8_to_w_dup(str_arg);
+        if (args_str && args_str[0]) cmd_args = u8_to_w_dup(args_str);
     } else {
+        if (args_str)
+            luaL_error(L, "%s takes no arguments string — only spawn does",
+                       action_str);
         action = action_name_to_enum(action_str);
         if (action == ACTION_NONE) luaL_error(L, "unknown action: %s", action_str);
 
@@ -143,8 +149,46 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
         }
     }
 
-    keymap_add_binding(map, mods, vk, action, arg, submap, command, terminal);
-    free(command);   /* keymap_add_binding takes its own copy */
+    keymap_add_binding(map, mods, vk, action, arg, submap, command, cmd_args,
+                       terminal);
+    free(command);    /* keymap_add_binding takes its own copies */
+    free(cmd_args);
+}
+
+/* ===========================================================================
+ * A binding's payload: either a plain string, or {command, arguments}.
+ *
+ * Arguments have to be a separate string because ShellExecuteW takes them
+ * separately, and splitting one string back apart is ambiguous as soon as a
+ * path contains a space — which on Windows is most of them. Reading the pair
+ * off the stack is factored out here so mshell.bind and mshell.submap accept
+ * exactly the same shapes.
+ *
+ * Returns how many values it pushed. *str and *args point into those, so the
+ * caller must lua_pop() that many only after it is finished with them.
+ * =========================================================================== */
+static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
+                        const char **str, const char **args) {
+    *has_num = false; *num_arg = 0; *str = NULL; *args = NULL;
+
+    if (lua_isnumber(L, idx)) {
+        *has_num = true;
+        *num_arg = (int)lua_tointeger(L, idx);
+        return 0;
+    }
+    if (lua_isstring(L, idx)) {
+        *str = lua_tostring(L, idx);
+        return 0;
+    }
+    if (lua_istable(L, idx)) {
+        int t = lua_absindex(L, idx);   /* idx may be relative; pushing shifts it */
+        lua_rawgeti(L, t, 1);
+        lua_rawgeti(L, t, 2);
+        *str  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
+        *args = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+        return 2;
+    }
+    return 0;
 }
 
 /* Parse a {"LWin", "Shift"} style modifier table at `idx` into a flag mask. */
@@ -178,10 +222,13 @@ static int lua_mshell_bind(lua_State *L) {
 
     const char *action_str = luaL_checkstring(L, 3);
 
-    bool        has_num = (nargs >= 4 && lua_isnumber(L, 4));
-    int         num_arg = has_num ? (int)lua_tointeger(L, 4) : 0;
-    const char *str_arg = (!has_num && nargs >= 4 && lua_isstring(L, 4))
-                            ? lua_tostring(L, 4) : NULL;
+    /* Payload: a number, a string, or {command, arguments} for spawn. */
+    bool        has_num = false;
+    int         num_arg = 0;
+    const char *str_arg = NULL, *args_str = NULL;
+    int         pushed  = 0;
+    if (nargs >= 4)
+        pushed = read_payload(L, 4, &has_num, &num_arg, &str_arg, &args_str);
 
     bool terminal = true;   /* most actions return to root after firing */
     if (nargs >= 5 && lua_isboolean(L, 5)) terminal = (bool)lua_toboolean(L, 5);
@@ -189,7 +236,8 @@ static int lua_mshell_bind(lua_State *L) {
     if (!g.root_map) return luaL_error(L, "root keymap not initialized");
 
     add_resolved_binding(L, g.root_map, mods, vk, action_str,
-                         has_num, num_arg, str_arg, terminal);
+                         has_num, num_arg, str_arg, args_str, terminal);
+    lua_pop(L, pushed);
     return 0;
 }
 
@@ -281,20 +329,34 @@ static int lua_mshell_submap(lua_State *L) {
                               key_str ? key_str : "?");
 
         if (lua_isstring(L, -1)) {
+            /*  key = "action"  */
             add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
-                                 false, 0, NULL, term);
+                                 false, 0, NULL, NULL, term);
         } else if (lua_istable(L, -1)) {
-            lua_rawgeti(L, -1, 1);   /* action string */
-            const char *action_str = lua_tostring(L, -1);
-            lua_rawgeti(L, -2, 2);   /* payload (number or string) */
-            bool        has_num = lua_isnumber(L, -1);
-            int         num_arg = has_num ? (int)lua_tointeger(L, -1) : 0;
-            const char *str_arg = (!has_num && lua_isstring(L, -1))
-                                    ? lua_tostring(L, -1) : NULL;
-            if (action_str)
-                add_resolved_binding(L, km, 0, vk, action_str,
-                                     has_num, num_arg, str_arg, term);
-            lua_pop(L, 2);           /* payload + action string */
+            /*  key = {"action", payload}  — payload may itself be
+             *  {command, arguments} for spawn. */
+            int  t = lua_absindex(L, -1);
+            lua_rawgeti(L, t, 1);
+            const char *action_str = lua_isstring(L, -1) ? lua_tostring(L, -1)
+                                                         : NULL;
+            if (!action_str)
+                return luaL_error(L, "submap '%s': binding for '%s' must start "
+                                     "with an action name", name, key_str);
+
+            lua_rawgeti(L, t, 2);
+            bool        has_num; int num_arg;
+            const char *str_arg, *args_str;
+            int pushed = read_payload(L, -1, &has_num, &num_arg,
+                                      &str_arg, &args_str);
+
+            add_resolved_binding(L, km, 0, vk, action_str,
+                                 has_num, num_arg, str_arg, args_str, term);
+
+            lua_pop(L, pushed + 2);  /* payload parts + payload + action */
+        } else {
+            return luaL_error(L, "submap '%s': binding for '%s' must be an "
+                                 "action name or {action, payload}; got %s",
+                              name, key_str, luaL_typename(L, -1));
         }
 
         lua_pop(L, 1);  /* pop value, keep key for lua_next */
@@ -482,8 +544,20 @@ static int lua_mshell_desktop_rule(lua_State *L) {
         return luaL_error(L, "desktop_rule: the pattern is empty — use \"*\" to "
                              "match every desktop");
 
+    /* app = "firefox.exe"          — launch it with no arguments
+     * app = {"wt.exe", "-p Ubuntu"} — launch it with arguments */
     lua_getfield(L, 2, "app");
-    if (lua_isstring(L, -1)) u8_to_w(lua_tostring(L, -1), r->app, MAX_PATH);
+    if (lua_isstring(L, -1)) {
+        u8_to_w(lua_tostring(L, -1), r->app, MAX_PATH);
+    } else if (lua_istable(L, -1)) {
+        int t = lua_absindex(L, -1);
+        lua_rawgeti(L, t, 1);
+        if (lua_isstring(L, -1)) u8_to_w(lua_tostring(L, -1), r->app, MAX_PATH);
+        lua_rawgeti(L, t, 2);
+        if (lua_isstring(L, -1))
+            u8_to_w(lua_tostring(L, -1), r->app_args, SPAWN_ARGS_MAX);
+        lua_pop(L, 2);
+    }
     lua_pop(L, 1);
 
     lua_getfield(L, 2, "float");
@@ -731,20 +805,37 @@ static int lua_mshell_rule(lua_State *L) {
 }
 
 /* ===========================================================================
- * mshell.spawn(command)
- *   command is executed at startup
+ * mshell.spawn(command [, arguments]) — run this at startup.
+ *
+ *   mshell.spawn("alacritty.exe")
+ *   mshell.spawn("wt.exe", "-p Ubuntu")
+ *
+ * Arguments are a separate string, not part of the command, because that is how
+ * ShellExecuteW takes them — and splitting one string apart is ambiguous the
+ * moment a path contains a space. Launching by bare name works (PATH is
+ * resolved) and so does a .lnk shortcut.
  * =========================================================================== */
 static int lua_mshell_spawn(lua_State *L) {
-    const char *cmd = luaL_checkstring(L, 1);
+    const char *cmd  = luaL_checkstring(L, 1);
+    const char *args = luaL_optstring(L, 2, NULL);
 
     if (g.startup_count >= MAX_STARTUP_COMMANDS) {
-        return luaL_error(L, "too many startup commands");
+        return luaL_error(L, "too many startup commands (max %d)",
+                          MAX_STARTUP_COMMANDS);
     }
 
     wchar_t *wcmd = u8_to_w_dup(cmd);
     if (!wcmd) return luaL_error(L, "out of memory");
 
-    g.startup_commands[g.startup_count++] = wcmd;
+    wchar_t *wargs = NULL;
+    if (args && args[0]) {
+        wargs = u8_to_w_dup(args);
+        if (!wargs) { free(wcmd); return luaL_error(L, "out of memory"); }
+    }
+
+    g.startup_commands[g.startup_count].cmd  = wcmd;
+    g.startup_commands[g.startup_count].args = wargs;
+    g.startup_count++;
     return 0;
 }
 
