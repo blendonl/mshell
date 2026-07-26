@@ -366,6 +366,35 @@ void desktop_switch(const wchar_t *name) {
     Desktop *new_dt = desktop_by_id(target_id);
     if (!new_dt) { events_suppress_end(); return; }
 
+    /* 0. Sticky windows come with us.
+     *
+     * Implemented by REASSIGNING them to the target desktop rather than by
+     * teaching the tiler, the focus ring and the bar that a window can be on
+     * several desktops at once. A sticky window is genuinely only ever on the
+     * one you are looking at, so every other part of mshell keeps working
+     * unchanged — and "sticky" ends up meaning exactly what it looks like.
+     *
+     * Done before the hide loop below, so they are never hidden in the first
+     * place and there is no flicker. */
+    if (old_dt && new_dt->count < MAX_WINDOWS_PER_DESKTOP) {
+        for (int i = old_dt->count - 1; i >= 0; i--) {
+            HWND h = old_dt->windows[i];
+            ManagedWindow *mw = window_find(h);
+            if (!mw || !mw->sticky) continue;
+            if (new_dt->count >= MAX_WINDOWS_PER_DESKTOP) break;
+
+            memmove(&old_dt->windows[i], &old_dt->windows[i + 1],
+                    (size_t)(old_dt->count - i - 1) * sizeof(HWND));
+            old_dt->count--;
+            if (old_dt->focused >= old_dt->count && old_dt->count > 0)
+                old_dt->focused = old_dt->count - 1;
+
+            new_dt->windows[new_dt->count++] = h;
+            mw->desktop_id  = target_id;
+            mw->has_applied = false;
+        }
+    }
+
     /* 1. Hide all windows on the desktop we're leaving */
     if (old_dt) {
         for (int i = 0; i < old_dt->count; i++) {

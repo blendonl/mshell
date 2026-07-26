@@ -170,6 +170,9 @@ typedef enum {
     ACTION_KILL,
     ACTION_MINIMIZE,
     ACTION_RESTORE,    /* un-minimize one — there is no taskbar to click */
+    ACTION_TOGGLE_STICKY,      /* show this window on every desktop        */
+    ACTION_MARK_SCRATCHPAD,    /* make this window the scratchpad          */
+    ACTION_TOGGLE_SCRATCHPAD,  /* summon / dismiss it                      */
 
     /* floating */
     ACTION_TOGGLE_FLOAT,
@@ -189,6 +192,7 @@ typedef enum {
     ACTION_LAYOUT_COLUMNS,
     ACTION_CYCLE_LAYOUT,
     ACTION_PROMOTE_MASTER,
+    ACTION_ZOOM,            /* dwm-style: swap with master, and back again */
     ACTION_INC_MASTER,
     ACTION_DEC_MASTER,
     ACTION_INC_NMASTER,
@@ -357,6 +361,9 @@ typedef struct {
     RECT      fs_prev_rect;          /* pre-fullscreen rect of a FLOATING
                                       * window (a tiled one is re-tiled)     */
     bool      fs_has_prev;           /* fs_prev_rect is valid                */
+    bool      sticky;                /* follows you to every desktop         */
+    bool      scratchpad;            /* the scratchpad window (see ACTION_
+                                      * TOGGLE_SCRATCHPAD); hidden when away  */
     bool      app_hidden;            /* the APP hid this window (minimise-to-
                                       * tray), as opposed to mshell hiding it
                                       * for a desktop switch or monocle. Such a
