@@ -620,6 +620,16 @@ typedef struct {
                                       * range — see events_init())           */
     HWINEVENTHOOK minimize_hook;     /* EVENT_SYSTEM_MINIMIZESTART/END — also
                                       * in the system range, so also its own  */
+    HWINEVENTHOOK movesize_hook;     /* EVENT_SYSTEM_MOVESIZESTART/END        */
+
+    /* --- mouse ---
+     * A tiled window cannot really be "moved": the layout owns its geometry.
+     * So a drag is interpreted instead — dropped onto another tile, the two
+     * swap; dragged along the master split, the ratio follows. drag_hwnd is the
+     * window a drag is in progress on, NULL when none. */
+    bool     mouse_enabled;
+    HWND     drag_hwnd;
+    POINT    drag_start;
 
     /* --- monitors (re-queried on display change) --- */
     Monitor  monitors[MAX_MONITORS];
@@ -632,6 +642,10 @@ typedef struct {
 
     /* --- config --- */
     wchar_t   config_path[MAX_PATH];
+    /* The last config load failure, as Lua reported it (UTF-8). The log is not
+     * always the right place to look — `--check` prints this straight to the
+     * console the user is standing in front of. */
+    char      config_error[512];
     bool      auto_reload;    /* reload when the config file is saved         */
     StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
     int       startup_count;
@@ -876,6 +890,11 @@ const wchar_t *session_start_desktop(void);  /* last desktop, or NULL          *
 /* ===========================================================================
  * Prototypes — bar.c (status bar)
  * =========================================================================== */
+/* Mouse drag handling (events.c). A tiled drag is not a move — see the note on
+ * g.drag_hwnd. */
+void     mouse_drag_begin(HWND hwnd);
+void     mouse_drag_end(HWND hwnd);
+
 bool     bar_init(void);
 void     bar_shutdown(void);
 
@@ -933,6 +952,11 @@ void     config_on_file_changed(unsigned generation);
 /* Handle --msg / --query. True if this invocation was a client command, in
  * which case the shell must not start. Call first in WinMain. */
 bool     ipc_client_try(int *exit_code);
+
+/* Write a line to the PARENT console. mshell is a GUI-subsystem binary with no
+ * console of its own, so this is the only way a command-line invocation can say
+ * anything; it is a no-op when there is no parent console. */
+void     console_print(const char *s);
 
 void     ipc_start(void);   /* begin serving the per-session named pipe */
 void     ipc_stop(void);

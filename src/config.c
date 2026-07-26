@@ -24,6 +24,7 @@ static void config_apply_defaults(void) {
     g.border_width     = DEFAULT_BORDER_WIDTH;
     g.border_color     = DEFAULT_BORDER_COLOR;
     g.background_color = DEFAULT_BACKGROUND_COLOR;
+    g.mouse_enabled    = true;
     g.bar_enabled      = true;
     g.bar_bottom       = false;
     g.bar_height       = DEFAULT_BAR_HEIGHT;
@@ -100,6 +101,7 @@ typedef struct {
     COLORREF  border_color, background_color;
     bool      block_system_keys;
     bool      auto_reload;
+    bool      mouse_enabled;
     bool      bar_enabled, bar_bottom;
     int       bar_height;
     unsigned  bar_modules;
@@ -138,6 +140,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->background_color  = g.background_color;
     s->block_system_keys = g.block_system_keys;
     s->auto_reload       = g.auto_reload;
+    s->mouse_enabled     = g.mouse_enabled;
     s->bar_enabled       = g.bar_enabled;
     s->bar_bottom        = g.bar_bottom;
     s->bar_height        = g.bar_height;
@@ -213,6 +216,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.background_color  = s->background_color;
     g.block_system_keys = s->block_system_keys;
     g.auto_reload       = s->auto_reload;
+    g.mouse_enabled     = s->mouse_enabled;
     g.bar_enabled       = s->bar_enabled;
     g.bar_bottom        = s->bar_bottom;
     g.bar_height        = s->bar_height;
@@ -366,6 +370,14 @@ bool config_load(const wchar_t *path) {
     }
 
     if (status != LUA_OK) {
+        /* Keep the message: --check prints it to the console, where the person
+         * who just ran it is actually looking. */
+        {
+            const char *err = lua_tostring(L, -1);
+            snprintf(g.config_error, sizeof g.config_error, "%s",
+                     err ? err : "unknown error");
+        }
+
         /* log_err, not log_w: this is the one message that explains why none of
          * the user's keybinds exist, and it has to survive a non-verbose run. */
         log_err(L"config: LOAD FAILED: %hs", lua_tostring(L, -1));
@@ -388,6 +400,7 @@ bool config_load(const wchar_t *path) {
      * the old VM is closed: any Lua binding queued under the old config is
      * identified by its generation, and closing the state invalidates every
      * registry ref that referred to it. */
+    g.config_error[0] = '\0';
     g.config_gen++;
     config_snapshot_free(&snap);
     if (old_L) lua_close(old_L);
