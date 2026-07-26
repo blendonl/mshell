@@ -423,6 +423,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * it is created later (kb_init), but config_init() runs first. */
     kb_locks_init();
 
+    /* --- --check: validate a config and exit ---
+     * Deliberately BEFORE the log file is opened. The log is opened with "w",
+     * so a --check run while mshell is your shell would truncate the running
+     * instance's log out from under it. Nothing here needs the file anyway:
+     * the result goes to the console the user just typed into.
+     *
+     * Before the mutex too, so it works while mshell is already running — and
+     * the point is to check a config BEFORE trusting it, since a config error
+     * is atomic and the fallback keymap has six bindings. */
+    if (has_flag(lpCmdLine, "--check")) {
+        kb_locks_init();
+        resolve_config_path(g.config_path, MAX_PATH);
+
+        char msg[1024];
+        char path_u8[MAX_PATH * 3];
+        WideCharToMultiByte(CP_UTF8, 0, g.config_path, -1, path_u8,
+                            (int)sizeof path_u8, NULL, NULL);
+
+        if (config_load(g.config_path)) {
+            snprintf(msg, sizeof msg,
+                     "ok: %s\n  %d root bindings, %d keymaps, %d window rules, "
+                     "%d desktop rules, %d startup programs",
+                     path_u8, g.root_map ? g.root_map->count : 0,
+                     g.keymap_count, g.rule_count, g.desktop_rule_count,
+                     g.startup_count);
+            console_print(msg);
+            return 0;
+        }
+        snprintf(msg, sizeof msg,
+                 "FAILED: %s\n  %s\n  Nothing in this file would take effect: "
+                 "a config error is atomic.", path_u8, g.config_error);
+        console_print(msg);
+        return 1;
+    }
+
     /* --- run mode ---
      * --test    : run alongside explorer as an ordinary process (quitting just
      *             exits; respects the taskbar).

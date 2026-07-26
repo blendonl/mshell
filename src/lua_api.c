@@ -742,6 +742,16 @@ static int lua_mshell_set_attach(lua_State *L) {
     return 0;
 }
 
+/* mshell.set_mouse(enabled) — dragging a TILED window onto another swaps them.
+ * A tiled window cannot really be moved (the layout owns its geometry), so the
+ * drag is interpreted rather than obeyed. Floating windows are dragged normally
+ * either way. Default on; false restores the old snap-back-only behaviour. */
+static int lua_mshell_set_mouse(lua_State *L) {
+    reject_at_runtime(L, "set_mouse");
+    g.mouse_enabled = lua_toboolean(L, 1);
+    return 0;
+}
+
 /* mshell.set_manage_owned(enabled) — also tile owned/dialog windows (risky) */
 static int lua_mshell_set_manage_owned(lua_State *L) {
     g.manage_owned = lua_toboolean(L, 1);
@@ -1354,6 +1364,7 @@ void lua_register_api(lua_State *L) {
         {"set_float_policy",lua_mshell_set_float_policy},
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
         {"set_attach",      lua_mshell_set_attach},
+        {"set_mouse",       lua_mshell_set_mouse},
         {"set_manage_owned",lua_mshell_set_manage_owned},
         {"set_float_on_top",lua_mshell_set_float_on_top},
         {"set_min_window_size",lua_mshell_set_min_window_size},

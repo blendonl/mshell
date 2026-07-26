@@ -365,7 +365,7 @@ void ipc_stop(void) {
  * (double-clicked) the output is simply dropped, which is the best available
  * outcome and better than popping a message box.
  * =========================================================================== */
-static void client_print(const char *s) {
+void console_print(const char *s) {
     if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
 
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -383,14 +383,14 @@ static int ipc_client_send(const wchar_t *cmd) {
     ipc_pipe_name(name, MAX_PATH);
 
     if (!WaitNamedPipeW(name, 2000)) {
-        client_print("error: no mshell is running in this session");
+        console_print("error: no mshell is running in this session");
         return 1;
     }
 
     HANDLE pipe = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                               OPEN_EXISTING, 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE) {
-        client_print("error: could not connect to mshell");
+        console_print("error: could not connect to mshell");
         return 1;
     }
 
@@ -404,7 +404,7 @@ static int ipc_client_send(const wchar_t *cmd) {
     DWORD read = 0;
     if (ReadFile(pipe, reply, IPC_REPLY_MAX - 1, &read, NULL) && read) {
         reply[read] = '\0';
-        client_print(reply);
+        console_print(reply);
     }
     CloseHandle(pipe);
 
@@ -432,7 +432,7 @@ bool ipc_client_try(int *exit_code) {
             break;
         }
         if (wcscmp(argv[i], L"--msg") == 0) {
-            client_print("error: --msg needs a command, e.g. "
+            console_print("error: --msg needs a command, e.g. "
                          "--msg \"switch_desktop web\"");
             *exit_code = 1;
             handled = true;

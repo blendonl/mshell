@@ -85,6 +85,14 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         }
         break;
 
+    case EVENT_SYSTEM_MOVESIZESTART:
+        mouse_drag_begin(hwnd);
+        break;
+
+    case EVENT_SYSTEM_MOVESIZEEND:
+        mouse_drag_end(hwnd);
+        break;
+
     case EVENT_SYSTEM_MINIMIZESTART:
     case EVENT_SYSTEM_MINIMIZEEND:
         /* A window minimized or came back. Minimizing does NOT clear WS_VISIBLE
@@ -212,6 +220,68 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
 }
 
 /* ===========================================================================
+ * Mouse drags on tiled windows.
+ *
+ * A tiled window cannot be "moved" in the ordinary sense — the layout owns its
+ * geometry, and the existing LOCATIONCHANGE handler exists precisely to snap it
+ * back. Rather than fight that, a drag is INTERPRETED:
+ *
+ *   - dropped over another tiled window  -> the two swap places
+ *   - dropped anywhere else              -> it snaps back, as before
+ *
+ * That makes dragging mean the one thing it can usefully mean in a tiling
+ * layout, and it needs no new geometry state: the swap is the same operation
+ * Win+Shift+h/j/k/l already performs.
+ *
+ * Floating windows are untouched — they are dragged the normal way.
+ * =========================================================================== */
+void mouse_drag_begin(HWND hwnd) {
+    if (!g.mouse_enabled) return;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || mw->is_floating) return;   /* floating drags are real drags */
+
+    g.drag_hwnd = hwnd;
+    GetCursorPos(&g.drag_start);
+}
+
+void mouse_drag_end(HWND hwnd) {
+    if (!g.mouse_enabled || g.drag_hwnd != hwnd) { g.drag_hwnd = NULL; return; }
+    g.drag_hwnd = NULL;
+
+    POINT drop;
+    if (!GetCursorPos(&drop)) { tile_current(); return; }
+
+    Desktop *dt = desktop_current();
+
+    /* Which tile did it land on? WindowFromPoint would return the dragged
+     * window itself (it is under the cursor), so the desktop's own list is
+     * searched against the rects the tiler assigned. */
+    int from = -1, to = -1;
+    for (int i = 0; i < dt->count; i++) {
+        ManagedWindow *mw = window_find(dt->windows[i]);
+        if (!mw || mw->is_floating || !mw->has_applied) continue;
+
+        if (dt->windows[i] == hwnd) { from = i; continue; }
+
+        RECT r = mw->applied_rect;
+        if (drop.x >= r.left && drop.x < r.right &&
+            drop.y >= r.top  && drop.y < r.bottom)
+            to = i;
+    }
+
+    if (from >= 0 && to >= 0 && from != to) {
+        hwnd_swap(&dt->windows[from], &dt->windows[to]);
+        dt->focused = to;
+        log_w(L"mouse: swapped tiles %d <-> %d", from, to);
+    }
+
+    /* Either way the window is currently wherever the mouse left it, so re-tile
+     * — that both applies a swap and snaps back a drag that meant nothing. */
+    tile_current();
+}
+
+/* ===========================================================================
  * Set up WinEvent hooks
  * =========================================================================== */
 bool events_init(void) {
@@ -299,6 +369,22 @@ bool events_init(void) {
         log_w(L"SetWinEventHook(MINIMIZE) failed: %lu — minimized windows will "
               L"keep an empty tile", GetLastError());
 
+    /* Mouse drags: MOVESIZESTART/END are 0x000A/0x000B, adjacent, and again in
+     * the system range. Not fatal — without it a dragged tile just snaps back,
+     * which is the pre-0.11 behaviour. */
+    g.movesize_hook = SetWinEventHook(
+        EVENT_SYSTEM_MOVESIZESTART,
+        EVENT_SYSTEM_MOVESIZEEND,
+        NULL,
+        events_win_event_proc,
+        0, 0,
+        WINEVENT_OUTOFCONTEXT
+    );
+
+    if (!g.movesize_hook)
+        log_w(L"SetWinEventHook(MOVESIZE) failed: %lu — dragging a tiled window "
+              L"will not swap it", GetLastError());
+
     return true;
 }
 
@@ -321,5 +407,9 @@ void events_shutdown(void) {
     if (g.location_hook) {
         UnhookWinEvent(g.location_hook);
         g.location_hook = NULL;
+    }
+    if (g.movesize_hook) {
+        UnhookWinEvent(g.movesize_hook);
+        g.movesize_hook = NULL;
     }
 }
