@@ -84,6 +84,11 @@ if exist "%CFGDIR%\init.lua" (
     echo  Default config installed to %CFGDIR%\init.lua
 )
 
+REM  The large annotated example always goes alongside, and is always
+REM  refreshed: it is reference material, not your config, so there is nothing
+REM  in it to preserve and an out-of-date copy would document the wrong release.
+copy /Y "%~dp0config\init.full.lua" "%CFGDIR%\init.full.lua" >nul 2>&1
+
 echo  Pointing the per-user shell at %DEST%\mshell.exe ...
 reg add "HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" ^
     /v Shell /t REG_SZ /d "C:\mshell\mshell.exe --shell" /f >nul || goto :fail

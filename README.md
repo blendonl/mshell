@@ -111,21 +111,51 @@ Run it again to upgrade: it replaces the installed exe even while that exe is
 your running shell, then restarts mshell so the new build takes over without a
 sign-out. Your `init.lua` is never overwritten.
 
+## Two config files
+
+The release ships two, and they are for different moments:
+
+| File | What it is |
+|------|-----------|
+| `config/init.lua` | **The default.** ~130 lines, assumes nothing is installed but Windows, and opens `cmd.exe` because that is the one terminal every machine has. This is what `install.bat` puts at `%APPDATA%\mshell\init.lua`. |
+| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
+
+A default that launched Alacritty, Firefox, Discord and Valorant would greet
+most new users with a log full of launch failures, so it doesn't. Everything
+interesting is one file away and documented.
+
 ## Default keybindings
 
 Modifier is **`Win`** (swallowed entirely; every `Win+*` combo is mshell's).
-
-Two ways to drive it: hold **`Win`+key** for the chords below, or **tap `Win`**
-on its own to enter the **`normal`** leader map and use bare keys — `h/j/k/l`
-focus, `w`/`r`/`d`/`o` open the window/resize/desktop/launch submaps, and
-`g`/`m` open the two desktop maps (**go** there / **move** the window there).
-Tap `Win` again or press `Esc` to leave.
+Two ways to drive it: hold **`Win`+key** for a chord, or **tap `Win`** on its own
+to enter the leader map and use bare keys — `h/j/k/l` focus, `Space` cycles the
+layout, `t` opens a terminal. Tap `Win` again or press `Esc` to leave.
 
 Desktops are created by going to them and destroyed when you leave them empty,
-so nothing below has to exist in advance. `init.lua` keeps one table of the
-desktops worth a key and a rule — the rule carries the app to open when you
-arrive and it's empty — so the leader gets you there in three keystrokes and the
-app is already running:
+so none of the numbered desktops has to exist in advance.
+
+| Keys | Action |
+|------|--------|
+| `Win+h/j/k/l` | Focus left/down/up/right |
+| `Win+Shift+h/j/k/l` | Move the window that way |
+| `Win+1..9` / `Win+Shift+1..9` | Go to desktop `1`..`9` / send the window there |
+| ``Win+` `` · `Win+[` · `Win+]` | Last desktop · previous · next |
+| `Win+,` `.` (+`Shift`) | Focus / move to the previous or next monitor |
+| `Win+t` `m` `g` · `Win+Space` | Layout tiling / monocle / grid · cycle |
+| `Win+f` · `Win+Return` | Toggle floating · promote to master |
+| `Win+Ctrl+h/l` · `Win+Ctrl+j/k` | Master ratio · master count |
+| `Win+Shift+f` · `Win+Ctrl+f` · `Win+F11` | Fullscreen: window · inside the tile · both |
+| `Win+n` · `Win+Shift+n` | Minimize · restore (there is no taskbar to click) |
+| `Win+Shift+c` · `Win+Shift+x` | Close · kill |
+| `Win+Shift+Return` | Terminal |
+| `Win+Shift+r` · `Win+Shift+q` | Reload config · quit |
+
+### What `init.full.lua` adds
+
+Everything below comes from the worked example, not the default. Its `desktops`
+table gives each desktop a key *and* a rule — the rule carries the app to open
+when you arrive and it's empty — so the leader gets you there in three
+keystrokes with the app already running:
 
 | Keys | Action |
 |------|--------|
@@ -137,35 +167,17 @@ app is already running:
 | **Tap `Win`** then `g [` / `g ]` | Step through the desktops that exist right now |
 | **Tap `Win`** then `m <key>` | Same keys, but send the focused **window** there |
 
+On top of the core bindings above, it adds four submaps and a game desktop:
+
 | Keys | Action |
 |------|--------|
-| **Tap `Win`** | Enter the `normal` leader map (tap again / `Esc` to leave) |
-| `Win+h/j/k/l` | Focus left/down/up/right |
-| `Win+Shift+h/j/k/l` | Move window in that direction |
-| `Win+1..9` | Switch to the desktop named `1`..`9` (creating it if new) |
-| `Win+Shift+1..9` | Send window to that desktop |
-| `Win+[` / `Win+]` | Previous / next of the desktops that currently exist |
-| ``Win+` `` | Back to the last desktop (press twice to return) |
-| `Win+,` / `Win+.` | Focus previous / next monitor |
-| `Win+Shift+,` / `Win+Shift+.` | Send window to previous / next monitor |
-| `Win+t / m / g` | Layout: tiling / monocle / grid |
-| `Win+Space` | Cycle through all layouts |
-| `Win+f` | Toggle floating |
-| `Win+Shift+f` | Fullscreen: the **window** covers its monitor |
-| `Win+Ctrl+f` | Fullscreen: the app's own fullscreen stays **inside** the tile |
-| `Win+Alt+f` | Fullscreen: **both** — the app's own fullscreen covers the monitor |
-| `Win+Return` | Promote to master |
-| `Win+Shift+Return` | Spawn terminal |
-| `Win+Ctrl+h/l` | Shrink / grow master area (ratio) |
-| `Win+Ctrl+j/k` | Fewer / more master windows (`nmaster`) |
 | `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts) |
 | `Win+r` | **resize** submap (persisting; ratio + per-window `cfact`; `Esc` exits) |
 | `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop) |
-| `Win+o` | **launch** submap (one-shot) |
+| `Win+o` | **launch** submap (one-shot; terminal, browser, files, launcher) |
 | `Win+v` / `Win+Shift+v` | Go to / send window to the `game` desktop (Valorant) |
-| `Win+Shift+c` / `Win+Shift+x` | Close / kill window |
-| `Win+Shift+r` | Reload config |
-| `Win+Shift+q` | Quit (logs out if running as the shell!) |
+| `Win+Alt+f` | Fullscreen: **both** (the minimal config puts this on `Win+F11`) |
+| `Win+Ctrl+i` | A Lua-function binding: logs the current desktop and window |
 
 ## Configuration
 
@@ -227,7 +239,7 @@ mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 ```
 
-API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `set_gap`, `set_gaps`,
+API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `set_gaps`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_whichkey`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
 `set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_manage_owned`,
