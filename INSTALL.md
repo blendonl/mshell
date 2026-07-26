@@ -138,6 +138,41 @@ elevated. In order of preference:
 > "relaunch elevated, then exit" would log you straight out), elevation changes
 > what your config file is. Elevate the login token instead, if you must (above).
 
+### The privileged helper (recommended instead of elevating mshell)
+
+`mshelld.exe` ships alongside mshell and exists to make elevating mshell
+unnecessary. It is elevated; mshell is not. It has **no config file, no Lua, no
+scripting, no window rules and no keyboard hook** — it accepts one request, "put
+this window at this rectangle", and performs it. Every decision stays in the
+unelevated shell.
+
+With it running, an unelevated mshell tiles windows owned by elevated processes
+(Task Manager, regedit, an admin terminal) instead of leaving them floating —
+and your `init.lua` is never administrator-level code.
+
+Set it up as a logon task, which is what gives it a full token without weakening
+UAC:
+
+```
+schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
+         /sc onlogon /rl highest /f
+```
+
+mshell finds it automatically; nothing needs configuring. If it is not running,
+mshell behaves exactly as it always has — those windows float — so this is
+entirely opt-in.
+
+**What it does not do:** keybinds still stop responding while an elevated window
+has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
+deliberately left in mshell — moving it would mean putting the whole keymap
+state machine (submaps, leader, exit keys) inside the elevated process as
+config-derived data, which is a far larger surface than a list of rectangles and
+defeats the point of keeping the privileged half dumb. See `src/proto.h`.
+
+So: if you want elevated windows *tiled*, install the helper. If you additionally
+want keybinds to work while an elevated window has focus, that is the one
+remaining reason to elevate mshell itself — and the trade-off below applies.
+
 ### What elevation does to `init.lua`
 
 **If you run mshell elevated, treat `init.lua` as administrator-level code.**

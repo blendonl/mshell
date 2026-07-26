@@ -695,6 +695,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             g.desktop_rule_count, g.startup_count, desktop_current()->name);
 
     /* --- control channel (mshell.exe --msg / --query) --- */
+    helper_init();   /* optional; absent by default */
     ipc_start();
 
     /* --- WinEvent hooks --- */
@@ -741,6 +742,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     log_w(L"Shutting down…");
 
     ipc_stop();
+    helper_shutdown();
     events_shutdown();
     kb_shutdown();
     config_shutdown();
