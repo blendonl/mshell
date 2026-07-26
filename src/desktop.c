@@ -162,6 +162,11 @@ void desktop_apply_rules(int slot) {
         if (r->set_nmaster) dt->n_master     = r->n_master;
     }
 
+    /* Anything remembered from last time overrides the rule defaults — a
+     * layout you switched to is yours. A reload re-runs this whole function,
+     * so editing a rule still wins at that point. */
+    session_apply(dt);
+
     desktop_resolve_monitor(dt);
 }
 
@@ -280,8 +285,14 @@ void desktop_gc(int slot) {
  * other desktop is created by being switched to.
  * =========================================================================== */
 void desktop_init(void) {
-    const wchar_t *name = g.start_desktop[0] ? g.start_desktop
-                                             : DEFAULT_START_DESKTOP;
+    /* Where you were last beats where the config says to start: coming back to
+     * the desktop you left is what "restart" should feel like. set_start_desktop
+     * still decides on a genuinely first run, and deleting session.txt restores
+     * that behaviour. */
+    const wchar_t *remembered = session_start_desktop();
+    const wchar_t *name = remembered            ? remembered
+                        : g.start_desktop[0]    ? g.start_desktop
+                                                : DEFAULT_START_DESKTOP;
 
     g.desktop_count      = 0;
     g.current_desktop_id = 0;
@@ -449,6 +460,7 @@ void desktop_switch(const wchar_t *name) {
     /* 8. Tell the config, once everything above has settled — the handler gets
      *    the desktop as it now is, plus `from` naming where we came from. */
     bar_refresh();   /* the desktop set and the current one both just changed */
+    session_save();  /* which desktop you are on is part of the session */
     lua_fire(LUA_EVENT_DESKTOP_SWITCH, NULL, from);
 }
 

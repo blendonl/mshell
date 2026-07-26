@@ -862,6 +862,18 @@ void     background_shutdown(void);
 void     background_update(void);         /* resize/repaint on display change      */
 
 /* ===========================================================================
+ * Prototypes — session.c
+ *
+ * Per-desktop layout / master-ratio / master-count, remembered by desktop NAME
+ * across restarts. Window placement is deliberately NOT saved: an HWND means
+ * nothing next boot, and guessing from titles would scatter your windows.
+ * =========================================================================== */
+void     session_load(void);              /* read the file; call once at start */
+void     session_apply(Desktop *dt);      /* from desktop_apply_rules          */
+void     session_save(void);              /* whenever a saved value changes    */
+const wchar_t *session_start_desktop(void);  /* last desktop, or NULL          */
+
+/* ===========================================================================
  * Prototypes — bar.c (status bar)
  * =========================================================================== */
 bool     bar_init(void);

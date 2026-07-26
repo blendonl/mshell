@@ -595,6 +595,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * Nothing exists until now: desktops are created on demand, so this brings
      * the one we land on into being. After the config, because the config picks
      * its name (set_start_desktop) and the rules that describe it. */
+    /* Read the remembered per-desktop settings BEFORE the first desktop is
+     * created, so desktop_apply_rules can use them straight away. */
+    session_load();
     desktop_init();
 
     /* --- desktop backdrop + focus ring + submap hint (need config colors) --- */
