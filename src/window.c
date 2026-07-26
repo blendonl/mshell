@@ -199,6 +199,8 @@ static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
         L"mshell_Background",   /* our own desktop backdrop   */
         L"mshell_FocusBorder",  /* our own focus ring         */
         L"mshell_MessageWindow",/* our own message window     */
+        L"mshell_Bar",          /* our own status bar         */
+        L"mshell_WhichKey",     /* our own submap hint        */
         NULL
     };
     for (const wchar_t **p = ignore_classes; *p; p++) {
@@ -997,6 +999,7 @@ void window_focus(HWND hwnd) {
 
     /* Keep the focus ring on the newly-focused window. */
     border_refresh();
+    bar_refresh();   /* the title section follows the focus */
 
     /* Only when the focus actually moved. window_focus is also called to
      * re-assert focus that is already correct — after a re-tile, on a desktop

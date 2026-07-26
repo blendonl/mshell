@@ -419,6 +419,7 @@ void desktop_switch(const wchar_t *name) {
 
     /* 8. Tell the config, once everything above has settled — the handler gets
      *    the desktop as it now is, plus `from` naming where we came from. */
+    bar_refresh();   /* the desktop set and the current one both just changed */
     lua_fire(LUA_EVENT_DESKTOP_SWITCH, NULL, from);
 }
 

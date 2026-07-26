@@ -24,6 +24,14 @@ static void config_apply_defaults(void) {
     g.border_width     = DEFAULT_BORDER_WIDTH;
     g.border_color     = DEFAULT_BORDER_COLOR;
     g.background_color = DEFAULT_BACKGROUND_COLOR;
+    g.bar_enabled      = true;
+    g.bar_bottom       = false;
+    g.bar_height       = DEFAULT_BAR_HEIGHT;
+    g.bar_modules      = BAR_MOD_DEFAULT;
+    g.bar_bg           = DEFAULT_BAR_BG;
+    g.bar_fg           = DEFAULT_BAR_FG;
+    g.bar_accent       = DEFAULT_BAR_ACCENT;
+    g.bar_dim          = DEFAULT_BAR_DIM;
     g.whichkey_enabled = true;
     g.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
     g.whichkey_bg      = DEFAULT_WHICHKEY_BG;
@@ -92,6 +100,10 @@ typedef struct {
     COLORREF  border_color, background_color;
     bool      block_system_keys;
     bool      auto_reload;
+    bool      bar_enabled, bar_bottom;
+    int       bar_height;
+    unsigned  bar_modules;
+    COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
     bool      whichkey_enabled;
     int       whichkey_delay;
     COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
@@ -126,6 +138,14 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->background_color  = g.background_color;
     s->block_system_keys = g.block_system_keys;
     s->auto_reload       = g.auto_reload;
+    s->bar_enabled       = g.bar_enabled;
+    s->bar_bottom        = g.bar_bottom;
+    s->bar_height        = g.bar_height;
+    s->bar_modules       = g.bar_modules;
+    s->bar_bg            = g.bar_bg;
+    s->bar_fg            = g.bar_fg;
+    s->bar_accent        = g.bar_accent;
+    s->bar_dim           = g.bar_dim;
     s->whichkey_enabled  = g.whichkey_enabled;
     s->whichkey_delay    = g.whichkey_delay;
     s->whichkey_bg       = g.whichkey_bg;
@@ -193,6 +213,14 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.background_color  = s->background_color;
     g.block_system_keys = s->block_system_keys;
     g.auto_reload       = s->auto_reload;
+    g.bar_enabled       = s->bar_enabled;
+    g.bar_bottom        = s->bar_bottom;
+    g.bar_height        = s->bar_height;
+    g.bar_modules       = s->bar_modules;
+    g.bar_bg            = s->bar_bg;
+    g.bar_fg            = s->bar_fg;
+    g.bar_accent        = s->bar_accent;
+    g.bar_dim           = s->bar_dim;
     g.whichkey_enabled  = s->whichkey_enabled;
     g.whichkey_delay    = s->whichkey_delay;
     g.whichkey_bg       = s->whichkey_bg;
@@ -582,6 +610,11 @@ void config_reload(void) {
     /* Re-assert visibility/layout for the (preserved) windows and repaint the
      * backdrop in case colors changed. */
     background_update();
+    /* The bar's height, position and colours may all have changed, and its
+     * strip comes out of the work area the tiler is about to use — so
+     * re-measure the work areas first, then rebuild it, then re-tile. */
+    update_work_area();
+    bar_reconfigure();
     desktop_reapply();
 }
 

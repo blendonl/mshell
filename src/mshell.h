@@ -105,6 +105,21 @@
 #define DEFAULT_BORDER_COLOR      RGB(0xff, 0xff, 0xff)  /* focused-window ring   */
 #define DEFAULT_BACKGROUND_COLOR  RGB(0x00, 0x00, 0x00)  /* desktop backdrop      */
 
+/* status bar (all overridable via mshell.set_bar{}) */
+#define DEFAULT_BAR_HEIGHT        28                     /* design px at 96 DPI */
+#define DEFAULT_BAR_BG            RGB(0x1e, 0x1e, 0x2e)
+#define DEFAULT_BAR_FG            RGB(0xcd, 0xd6, 0xf4)
+#define DEFAULT_BAR_ACCENT        RGB(0x7a, 0xa2, 0xf7)  /* the current desktop */
+#define DEFAULT_BAR_DIM           RGB(0x6c, 0x70, 0x86)  /* the other desktops  */
+
+/* Which sections the bar draws, left to right. */
+#define BAR_MOD_DESKTOPS  0x1
+#define BAR_MOD_LAYOUT    0x2
+#define BAR_MOD_TITLE     0x4
+#define BAR_MOD_CLOCK     0x8
+#define BAR_MOD_DEFAULT   (BAR_MOD_DESKTOPS | BAR_MOD_LAYOUT | \
+                           BAR_MOD_TITLE    | BAR_MOD_CLOCK)
+
 /* which-key submap hint (all overridable via mshell.set_whichkey{}) */
 #define DEFAULT_WHICHKEY_DELAY    150                    /* ms; 0 = show instantly */
 #define DEFAULT_WHICHKEY_BG       RGB(0x1e, 0x1e, 0x2e)  /* panel background      */
@@ -533,6 +548,17 @@ typedef struct {
     COLORREF border_color;    /* focused-window ring color                    */
     COLORREF background_color;/* solid desktop backdrop color                 */
 
+    /* --- status bar ---
+     * With no taskbar there is otherwise nothing on screen telling you which
+     * desktop you are on — and since desktops are created and destroyed as you
+     * use them, the set itself is invisible without this. */
+    bool     bar_enabled;
+    bool     bar_bottom;      /* false = top edge (default), true = bottom     */
+    int      bar_height;      /* design pixels at 96 DPI; scaled per monitor   */
+    unsigned bar_modules;     /* BAR_MOD_* bitmask, drawn left to right        */
+    COLORREF bar_bg, bar_fg, bar_accent, bar_dim;
+    HWND     bar_windows[MAX_MONITORS];   /* one per display, or NULL          */
+
     /* --- which-key submap hint --- */
     bool     whichkey_enabled;   /* show a hint panel when a submap is active  */
     int      whichkey_delay;     /* ms before it appears (0 = instant)         */
@@ -649,6 +675,11 @@ void     resolve_config_path(wchar_t *out, size_t out_len);
 
 /* monitors */
 void     monitors_update(void);           /* (re)enumerate physical displays */
+
+/* Re-enumerate displays AND re-apply the bar's reservation, then refresh the
+ * cached primary work area. Anything that changes the display set, the DPI, or
+ * the bar's geometry must go through this before tiling. */
+void     update_work_area(void);
 int      monitor_of_window(HWND hwnd);    /* index into g.monitors, or 0      */
 
 /* Effective DPI of a monitor (96 when unknown). mshell is per-monitor DPI
@@ -817,6 +848,25 @@ void     border_hide(void);
 bool     background_init(void);
 void     background_shutdown(void);
 void     background_update(void);         /* resize/repaint on display change      */
+
+/* ===========================================================================
+ * Prototypes — bar.c (status bar)
+ * =========================================================================== */
+bool     bar_init(void);
+void     bar_shutdown(void);
+
+/* Create/destroy/reposition the per-monitor bar windows to match the current
+ * config and display set. Call after a config load and on a display change. */
+void     bar_reconfigure(void);
+
+/* Subtract the bar from each monitor's work_area so the tiler lays out beneath
+ * it. Called from update_work_area(), right after monitors_update(). Fullscreen
+ * windows use monitor .full and so still cover the bar, which is correct. */
+void     bar_reserve_work_area(void);
+
+/* Rebuild the bar text and repaint if it changed. Cheap to call often — it
+ * compares against what is already displayed and does nothing when equal. */
+void     bar_refresh(void);
 
 /* ===========================================================================
  * Prototypes — whichkey.c (submap hint popup)

@@ -236,8 +236,11 @@ int monitor_of_window(HWND hwnd) {
  * Refresh monitors and the primary work area (kept for single-monitor
  * fallbacks and helper-window sizing).
  * --------------------------------------------------------------------------- */
-static void update_work_area(void) {
+void update_work_area(void) {
     monitors_update();
+    /* The bar takes its strip out of each monitor's work area BEFORE anything
+     * reads it, so the tiler lays out beneath it without knowing it exists. */
+    bar_reserve_work_area();
     g.work_area = g.monitors[g.primary_monitor].work_area;
 }
 
@@ -290,6 +293,7 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
          * longer there has to stop being pinned to it. */
         desktop_monitors_changed();
         background_update();
+        bar_reconfigure();     /* monitor set or geometry changed */
         tile_current();
         return 0;
 
@@ -297,6 +301,7 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         update_work_area();
         desktop_monitors_changed();
         background_update();
+        bar_reconfigure();
         tile_current();
         return 0;
 
@@ -309,6 +314,7 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         update_work_area();
         background_update();
         whichkey_hide();      /* its font was built for the old DPI */
+        bar_reconfigure();    /* ditto, and its height is DPI-scaled */
         tile_current();
         return 0;
 
@@ -577,6 +583,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     background_init();
     border_init();
     whichkey_init();
+    bar_init();
+    /* Monitors were measured before the config was read, so the work areas do
+     * not yet account for a bar the config just enabled. Re-measure, then
+     * create the bar windows. */
+    update_work_area();
+    bar_reconfigure();
 
     /* --- keyboard hook --- */
     if (!kb_init()) {
@@ -647,6 +659,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     window_restore_all_decorations();
 
     /* tear down our own helper windows */
+    bar_shutdown();
     whichkey_shutdown();
     border_shutdown();
     background_shutdown();
