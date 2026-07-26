@@ -72,11 +72,17 @@ curl -LO https://www.lua.org/ftp/lua-5.4.7.tar.gz
 tar xzf lua-5.4.7.tar.gz --strip-components=1
 cd ../..
 make            # produces mshell.exe
+make test       # runs the host-side unit tests (no Windows needed)
 make dist       # produces dist/mshell-<version>-win64.zip
 ```
 
-The version lives in one place — `VERSION` in the `Makefile` — and is baked
-into both the binary (startup log) and the release zip name.
+The version lives in one place — `VERSION` in the `Makefile` — and is baked into
+the binary's startup log, its VERSIONINFO resource, and the release zip name.
+
+`make test` builds the parts with no Windows in them — rule pattern matching and
+the tiling arithmetic — with the host compiler and runs them directly, so it
+works on the same Linux box you cross-compile from. Everything that needs a real
+machine is listed in [MANUAL-TESTS.md](MANUAL-TESTS.md).
 
 ## Try it (without committing)
 
