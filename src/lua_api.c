@@ -461,17 +461,6 @@ static int lua_mshell_set_leader(lua_State *L) {
 }
 
 /* ===========================================================================
- * mshell.set_gap(pixels) — set inner and outer gaps to the same value
- * =========================================================================== */
-static int lua_mshell_set_gap(lua_State *L) {
-    int gap = (int)luaL_checkinteger(L, 1);
-    gap = clamp_i(gap, 0, 100);
-    g.inner_gap = gap;
-    g.outer_gap = gap;
-    return 0;
-}
-
-/* ===========================================================================
  * mshell.set_gaps(inner [, outer]) — independent inner/outer gaps.
  *   inner: gap between adjacent tiled windows
  *   outer: margin between the screen edge and the outermost windows
@@ -1269,7 +1258,6 @@ void lua_register_api(lua_State *L) {
         {"bind",            lua_mshell_bind},
         {"submap",          lua_mshell_submap},
         {"set_leader",      lua_mshell_set_leader},
-        {"set_gap",         lua_mshell_set_gap},
         {"set_gaps",        lua_mshell_set_gaps},
         {"set_smart_gaps",  lua_mshell_set_smart_gaps},
         {"set_border",      lua_mshell_set_border},
