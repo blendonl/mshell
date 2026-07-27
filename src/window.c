@@ -492,17 +492,28 @@ void window_hide(ManagedWindow *mw) {
      * the app brings it back. */
     if (mw->app_hidden) return;
 
-    if (g.hide_policy == HIDE_CLOAK && dwm_set_cloaked(mw->hwnd, true)) {
+    /* The flags go up BEFORE the window is touched, never after.
+     *
+     * The EVENT_OBJECT_HIDE handler tells our own hide from an app's
+     * minimise-to-tray by reading exactly these two, and getting that wrong
+     * loses the window for good (see the comment there). The out-of-context
+     * hook queues the event rather than delivering it inline, so setting them
+     * afterwards happens to work — but an invariant that holds only by timing
+     * is not one to lean on, and it costs nothing to make it hold outright. */
+    mw->wm_hidden = true;
+    mw->cloaked   = false;
+
+    if (g.hide_policy == HIDE_CLOAK) {
         mw->cloaked = true;
-    } else {
-        /* Either the policy asked for it, or DWM refused (composition off,
-         * which is possible in a VM or over some remote sessions). Falling
-         * back keeps desktops working; they just flicker the old way.
-         *
-         * Said once and loudly when it was not asked for: a silent downgrade to
-         * the mechanism that turns windows black is the single most confusing
-         * way this can fail, and the log is the only place it would show. */
-        if (g.hide_policy == HIDE_CLOAK) {
+        if (!dwm_set_cloaked(mw->hwnd, true)) {
+            /* DWM refused — composition off, which is possible in a VM or over
+             * some remote sessions. Fall back so desktops keep working.
+             *
+             * Said once and loudly: a silent downgrade to the mechanism that
+             * leaves the visible bit cleared changes how the hide is detected
+             * and how the window comes back, and the log is the only place it
+             * would ever show. */
+            mw->cloaked = false;
             static bool warned;
             if (!warned) {
                 warned = true;
@@ -510,11 +521,12 @@ void window_hide(ManagedWindow *mw) {
                                   L"falling back to ShowWindow(SW_HIDE) for "
                                   L"this session");
             }
+            ShowWindow(mw->hwnd, SW_HIDE);
         }
+    } else {
         ShowWindow(mw->hwnd, SW_HIDE);
-        mw->cloaked = false;
     }
-    mw->wm_hidden = true;
+
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
             mw->cloaked ? L"cloaked" : L"SW_HIDE");
 }
