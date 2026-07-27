@@ -18,6 +18,7 @@
  */
 
 #include "mshell.h"
+#include "overlay.h"
 
 static const wchar_t *WK_CLASS = L"mshell_WhichKey";
 
@@ -47,8 +48,7 @@ typedef struct {
 
 /* Prepared state: filled by whichkey_show, consumed by WM_PAINT. Only ever
  * touched on the main thread. */
-static HFONT   s_font;
-static UINT    s_font_dpi;      /* DPI s_font was built for (0 = no font yet) */
+static OverlayFont s_font;      /* caches the DPI it was built for */
 static WkRow   s_rows[WK_MAX_ROWS];
 static int     s_count;
 static int     s_cols, s_per_col;
@@ -61,7 +61,7 @@ static wchar_t s_title[80];
  * third of its intended size on a 300% display. */
 static int     s_pad, s_key_gap, s_col_gap, s_row_vpad, s_hdr_gap;
 
-static int wk_dpi_scale(int px, UINT dpi) { return MulDiv(px, (int)dpi, 96); }
+#define wk_dpi_scale(px, dpi) overlay_scale((px), (dpi))
 
 /* Rebuild the font and the scaled metrics for `dpi`, if they aren't already. */
 static void wk_apply_dpi(UINT dpi) {
@@ -71,16 +71,9 @@ static void wk_apply_dpi(UINT dpi) {
     s_row_vpad = wk_dpi_scale(WK_ROW_VPAD, dpi);
     s_hdr_gap  = wk_dpi_scale(WK_HDR_GAP,  dpi);
 
-    if (s_font && s_font_dpi == dpi) return;
-    if (s_font) DeleteObject(s_font);
-
-    /* Negative height == pixels, so this needs scaling like everything else. */
-    s_font = CreateFontW(-wk_dpi_scale(18, dpi), 0, 0, 0, FW_NORMAL,
-                         FALSE, FALSE, FALSE,
-                         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                         L"Segoe UI");
-    s_font_dpi = dpi;
+    /* 18 design px; overlay_font rebuilds only when dpi or size actually
+     * changed, so calling this on every show is free. */
+    overlay_font(&s_font, dpi, wk_dpi_scale(18, dpi));
 }
 
 /* The human-readable label for one binding. spawn shows its command, the
@@ -164,7 +157,7 @@ static void whichkey_show(KeyMap *map) {
 
     /* --- measure text with our font --- */
     HDC   dc  = GetDC(g.whichkey_window);
-    HFONT old = (HFONT)SelectObject(dc, s_font);
+    HFONT old = (HFONT)SelectObject(dc, s_font.font);
 
     TEXTMETRICW tm;
     GetTextMetricsW(dc, &tm);
@@ -245,20 +238,14 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 1;   /* fully painted in WM_PAINT — skip erase to avoid flicker */
 
     case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC  hdc = BeginPaint(hwnd, &ps);
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        int W = rc.right, H = rc.bottom;
+        /* Double-buffered so the panel never flickers as it repaints. */
+        OverlayPaint op;
+        HDC mdc = overlay_paint_begin(&op, hwnd);
+        if (!mdc) return 0;
+        int  W = op.w, H = op.h;
+        RECT rc = { 0, 0, W, H };
 
-        /* Double-buffer so the panel never flickers as it repaints. */
-        HDC     mdc = CreateCompatibleDC(hdc);
-        HBITMAP bmp = CreateCompatibleBitmap(hdc, W, H);
-        HBITMAP obm = (HBITMAP)SelectObject(mdc, bmp);
-
-        HBRUSH bg = CreateSolidBrush(g.whichkey_bg);
-        FillRect(mdc, &rc, bg);
-        DeleteObject(bg);
+        overlay_fill(mdc, &rc, g.whichkey_bg);
 
         /* 1px outline in the accent colour */
         HPEN   pen = CreatePen(PS_SOLID, 1, g.whichkey_border);
@@ -269,7 +256,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SelectObject(mdc, opn);
         DeleteObject(pen);
 
-        HFONT of = (HFONT)SelectObject(mdc, s_font);
+        HFONT of = (HFONT)SelectObject(mdc, s_font.font);
         SetBkMode(mdc, TRANSPARENT);
 
         /* header */
@@ -300,12 +287,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
 
         SelectObject(mdc, of);
-        BitBlt(hdc, 0, 0, W, H, mdc, 0, 0, SRCCOPY);
-
-        SelectObject(mdc, obm);
-        DeleteObject(bmp);
-        DeleteDC(mdc);
-        EndPaint(hwnd, &ps);
+        overlay_paint_end(&op);
         return 0;
     }
     }
@@ -313,24 +295,15 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 bool whichkey_init(void) {
-    WNDCLASSEXW wc = {0};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = wk_wndproc;
-    wc.hInstance     = g.hinst;
-    wc.lpszClassName = WK_CLASS;
-    RegisterClassExW(&wc);
+    if (!overlay_register(WK_CLASS, wk_wndproc, false)) return false;
 
     /* Layered + noactivate + toolwindow + topmost: a transient hint that never
      * takes focus, never appears in Alt+Tab, is skipped by our own window
      * management (toolwindow), and floats above the tiled grid. */
-    g.whichkey_window = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-        WK_CLASS, L"", WS_POPUP,
-        0, 0, 0, 0, NULL, NULL, g.hinst, NULL);
-    if (!g.whichkey_window) {
-        log_w(L"whichkey: CreateWindowEx failed: %lu", GetLastError());
-        return false;
-    }
+    g.whichkey_window = overlay_create(
+        WK_CLASS,
+        WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+    if (!g.whichkey_window) return false;
 
     /* Slight translucency, like the focus ring. */
     SetLayeredWindowAttributes(g.whichkey_window, 0, 235, LWA_ALPHA);
@@ -348,9 +321,7 @@ bool whichkey_init(void) {
 void whichkey_shutdown(void) {
     if (g.whichkey_window) {
         KillTimer(g.whichkey_window, WK_TIMER_ID);
-        DestroyWindow(g.whichkey_window);
-        g.whichkey_window = NULL;
     }
-    if (s_font) { DeleteObject(s_font); s_font = NULL; s_font_dpi = 0; }
-    UnregisterClassW(WK_CLASS, g.hinst);
+    overlay_destroy(&g.whichkey_window, WK_CLASS);
+    overlay_font_free(&s_font);
 }

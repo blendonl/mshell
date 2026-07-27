@@ -10,6 +10,7 @@
  */
 
 #include "mshell.h"
+#include "overlay.h"
 
 static const wchar_t *BORDER_CLASS = L"mshell_FocusBorder";
 
@@ -20,9 +21,7 @@ static LRESULT CALLBACK border_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        HBRUSH br = CreateSolidBrush(g.border_color);
-        FillRect(dc, &rc, br);
-        DeleteObject(br);
+        overlay_fill(dc, &rc, g.border_color);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -33,25 +32,15 @@ static LRESULT CALLBACK border_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
 }
 
 bool border_init(void) {
-    WNDCLASSEXW wc = {0};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = border_wndproc;
-    wc.hInstance     = g.hinst;
-    wc.lpszClassName = BORDER_CLASS;
-    RegisterClassExW(&wc);
+    if (!overlay_register(BORDER_CLASS, border_wndproc, false)) return false;
 
     /* Layered + transparent => fully click-through; NOACTIVATE => never steals
      * focus; toolwindow => never enters our own management or Alt+Tab. Not
      * topmost: we re-stack it directly above the focused window each update. */
-    g.border_window = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        BORDER_CLASS, L"", WS_POPUP,
-        0, 0, 0, 0, NULL, NULL, g.hinst, NULL);
-
-    if (!g.border_window) {
-        log_w(L"border: CreateWindowEx failed: %lu", GetLastError());
-        return false;
-    }
+    g.border_window = overlay_create(
+        BORDER_CLASS,
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+    if (!g.border_window) return false;
 
     SetLayeredWindowAttributes(g.border_window, 0, 255, LWA_ALPHA);
     return true;
@@ -110,9 +99,5 @@ void border_refresh(void) {
 }
 
 void border_shutdown(void) {
-    if (g.border_window) {
-        DestroyWindow(g.border_window);
-        g.border_window = NULL;
-    }
-    UnregisterClassW(BORDER_CLASS, g.hinst);
+    overlay_destroy(&g.border_window, BORDER_CLASS);
 }
