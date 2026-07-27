@@ -535,10 +535,25 @@ static int lua_mshell_set_auto_reload(lua_State *L) {
 
 /* ===========================================================================
  * mshell.set_verbose(enabled)
- *   Toggle debug logging (OutputDebugString / DebugView) at runtime.
+ *   Kept for configs that already call it: true means DEBUG, false means the
+ *   INFO default. set_log_level is the finer-grained knob.
  * =========================================================================== */
 static int lua_mshell_set_verbose(lua_State *L) {
-    g.verbose = lua_toboolean(L, 1);
+    log_set_level(lua_toboolean(L, 1) ? LOG_DEBUG : LOG_INFO);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_log_level("error"|"warn"|"info"|"debug"|"trace")
+ *   Raising the level widens the log. "debug" is what --verbose gives you.
+ * =========================================================================== */
+static int lua_mshell_set_log_level(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    LogLevel lvl;
+    if (!log_level_from_name(name, &lvl))
+        return luaL_error(L, "unknown log level: %s "
+                             "(error|warn|info|debug|trace)", name);
+    log_set_level(lvl);
     return 0;
 }
 
@@ -1370,6 +1385,7 @@ void lua_register_api(lua_State *L) {
         {"set_min_window_size",lua_mshell_set_min_window_size},
         {"set_auto_reload", lua_mshell_set_auto_reload},
         {"set_verbose",     lua_mshell_set_verbose},
+        {"set_log_level",   lua_mshell_set_log_level},
         {"block_system_keys",lua_mshell_block_system_keys},
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
