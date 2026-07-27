@@ -239,6 +239,9 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
              * and when the frame is already bare. */
             if (mw->is_floating) {
                 if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
+                /* A native move/resize of the focused float fires here and
+                 * nowhere else — keep the ring hugging it. */
+                if (hwnd == desktop_get_focused()) border_refresh();
                 break;
             }
 

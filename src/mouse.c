@@ -95,6 +95,7 @@ void mouse_mod_drag_apply(int dx, int dy) {
 
     mw->applied_rect = want;
     mw->has_applied  = true;
+    border_refresh();   /* the ring follows the dragged/resized window */
 }
 
 /* Called from the hook thread. Returns true when the event was consumed. */
