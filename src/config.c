@@ -604,6 +604,17 @@ void config_on_file_changed(unsigned generation) {
  * config is kept intact.
  * =========================================================================== */
 void config_reload(void) {
+    /* A reload is the way out of panic mode, and it is cleared HERE rather than
+     * in the reload action because panic mode is precisely the state in which
+     * no keybinding fires — the hook is passing everything through. What still
+     * reaches us is `mshell.exe --msg reload` and saving init.lua, and both
+     * arrive through this function. Cleared before the load so that a config
+     * with an error still gets you your keys back. */
+    if (g.panicked) {
+        g.panicked = false;
+        log_err(L"panic mode cleared — mshell is handling keys again");
+    }
+
     /* Re-resolve first: if the user has just created %APPDATA%\mshell\init.lua
      * on a session that started from the exe-dir fallback (or from no config at
      * all), Win+Shift+R should pick it up rather than needing a sign-out. */

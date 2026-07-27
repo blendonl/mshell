@@ -661,12 +661,50 @@ void desktop_remove_window(HWND hwnd) {
 /* ===========================================================================
  * Track focus change
  * =========================================================================== */
+/* Push `hwnd` to the front of a desktop's focus history, moving it up rather
+ * than duplicating it if it is already there. */
+static void desktop_focus_hist_push(Desktop *dt, HWND hwnd) {
+    if (dt->focus_hist_n > 0 && dt->focus_hist[0] == hwnd) return;  /* no change */
+
+    int from = dt->focus_hist_n;         /* how much of the list to shift */
+    for (int i = 0; i < dt->focus_hist_n; i++) {
+        if (dt->focus_hist[i] == hwnd) { from = i; break; }
+    }
+    if (from >= FOCUS_HIST_MAX) from = FOCUS_HIST_MAX - 1;
+
+    for (int i = from; i > 0; i--)
+        dt->focus_hist[i] = dt->focus_hist[i - 1];
+    dt->focus_hist[0] = hwnd;
+
+    if (dt->focus_hist_n < FOCUS_HIST_MAX && from == dt->focus_hist_n)
+        dt->focus_hist_n++;
+}
+
+/* The most recent still-live window that is not the current one. Entries are
+ * validated here rather than pruned on close: a window dying is precisely when
+ * this gets called, so the check has to happen at read time anyway. */
+HWND desktop_last_window(void) {
+    Desktop *dt = desktop_current();
+    if (!dt) return NULL;
+
+    HWND cur = desktop_get_focused();
+    for (int i = 0; i < dt->focus_hist_n; i++) {
+        HWND h = dt->focus_hist[i];
+        if (!h || h == cur || !IsWindow(h)) continue;
+        /* Must still be on this desktop — it may have been moved away. */
+        for (int j = 0; j < dt->count; j++)
+            if (dt->windows[j] == h) return h;
+    }
+    return NULL;
+}
+
 void desktop_focus_update(HWND hwnd) {
     for (int d = 0; d < g.desktop_count; d++) {
         Desktop *dt = &g.desktops[d];
         for (int i = 0; i < dt->count; i++) {
             if (dt->windows[i] == hwnd) {
                 dt->focused = i;
+                desktop_focus_hist_push(dt, hwnd);
                 return;
             }
         }

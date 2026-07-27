@@ -168,7 +168,13 @@ static const ActionNameEntry action_names[] = {
     {"toggle_sticky",    ACTION_TOGGLE_STICKY},
     {"mark_scratchpad",  ACTION_MARK_SCRATCHPAD},
     {"toggle_scratchpad",ACTION_TOGGLE_SCRATCHPAD},
+    {"toggle_always_on_top", ACTION_TOGGLE_ALWAYS_ON_TOP},
+    {"last_window",      ACTION_LAST_WINDOW},
     {"toggle_float",     ACTION_TOGGLE_FLOAT},
+    {"resize_left",      ACTION_RESIZE_LEFT},
+    {"resize_down",      ACTION_RESIZE_DOWN},
+    {"resize_up",        ACTION_RESIZE_UP},
+    {"resize_right",     ACTION_RESIZE_RIGHT},
     {"fullscreen",         ACTION_FULLSCREEN},
     {"fullscreen_content", ACTION_FULLSCREEN_CONTENT},
     {"fullscreen_both",    ACTION_FULLSCREEN_BOTH},
@@ -193,6 +199,7 @@ static const ActionNameEntry action_names[] = {
     {"spawn",            ACTION_SPAWN},
     {"reload",           ACTION_RELOAD},
     {"quit",             ACTION_QUIT},
+    {"panic",            ACTION_PANIC},
     {NULL, ACTION_NONE}
 };
 
@@ -484,6 +491,13 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (kb->dwExtraInfo == MSHELL_INPUT_TAG)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
+    /* Panic mode: pass everything, bind nothing. Checked here rather than by
+     * unhooking so the state is reversible from a reload — and because
+     * unhooking from the hook thread while inside the callback is not something
+     * to do. Win, Alt+Tab and the Start menu all work again from this point. */
+    if (g.panicked)
+        return CallNextHookEx(NULL, nCode, wParam, lParam);
+
     bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
 
     /* Any non-Win key seen while Win is held means the Win press was USED (a
@@ -771,6 +785,60 @@ static void move_focused_to_monitor(int delta) {
     if (focus) window_focus(focus);
 }
 
+/* ---------------------------------------------------------------------------
+ * Move or resize a FLOATING window by one step.
+ *
+ * The step is a design-pixel constant scaled to the window's own monitor, so
+ * one press covers the same visible distance on a 100% and a 200% display.
+ * Resizing pulls the edge the direction names: resize_left narrows, resize_
+ * right widens, which reads the same way the tiled inc/dec_master pair does.
+ *
+ * Geometry is written through window_set_pos (the helper-aware wrapper) and
+ * recorded in applied_rect, so the drift detector recognises the move as ours
+ * and does not treat it as the window escaping.
+ * --------------------------------------------------------------------------- */
+#define FLOAT_STEP 40   /* design px at 96 DPI */
+
+static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
+    RECT r;
+    if (!mw || !window_frame_rect(mw->hwnd, &r)) return;
+
+    int step = MulDiv(FLOAT_STEP, (int)monitor_dpi(mw->monitor), 96);
+    int dx = 0, dy = 0;
+    switch (action) {
+    case ACTION_MOVE_LEFT:  case ACTION_RESIZE_LEFT:  dx = -step; break;
+    case ACTION_MOVE_RIGHT: case ACTION_RESIZE_RIGHT: dx =  step; break;
+    case ACTION_MOVE_UP:    case ACTION_RESIZE_UP:    dy = -step; break;
+    case ACTION_MOVE_DOWN:  case ACTION_RESIZE_DOWN:  dy =  step; break;
+    default: return;
+    }
+
+    int w = r.right - r.left, h = r.bottom - r.top;
+    int x = r.left,           y = r.top;
+
+    if (resize) {
+        w += dx;
+        h += dy;
+        /* Never let a window be resized into something unclickable. */
+        if (w < g.min_win_w) w = g.min_win_w;
+        if (h < g.min_win_h) h = g.min_win_h;
+    } else {
+        x += dx;
+        y += dy;
+    }
+
+    RECT want = { x, y, x + w, y + h };
+    RECT adj  = window_adjust_for_frame(mw->hwnd, want);
+    window_set_pos(mw->hwnd, adj.left, adj.top,
+                   adj.right - adj.left, adj.bottom - adj.top,
+                   SWP_NOZORDER | SWP_NOACTIVATE);
+
+    mw->applied_rect = want;
+    mw->has_applied  = true;
+    mw->monitor      = monitor_of_window(mw->hwnd);
+    border_refresh();
+}
+
 /* Grow/shrink the focused window within its stack (cfact). */
 static void adjust_cfact(HWND focus, float delta) {
     ManagedWindow *mw = window_find(focus);
@@ -875,11 +943,20 @@ void execute_action(Action action, int arg, const wchar_t *command,
         break;
     }
 
-    /* -- window swap (shift + vim) ------------------------------------- */
+    /* -- window swap (shift + vim), or a literal move when floating -----
+     * A tiled window has no position of its own — the layout owns it — so
+     * "move" there means swapping places with the neighbour in that direction.
+     * A floating window does have one, and the same keys should move it, which
+     * is what they now do. */
     case ACTION_MOVE_LEFT:
     case ACTION_MOVE_DOWN:
     case ACTION_MOVE_UP:
-    case ACTION_MOVE_RIGHT:
+    case ACTION_MOVE_RIGHT: {
+        ManagedWindow *mw = focus ? window_find(focus) : NULL;
+        if (mw && mw->is_floating) {
+            float_nudge(mw, action, false);
+            break;
+        }
         if (dt->layout != LAYOUT_MONOCLE && dt->count > 1 && focus) {
             bool prev = (action == ACTION_MOVE_LEFT || action == ACTION_MOVE_UP);
             int target = resolve_target(dt, fi, action, prev);
@@ -888,6 +965,48 @@ void execute_action(Action action, int arg, const wchar_t *command,
             tile_current();
         }
         break;
+    }
+
+    /* -- resize a floating window --------------------------------------
+     * Tiled geometry belongs to the layout (inc_master / cfact are its knobs),
+     * so this is deliberately a no-op on a tiled window rather than quietly
+     * doing something else. */
+    case ACTION_RESIZE_LEFT:
+    case ACTION_RESIZE_DOWN:
+    case ACTION_RESIZE_UP:
+    case ACTION_RESIZE_RIGHT: {
+        ManagedWindow *mw = focus ? window_find(focus) : NULL;
+        if (mw && mw->is_floating) float_nudge(mw, action, true);
+        break;
+    }
+
+    /* -- always on top --------------------------------------------------
+     * The z-order pass owns the actual promotion, so this only flips the
+     * intent and asks for a pass. */
+    case ACTION_TOGGLE_ALWAYS_ON_TOP: {
+        ManagedWindow *mw = focus ? window_find(focus) : NULL;
+        if (mw) {
+            mw->always_on_top = !mw->always_on_top;
+            log_msg(LOG_INFO, L"always-on-top %ls",
+                    mw->always_on_top ? L"on" : L"off");
+            window_enforce_zorder();
+        }
+        break;
+    }
+
+    /* -- back to the previously focused window --------------------------
+     * The window-level counterpart of last_desktop, and a toggle for the same
+     * reason: focusing the old window pushes the current one to the front of
+     * the history, so pressing it twice returns you. */
+    case ACTION_LAST_WINDOW: {
+        HWND prev = desktop_last_window();
+        if (prev) {
+            desktop_focus_update(prev);
+            window_focus(prev);
+            if (dt->layout == LAYOUT_MONOCLE) tile_current();
+        }
+        break;
+    }
 
     /* -- desktop switching ---------------------------------------------
      * The target is a NAME (in `command`), and it does not have to exist:
@@ -1134,7 +1253,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
 
     /* -- meta ---------------------------------------------------------- */
     case ACTION_RELOAD:
-        config_reload();
+        config_reload();   /* clears panic mode, wherever the reload came from */
         tile_current();
         whichkey_hide();   /* colors/enabled may have changed; drop any stale hint */
         log_w(L"Config reloaded");
@@ -1143,6 +1262,31 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_QUIT:
         g.running = false;
         PostQuitMessage(0);
+        break;
+
+    /* -- panic --------------------------------------------------------
+     * The escape hatch that does not require Task Manager. Explorer comes up
+     * alongside us (it coexists fine — that is exactly what --test mode is),
+     * every window we hid is given back, and the keyboard hook stops swallowing
+     * anything, so Win, Alt+Tab and the Start menu all work again.
+     *
+     * It deliberately does NOT quit: as the shell, exiting ends the session,
+     * which is the outcome someone reaching for a panic key is trying to avoid.
+     * mshell stays running and can be restored with reload, or quit
+     * deliberately once you have a desktop to land on. */
+    case ACTION_PANIC:
+        /* No keybinding can undo this — the hook stops matching, which is the
+         * point — so the way back is a reload from outside: `mshell.exe --msg
+         * reload`, or just saving init.lua if auto-reload is on. */
+        log_err(L"PANIC: starting explorer.exe and releasing the keyboard. "
+                L"mshell is still running but no longer binding any key. "
+                L"To undo: run `mshell.exe --msg reload`, or save your "
+                L"init.lua if auto-reload is enabled.");
+        window_restore_all_visibility();
+        g.panicked = true;              /* checked by the hook, first thing */
+        kb_reset_state();               /* drop any half-held modifier */
+        whichkey_hide();
+        spawn_command(L"explorer.exe", NULL, L"panic");
         break;
 
     default:

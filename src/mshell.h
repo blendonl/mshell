@@ -95,6 +95,7 @@
  * --------------------------------------------------------------------------- */
 #define MAX_DESKTOPS              32    /* how many may be ALIVE at once         */
 #define MAX_WINDOWS_PER_DESKTOP   256
+#define FOCUS_HIST_MAX            8     /* per-desktop focus history depth */
 #define MAX_BINDINGS_PER_MAP      256
 #define MAX_KEYMAPS               32
 #define MAX_RULES                 128
@@ -179,9 +180,21 @@ typedef enum {
     ACTION_TOGGLE_STICKY,      /* show this window on every desktop        */
     ACTION_MARK_SCRATCHPAD,    /* make this window the scratchpad          */
     ACTION_TOGGLE_SCRATCHPAD,  /* summon / dismiss it                      */
+    ACTION_TOGGLE_ALWAYS_ON_TOP, /* keep it in the topmost band            */
+    ACTION_LAST_WINDOW,        /* back to the previously focused window    */
 
     /* floating */
     ACTION_TOGGLE_FLOAT,
+
+    /* Resize a FLOATING window from the keyboard. A tiled window's geometry
+     * belongs to the layout — inc_master / cfact are its equivalents — so these
+     * are deliberately no-ops on one. Moving a float needs no new action: the
+     * move_* group already means "move this window", and does so literally when
+     * the window is floating rather than swapping it in the tile order. */
+    ACTION_RESIZE_LEFT,
+    ACTION_RESIZE_DOWN,
+    ACTION_RESIZE_UP,
+    ACTION_RESIZE_RIGHT,
 
     /* fullscreen — one per FullscreenMode; each binding toggles its own mode */
     ACTION_FULLSCREEN,           /* the window covers its monitor            */
@@ -221,6 +234,11 @@ typedef enum {
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
+
+    /* Last resort: start Explorer alongside us and stop swallowing keys, so a
+     * machine whose shell is misbehaving stays usable without Task Manager.
+     * Deliberately does not exit — quitting as the shell is what logs you out. */
+    ACTION_PANIC,
 
     ACTION_COUNT
 } Action;
@@ -390,6 +408,7 @@ typedef struct {
                                       * so later passes skip the batch for it —
                                       * one refused window would fail the whole
                                       * DeferWindowPos group.                 */
+    bool      always_on_top;         /* user asked for the topmost band      */
     bool      sticky;                /* follows you to every desktop         */
     bool      scratchpad;            /* the scratchpad window (see ACTION_
                                       * TOGGLE_SCRATCHPAD); hidden when away  */
@@ -430,6 +449,16 @@ typedef struct {
     HWND   windows[MAX_WINDOWS_PER_DESKTOP];
     int    count;
     int    focused;         /* index into windows[] of the active window  */
+
+    /* Most-recently-focused first, [0] being the current window. Kept per
+     * desktop because "the window I was just in" means the one on the desktop
+     * you are standing on; a global list would send last_window somewhere you
+     * cannot see. HWNDs rather than indices: windows[] is memmove'd on every
+     * insert and removal, so an index would silently come to mean another
+     * window. Dead entries are skipped at read time instead of being pruned
+     * eagerly, since a window closing is exactly when the list is consulted. */
+    HWND   focus_hist[FOCUS_HIST_MAX];
+    int    focus_hist_n;
 
     /* --- settings: global defaults first, then every matching DesktopRule,
      *     applied at creation and re-applied on config reload --- */
@@ -701,6 +730,9 @@ typedef struct {
 
     /* --- run mode --- */
     bool     test_mode;       /* running alongside explorer, not as shell */
+    bool     panicked;        /* ACTION_PANIC fired: the keyboard hook passes
+                               * everything through and Explorer is running
+                               * alongside us. Cleared by a config reload. */
     bool     safe_mode;       /* repeated fast restarts detected: init.lua is
                                * skipped this run in favour of the built-in
                                * keymap, because a config that crashes us at
@@ -884,6 +916,7 @@ void     desktop_add_window(HWND hwnd, int slot);
 void     desktop_remove_window(HWND hwnd);
 int      desktop_of_window(HWND hwnd);   /* desktop id, or 0 when unmanaged */
 void     desktop_focus_update(HWND hwnd);
+HWND     desktop_last_window(void);      /* previous focus on THIS desktop */
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything
  * that can empty a desktop; it decides for itself whether there's work to do. */
