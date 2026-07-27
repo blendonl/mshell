@@ -24,6 +24,8 @@ All notable changes to mshell are documented here. This project adheres to
   `ReadDirectoryChangesW`, which names the changed files, and batches touching
   only `session.txt` are ignored. A real `init.lua` save still reloads exactly
   as before.
+- **`layout_bsp` now saves the session like every other layout action**, so a
+  BSP layout survives a restart instead of being forgotten.
 - **The focus ring now follows a floating window while it moves.** A native
   move/resize of the focused float and a mod+drag both left the ring behind at
   the old rect until something else refreshed it; both paths now refresh the
