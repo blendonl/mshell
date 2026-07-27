@@ -665,6 +665,17 @@ typedef struct {
     bool       no_ring;             /* don't draw the focus ring around it   */
     bool       no_decor;            /* strip the frame, add no border at all */
     bool       fullscreen;          /* while floating: cover the monitor     */
+
+    /* --- where the window goes, rather than how it looks ---
+     * Before these, a window always landed on whichever desktop you happened to
+     * be looking at; "open Slack on chat" was expressible only as a desktop
+     * rule's auto-launch, which is a different thing (it fires when you ARRIVE
+     * on an empty desktop, not when the app opens). */
+    wchar_t    desktop[DESKTOP_NAME_MAX];  /* "" = the current desktop        */
+    bool       set_monitor;  int monitor;  /* pin to a display                */
+    bool       set_geometry;               /* fixed rect for a FLOATING window */
+    int        x, y, w, h;
+    bool       start_fullscreen;           /* claim the monitor on open        */
 } WindowRule;
 
 /* ---------------------------------------------------------------------------

@@ -511,9 +511,20 @@ void window_manage(HWND hwnd) {
     /* Grow managed array if needed */
     if (g.managed_count >= MAX_MANAGED_WINDOWS) return;
 
-    /* New windows land on the desktop you are looking at. */
-    int      slot = desktop_current_slot();
-    Desktop *dt   = &g.desktops[slot];
+    /* New windows land on the desktop you are looking at — unless a rule says
+     * otherwise, in which case that desktop is created if it does not exist,
+     * exactly as switching to a name would. The window is added there and, since
+     * only the current desktop is ever tiled, is hidden on the way if you are
+     * not standing on it. */
+    int slot = desktop_current_slot();
+    if (rule && rule->desktop[0]) {
+        int target = desktop_ensure(rule->desktop);
+        if (target >= 0) slot = target;
+        else log_msg(LOG_WARN, L"rule: cannot place a window on '%ls' — the "
+                               L"name is unusable or there are too many "
+                               L"desktops", rule->desktop);
+    }
+    Desktop *dt = &g.desktops[slot];
 
     ManagedWindow *mw = &g.managed[g.managed_count++];
     memset(mw, 0, sizeof(*mw));
@@ -521,8 +532,15 @@ void window_manage(HWND hwnd) {
     mw->desktop_id = dt->id;
     /* Tile it where it opened — unless the desktop is pinned to a display, in
      * which case that is where the desktop's windows go. */
-    window_set_monitor(mw, (dt->monitor >= 0 && dt->monitor < g.monitor_count)
-                             ? dt->monitor : monitor_of_window(hwnd));
+    {
+        /* A desktop pinned to a display wins: it moves ALL its windows there,
+         * so honouring a per-window pin against it would just be undone on the
+         * next reload. Otherwise the rule's pin, then wherever it opened. */
+        int mon = monitor_of_window(hwnd);
+        if (rule && rule->set_monitor) mon = rule->monitor;
+        if (dt->monitor >= 0 && dt->monitor < g.monitor_count) mon = dt->monitor;
+        window_set_monitor(mw, mon);
+    }
     mw->cfact      = 1.0f;
     mw->no_ring    = rule ? rule->no_ring    : false;
     mw->no_decor   = rule ? rule->no_decor   : false;
@@ -551,7 +569,31 @@ void window_manage(HWND hwnd) {
         window_strip_decorations(hwnd);
     }
 
+    /* A fixed rect only means anything for a window the layout is not going to
+     * place. Applied before the tile pass so the first frame is already right,
+     * and recorded as applied so the drift detector reads it as ours. */
+    if (mw->is_floating && rule && rule->set_geometry) {
+        RECT want = { rule->x, rule->y, rule->x + rule->w, rule->y + rule->h };
+        RECT adj  = window_adjust_for_frame(hwnd, want);
+        window_set_pos(hwnd, adj.left, adj.top,
+                       adj.right - adj.left, adj.bottom - adj.top,
+                       SWP_NOZORDER | SWP_NOACTIVATE);
+        mw->applied_rect = want;
+        mw->has_applied  = true;
+    }
+
+    if (rule && rule->start_fullscreen) mw->fs_mode = FS_WINDOW;
+
     desktop_add_window(hwnd, slot);
+
+    /* Hide it if it landed somewhere you are not looking — desktop membership
+     * is show/hide here, and only the current desktop is ever tiled. */
+    if (dt->id != g.current_desktop_id) {
+        events_suppress_begin();
+        ShowWindow(hwnd, SW_HIDE);
+        events_suppress_end();
+    }
+
     tile_current();
 
     /* The tiler never places floating windows, so a fullscreen rule does it
