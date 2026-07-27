@@ -3,6 +3,56 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Fixed
+
+- **Windows still came back black after switching desktops.** 0.13.0 changed
+  how a window is taken off the screen — `ShowWindow(SW_HIDE)` became a DWM
+  cloak — and shipped as though that were the fix. It was not, for a reason
+  that is plain in hindsight: the repaint meant to accompany it was written as
+
+  ```c
+  if (!IsWindowVisible(mw->hwnd)) { ... RedrawWindow ...; has_applied = false; }
+  ```
+
+  and a cloaked window is still `WS_VISIBLE`. On the new default path that
+  branch never ran. No `RedrawWindow`, no dropped `has_applied` — and with
+  `has_applied` intact the tiler's no-op-move skip meant no `SetWindowPos`
+  either, because the window was of course exactly where the layout had already
+  put it. Switching away and back did nothing to the window at all beyond
+  uncloaking it, and an app that had stopped presenting had no reason to start.
+
+  Cloaking is not what makes the difference. An app that renders off the UI
+  thread stops drawing whether it learns it is invisible from the hide or from
+  its own occlusion tracking noticing the cloak; being **asked to draw** on the
+  way back is what matters. So that now happens on every reveal, on either
+  path, decided from mshell's own bookkeeping rather than from
+  `IsWindowVisible` — which for the case that matters most answers "fine":
+
+  - `RedrawWindow` with `RDW_ALLCHILDREN`, because a Chromium window's content
+    lives in a child `HWND` and invalidating only the top level asks the wrong
+    window. No `RDW_UPDATENOW`: synchronous cross-process painting would hang
+    the WM on an app that is not answering.
+  - `has_applied` dropped, plus a `needs_repaint` flag so the tiling pass
+    cannot skip the placement as a no-op move and adds `SWP_NOCOPYBITS`, which
+    stops Windows blitting the stale bits forward.
+  - Floating windows get that placement inline, since the tiler never places
+    them and would never consume the flag.
+
+- **The desktop-switch show loop no longer skips windows the layout had
+  hidden.** That skip saved an uncloak/recloak for monocle's held-back windows,
+  and it was the one place in the reveal path that could decline to show a
+  window at all — a bad trade in code whose failure mode is windows staying
+  invisible. The tile pass re-hides them in the same turn of the message loop.
+
+### Internal
+
+- Each hide and show logs the mechanism it used at debug level, and a DWM that
+  refuses to cloak now warns once. A silent downgrade to `SW_HIDE` is otherwise
+  indistinguishable from cloaking that did not help, which is exactly the
+  confusion that made the first attempt at this take two goes.
+
 ## 0.13.1 — 2026-07-27
 
 ### Fixed
@@ -165,23 +215,16 @@ All notable changes to mshell are documented here. This project adheres to
   by definition exactly where it was, so no resize arrived to shake it out of
   it. A whole desktop's worth of windows could come back blank at once.
 
-  The fix is to **always ask the window to draw when it comes back** —
-  `RedrawWindow` over the window and its children (a Chromium window's content
-  is in a child HWND), plus a forced re-placement carrying `SWP_FRAMECHANGED`
-  and `SWP_NOCOPYBITS` so the tiler cannot skip it as a no-op move and Windows
-  cannot blit the stale bits forward. Monocle and the scratchpad reveal windows
-  through the same path and get the same fix.
+  Windows are now taken off the screen by **cloaking** them through DWM
+  (`DWMWA_CLOAK`) instead, which is the mechanism Windows' own virtual desktops
+  use and keeps the window from being torn down while it is away. Monocle and
+  the scratchpad hide windows the same way.
 
-  Windows are also **cloaked** through DWM (`DWMWA_CLOAK`) rather than hidden
-  now, which is the mechanism Windows' own virtual desktops use and keeps the
-  window from being torn down while it is away. That change alone was NOT
-  enough and was briefly shipped as though it were: an app stops presenting
-  whether it learns it is invisible from the hide or from its own occlusion
-  tracking noticing the cloak. Being asked to draw on the way back is what
-  actually matters, and it now happens on both paths.
+  `mshell.set_hide_policy("hide")` restores the old mechanism.
 
-  `mshell.set_hide_policy("hide")` restores the old `ShowWindow(SW_HIDE)`
-  mechanism; the repaint applies there too.
+  **This did not actually fix it** — see the Unreleased entry above. Cloaking
+  changed how a window is hidden without changing the thing that mattered,
+  which is whether anything asks it to draw on the way back.
 
 - **Leaving monocle could strand its hidden windows.** `layout_hidden` was set
   by monocle and the BSP tree but never cleared by the layouts that hide
