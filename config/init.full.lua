@@ -268,6 +268,13 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- Ignore windows smaller than this (default 120x80):
 -- mshell.set_min_window_size(120, 80)
 
+-- Notice windows that flash for attention, and mark them urgent. OFF by
+-- default, and deliberately: it costs a hook on EVENT_OBJECT_STATECHANGE, which
+-- fires for every control on the system. Until this is on, nothing is ever
+-- urgent and the `jump_urgent` key in the desktop sub-map (leader d u) has
+-- nothing to jump to — uncomment if you want that key to do something:
+-- mshell.set_urgency(true)
+
 ----------------------------------------------------------------------
 -- Fullscreen
 ----------------------------------------------------------------------
@@ -447,6 +454,11 @@ mshell.submap("window", {
     k     = "kill",
     f     = "toggle_float",
     Space = "promote_master",
+    -- Tab is the window-level twin of the desktop map's Tab: back to the window
+    -- you were on before this one, and again to come back. o pins a floating
+    -- window over the tiled grid (o for "on top"); toggling off demotes it.
+    Tab   = "last_window",
+    o     = "toggle_always_on_top",
     -- fullscreen (see the Fullscreen section above): w = the WINDOW fills the
     -- monitor, i = the app's own fullscreen stays INSIDE the window, a = both
     w     = "fullscreen",
@@ -465,10 +477,17 @@ mshell.submap("window", {
 -- Desktop sub-map (persisting — cycle focus within the current desktop and stay
 -- put between presses; Esc leaves). Tab jumps back to the desktop you came from
 -- and, since it swaps the pair every time, pressing it again returns you here.
+-- u goes to whatever asked for attention, WHEREVER it is — including a desktop
+-- you are not on, which is the case that flag exists for: a window that flashes
+-- its taskbar button has no taskbar to flash under mshell, so this is how you
+-- find it. It needs mshell.set_urgency(true) (commented out in the Tiling
+-- policy section above, because tracking urgency is not free); without it
+-- nothing is ever urgent and this key does nothing.
 mshell.submap("desktop", {
     h   = "focus_prev",
     l   = "focus_next",
     Tab = "last_desktop",
+    u   = "jump_urgent",
 }, { persist = true })
 
 -- Launch sub-map (one-shot). Shows the richer {"action", arg} binding form, so
@@ -486,11 +505,123 @@ local launch_keys = {
     b      = {"spawn", "firefox.exe"},
     e      = {"spawn", "explorer.exe"},   -- file manager on demand
     t      = {"spawn", {"wt.exe", "-p Ubuntu"}},
+    -- mshell's own launcher: a filter over your Start-menu shortcuts, and a Run
+    -- box for anything that matches nothing. It belongs in a ONE-SHOT map: the
+    -- launcher takes every keystroke while it is open, and this map has already
+    -- dropped you back to root by the time you are typing into it. On the
+    -- persisting leader instead, the leader would still be swallowing keys the
+    -- moment the launcher closed.
+    p      = "launcher",
 }
 if flow then
     launch_keys.a = {"spawn", flow}       -- Flow Launcher (pops its search box)
 end
 mshell.submap("launch", launch_keys)
+
+-- Media sub-map (persisting — volume is something you nudge, not something you
+-- set once, so stay put between presses; Esc leaves).
+--
+-- These actions synthesise the real media virtual-keys, so Windows' own volume
+-- indicator appears and per-app volume keeps working. A keyboard that HAS
+-- dedicated media keys never needs this map — those keys work already, below
+-- our hook. It is for the keyboards that don't, which under mshell have no
+-- other route to volume at all, because every Win+key combo belongs to us.
+--
+-- No digit is bound here, which leaves the vim-style repeat count free:
+-- `10k` is ten volume steps, because volume_up/volume_down are two of the
+-- actions a count is allowed to repeat.
+mshell.submap("media", {
+    k     = "volume_up",
+    j     = "volume_down",
+    m     = "volume_mute",
+    Space = "media_play",
+    l     = "media_next",
+    h     = "media_prev",
+    s     = "media_stop",
+}, { persist = true })
+
+-- Power sub-map (one-shot). Nested one layer under `system` below, and that is
+-- the whole safety story: there is no confirmation dialog anywhere in mshell,
+-- so `shut down` is four deliberate taps (Win, x, p, d) with Esc bailing out at
+-- every one of them. One-shot matters here too — in a persisting map a stray
+-- keypress sits in a map full of destructive keys, whereas here anything
+-- unbound simply drops you back to root having done nothing.
+--
+-- Every one of these exists because replacing Explorer removes the route to it:
+-- there is no Start menu to pick "Shut down" from, and `quit` is not a
+-- substitute, since exiting AS THE SHELL ends the session whatever you meant.
+mshell.submap("power", {
+    l = "lock",
+    s = "sleep",
+    h = "hibernate",
+    o = "logoff",
+    r = "reboot",
+    d = {"shutdown", {desc = "shut down (!)"}},
+})
+
+-- System sub-map (one-shot). mshell's own lifecycle lives here; the OS's power
+-- state lives one layer down under p, so nothing that ends your session shares
+-- a keypress with something that doesn't.
+--
+-- reload and quit keep their Win+Shift+r / Win+Shift+q chords as well — this is
+-- an added route, not a replacement.
+mshell.submap("system", {
+    p = {"enter_submap", "power"},
+    r = "reload",
+    q = "quit",
+    -- The escape hatch: starts Explorer alongside mshell and stops the hook
+    -- binding anything, so a misbehaving shell doesn't need Task Manager. It
+    -- deliberately does NOT quit. Nothing you press can undo it (not binding
+    -- keys is the point) — the way back is `mshell.exe --msg reload`, or just
+    -- saving this file, since auto-reload is on.
+    x = "panic",
+    -- Anything a config can do, a binding can do — including raising a
+    -- notification. mshell.notify is one of the few API calls that is legal at
+    -- RUNTIME as well as config time, which is what makes this possible.
+    -- (Win+Ctrl+i further down logs the same thing instead of showing it.)
+    -- Note: a function binding cannot carry a which-key label, so this key is
+    -- absent from the hint panel while the rest of the map is listed.
+    i = function()
+        local d = mshell.get_current_desktop()
+        local w = mshell.get_focused_window()
+        mshell.notify(("%s — %s, %d windows\nfocus: %s")
+            :format(d and d.name or "?", d and d.layout or "?",
+                    d and d.windows or 0, w and w.process or "nothing"))
+    end,
+})
+
+-- Capture sub-map (one-shot — take one, then back to root).
+-- Both write a PNG to Pictures\Screenshots AND put the image on the clipboard,
+-- so it can be pasted straight into whatever asked for it.
+mshell.submap("capture", {
+    s = "screenshot",           -- the whole virtual screen, every monitor
+    w = "screenshot_window",    -- just the focused window
+})
+
+-- Manual tiling sub-map (persisting — building a layout is several decisions in
+-- a row, so stay; Esc leaves).
+--
+-- `bsp` is the manual layout: windows split wherever you were, rather than
+-- flowing into a master/stack. h/v choose the direction the NEXT window takes,
+-- and any split can become a tabbed or stacked container showing one window at
+-- a time. The tree is an index over the window list, not a replacement for it,
+-- so a desktop moves between bsp and the dynamic layouts freely.
+--
+-- = and - carry a desc because "split_grow" in a hint panel says less than the
+-- key does. They are not count-repeatable, but the map persists, so the answer
+-- to wanting more is to press again.
+mshell.submap("bsp", {
+    b = "layout_bsp",           -- put this desktop in the manual layout
+    h = "split_h",              -- next window splits horizontally
+    v = "split_v",              -- …vertically
+    r = "rotate_split",         -- flip the split holding the focused window
+    t = "toggle_tabbed",
+    s = "toggle_stacked",
+    n = "container_next",       -- show the container's other child
+    p = "container_prev",
+    ["="] = {"split_grow",   {desc = "grow split"}},
+    ["-"] = {"split_shrink", {desc = "shrink split"}},
+}, { persist = true })
 
 -- The two desktop maps, both built from the `desktops` table in the Desktops
 -- section above — same keys in each, so `g` and `m` differ only in what moves:
@@ -512,7 +643,12 @@ mshell.submap("move", move_keys)
 -- it the leader is the mshell.set_leader call below. It's persisting, so you
 -- stay in it and can fire several keys in a row. Every sub-map above is reachable
 -- from here without touching Win: w → window, r → resize, d → desktop, o → launch,
--- g → go (jump to a desktop), m → move (send the focused window to one).
+-- g → go (jump to a desktop), m → move (send the focused window to one),
+-- u → media, x → system (and x p → power), c → capture, b → bsp.
+--
+-- Those last four are deliberately leader-ONLY, with no Win+key equivalent: a
+-- tap and two bare keys reaches anything here, and nothing in this file asks
+-- you to hold three keys at once to reach a feature.
 mshell.submap("normal", {
     -- focus navigation (stay in normal — press h/j/k/l as many times as you like)
     h = "focus_left",
@@ -526,6 +662,10 @@ mshell.submap("normal", {
     o = {"enter_submap", "launch"},
     g = {"enter_submap", "go"},       -- go to a desktop      (g b, g t, g v, …)
     m = {"enter_submap", "move"},     -- send a window to one  (m b, m t, m v, …)
+    u = {"enter_submap", "media"},    -- volume and track      (u k, u j, u m, …)
+    x = {"enter_submap", "system"},   -- reload/quit/panic, and x p for power
+    c = {"enter_submap", "capture"},  -- screenshots           (c s, c w)
+    b = {"enter_submap", "bsp"},      -- manual tiling         (b h, b v, b t, …)
     -- quick one-key actions
     Return = "promote_master",
     Space  = "cycle_layout",
