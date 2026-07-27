@@ -177,6 +177,10 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             desktop_focus_update(hwnd);
             if (mw && mw->monitor >= 0 && mw->monitor < g.monitor_count)
                 g.focused_monitor = mw->monitor;
+            /* Whoever was activated is now on top of its band. Clicking a tiled
+             * window therefore buries the floats, and this is the only place
+             * that hears about it — window_focus() never ran. */
+            window_raise_floats();
             border_refresh();   /* ring follows mouse/app focus too */
         }
         break;

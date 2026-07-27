@@ -944,11 +944,68 @@ void window_reassert_rule(HWND hwnd) {
 }
 
 /* ===========================================================================
+ * Raise the floating windows of the current desktop above the tiled grid, so
+ * they read as overlays instead of sinking behind a tiled window.
+ *
+ * Its own entry point rather than part of window_enforce_zorder() because a
+ * tiling pass is not the only thing that disturbs the order — and not even the
+ * common one. Activating a window raises it, so focusing a *tiled* window, by
+ * keybind or by click, drops every float behind it with no tiling pass in
+ * sight. Every focus change therefore has to re-assert this.
+ *
+ * Windows already in the topmost band are skipped: they are above the tiled
+ * grid by definition, and threading one into the chain below would drag the
+ * rest of the floats up there with it — SetWindowPos promotes the window it
+ * positions to topmost whenever hWndInsertAfter is itself topmost.
+ * =========================================================================== */
+void window_raise_floats(void) {
+    if (!g.float_on_top) return;
+
+    HWND floats[MAX_WINDOWS_PER_DESKTOP];
+    int  n = 0;
+
+    /* Walk the system z-order (top first) rather than Desktop.windows[], so a
+     * pass preserves how the floats are already stacked against each other.
+     * Raising them in desktop order would re-shuffle two overlapping floats on
+     * every focus change, which is a worse tic than the bug being fixed. */
+    for (HWND h = GetTopWindow(NULL); h && n < MAX_WINDOWS_PER_DESKTOP;
+         h = GetWindow(h, GW_HWNDNEXT)) {
+        ManagedWindow *mw = window_find(h);
+        if (!mw || !mw->is_floating) continue;
+        if (mw->desktop_id != g.current_desktop_id) continue;
+        if (!IsWindowVisible(h) || IsIconic(h)) continue;
+        if (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOPMOST) continue;
+        floats[n++] = h;
+    }
+    if (n == 0) return;
+
+    /* Among the floats, the focused one belongs on top — it is the window the
+     * user just asked to look at. */
+    HWND focused = desktop_get_focused();
+    for (int i = 1; i < n; i++) {
+        if (floats[i] != focused) continue;
+        memmove(&floats[1], &floats[0], (size_t)i * sizeof floats[0]);
+        floats[0] = focused;
+        break;
+    }
+
+    /* Chain them: the first goes to the top of the ordinary band, each of the
+     * rest directly under its predecessor. */
+    HWND after = HWND_TOP;
+    for (int i = 0; i < n; i++) {
+        SetWindowPos(floats[i], after, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        after = floats[i];
+    }
+}
+
+/* ===========================================================================
  * Enforce a sane z-order after a tiling pass:
  *   - the solid backdrop stays pinned to the very bottom so it can never rise
  *     up and black out the tiled windows;
  *   - optionally (float_on_top) floating windows are raised above the tiled
- *     grid so they read as overlays instead of sinking behind a tiled window.
+ *     grid;
+ *   - fullscreen and always-on-top windows go into the topmost band.
  * Tiled windows never overlap each other, so their relative order is moot.
  * =========================================================================== */
 void window_enforce_zorder(void) {
@@ -958,15 +1015,7 @@ void window_enforce_zorder(void) {
 
     Desktop *dt = desktop_current();
 
-    if (g.float_on_top) {
-        for (int i = 0; i < dt->count; i++) {
-            ManagedWindow *mw = window_find(dt->windows[i]);
-            if (mw && mw->is_floating && IsWindow(mw->hwnd) &&
-                IsWindowVisible(mw->hwnd))
-                SetWindowPos(mw->hwnd, HWND_TOP, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-    }
+    window_raise_floats();
 
     /* A window covering the whole monitor goes above everything else — raised
      * last, so it beats the floating pass above too: an overlay stranded in the
@@ -1126,6 +1175,11 @@ void window_focus(HWND hwnd) {
         /* Looking at it is what "attention given" means. */
         if (mw) mw->urgent = false;
     }
+
+    /* Activation just raised this window to the top of its band. If it is a
+     * tiled one, that put it over any float it overlaps, so put the floats
+     * back — before the ring is placed, which stacks itself at HWND_TOP. */
+    window_raise_floats();
 
     /* Keep the focus ring on the newly-focused window. */
     border_refresh();
