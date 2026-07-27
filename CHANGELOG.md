@@ -7,6 +7,19 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Fixed
 
+- **A version bump no longer builds under the old number.** `VERSION` reaches
+  the compiler as `-DMSHELL_VERSION` and windres as `-DVER_MAJOR` and friends,
+  and make compares timestamps, not command lines: after a bump every object
+  already on disk was still "up to date", so the new number reached only the
+  files something else happened to have made stale. The build then succeeded and
+  lied — `make dist` produced a zip named for one version holding a binary that
+  reported another in its VERSIONINFO, its startup log line, the `--msg status`
+  JSON and the update check, which compares that string against the latest
+  release and would have offered an upgrade to a version the binary already was.
+  0.13.1's own first build called itself 0.12.0. The objects that bake the
+  version in now depend on a stamp file named after it, so a bump invalidates
+  exactly those (Lua's 32, which never mention it, are left alone).
+
 - **A window mshell hid could be disowned a moment later and lost for good.**
   The `EVENT_OBJECT_HIDE` handler has to decide who hid a window — the app
   minimising itself to the tray, or mshell taking it off the screen for a
