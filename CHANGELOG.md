@@ -3,7 +3,7 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
-## Unreleased
+## 0.13.1 — 2026-07-27
 
 ### Fixed
 
