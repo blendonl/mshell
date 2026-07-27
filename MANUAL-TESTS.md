@@ -28,6 +28,8 @@ exists, so they are worth re-running before any release.
 
 ## Status bar (0.10.0)
 
+With `mode = "top_bar"` (the default):
+
 - It appears on **every** monitor, at the top, and tiled windows start below it
   rather than underneath it.
 - The desktop list updates as desktops are created and destroyed; the current
@@ -39,6 +41,32 @@ exists, so they are worth re-running before any release.
 - On a scaled display the bar is proportionate, not tiny or huge.
 - `modules = {"desktops"}` leaves only the desktop list.
 - `enabled = false`, save: the bar disappears and windows reclaim the space.
+
+## Floating bar mode
+
+With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
+
+- One panel, in the **middle of the screen**, showing the time large with the
+  date under it, then the desktops and layout, then the focused title.
+- Tiled windows fill the whole monitor: the panel reserves nothing and sits
+  over them.
+- Clicking where the panel is reaches the window **underneath** it — it never
+  takes focus and never swallows a click.
+- Only one panel on a multi-monitor desk. Focus a window on another display and
+  it moves there.
+- `mshell.exe --msg 'notify hello'` appears **in the panel**, not as a separate
+  toast, and the panel grows to fit it and shrinks again when it expires. A
+  warn/error notification's dot is yellow/red.
+- Several messages list newest-first; long ones wrap rather than being clipped.
+- Bind `toggle_bar`: the panel disappears and comes back. While it is hidden, a
+  notification appears as an ordinary toast again.
+- Switching to `mode = "top_bar"` and back at reload leaves no stray window and
+  no duplicate notifications.
+- On a scaled display, the panel and its type are proportionate.
+- A window that opens floating is centred on the same spot the panel occupies —
+  floats centre on the work area, and floating mode reserves none of it. The
+  panel is drawn over it and passes clicks through, so this is a look, not a
+  loss of function; `toggle_bar` gets it out of the way.
 
 ## Control channel (0.10.0)
 
@@ -237,6 +265,32 @@ The three modes are distinct and each key is its own toggle:
   (the default), no STATECHANGE hook is installed — check the log.
 - `rule({ title = "Picture-in-Picture" }, "float")` floats only that window of a
   browser, leaving the main window tiled.
+
+## Floating placement
+
+- Open a window with a `"float"` rule (Task Manager will do). It appears in the
+  **middle** of the monitor at its own size, in one step — no frame in the
+  corner followed by a jump.
+- `Win+f` on a tiled window: it keeps the size of the tile it left and moves to
+  the centre. `Win+f` again re-tiles it.
+- Open a file picker (`Ctrl+O` in any app, with the default `dialog = true`
+  rule): centred too.
+- On a second monitor, a float centres on the monitor it opened on, not on the
+  primary. With `desktop_rule(..., { monitor = 1 })` it centres on the pinned
+  display.
+- With the bar at the top (and again with `position = "bottom"`), a centred
+  float sits in the middle of the space *beside* the bar, never under it.
+- A window taller or wider than the work area is pinned to the top-left corner
+  of it rather than hanging off two edges.
+- `set_float_placement("none")`, save, open a float: it stays exactly where the
+  app put it. Windows already open are unaffected until they float again.
+- `rule({ process = "Flow.Launcher.exe" }, "float", { center = false })` — that
+  overlay keeps its own position while other floats still centre.
+- A rule with `geometry = {x, y, w, h}` still lands on that exact rect, and one
+  with `fullscreen = true` still covers the monitor.
+- Maximise a floating window (its own button, or `Win+Up`): it stays maximised
+  rather than being shrunk to a centred rect. Same for a minimised one — it does
+  not pop back open to be centred.
 - `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
   the others keep the global gaps.
 
@@ -329,6 +383,22 @@ and whether it is still readable.
 - Apply a tweak whose value did not previously exist, then revert: the value is
   **deleted**, not set to a default.
 - `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
+
+## Floating windows stay on top
+
+Open one tiled window and one floating one (`Win+f`), overlapping.
+
+- Focus the tiled window with `Win+h`/`Win+l`: the float stays visible on top.
+- Click the tiled window where the float does *not* cover it: same — the float
+  comes straight back over it rather than staying buried.
+- Two overlapping floats: focusing the lower one raises it, and focusing a tiled
+  window afterwards leaves the two floats in that same order instead of
+  swapping them.
+- `toggle_always_on_top` on one of two floats keeps it over the other one.
+- `mshell.set_float_on_top(false)` and reload: the old behaviour is back — the
+  float sinks behind whatever you focus.
+- A float minimized and restored is still on top; one moved to another desktop
+  does not raise itself over the desktop you are looking at.
 
 ## Shell-mode only
 

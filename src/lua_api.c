@@ -861,6 +861,26 @@ static int lua_mshell_set_fullscreen_policy(lua_State *L) {
     return 0;
 }
 
+/* mshell.set_float_placement("center" | "none")
+ *
+ * Where a window that is NOT tiled ends up:
+ *   "center" (default) in the middle of its monitor's work area — both the
+ *            window that opens floating (a rule, or a floating desktop) and the
+ *            one toggle_float just took out of the grid;
+ *   "none"   wherever the app opened it, which is what every release before
+ *            this setting existed did.
+ * Only the position: the size stays whatever the app asked for, clamped to the
+ * work area. A rule's `geometry` names an exact rect and beats this, a rule's
+ * `fullscreen` parks over the whole monitor and beats it, and `center` in a
+ * rule's opts overrides it per app in either direction. */
+static int lua_mshell_set_float_placement(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "center") == 0) g.float_placement = FLOAT_PLACE_CENTER;
+    else if (strcmp(s, "none")   == 0) g.float_placement = FLOAT_PLACE_NONE;
+    else return luaL_error(L, "float_placement must be 'center' or 'none'");
+    return 0;
+}
+
 /* mshell.set_attach("end" | "master" | "after") */
 static int lua_mshell_set_attach(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
@@ -877,7 +897,8 @@ static int lua_mshell_set_manage_owned(lua_State *L) {
     return 0;
 }
 
-/* mshell.set_float_on_top(enabled) — keep floating windows above tiled ones */
+/* mshell.set_float_on_top(enabled) — keep floating windows above tiled ones.
+ * On by default; pass false to let a float sink behind the window you focus. */
 static int lua_mshell_set_float_on_top(lua_State *L) {
     g.float_on_top = lua_toboolean(L, 1);
     return 0;
@@ -926,6 +947,10 @@ static int lua_mshell_set_min_window_size(lua_State *L) {
  *                                  chrome, this makes them borderless
  *              fullscreen = true   park it over the whole monitor it opened on
  *                                  (full bounds, no gaps); floating only
+ *              center     = false  don't centre this app's floating windows —
+ *                                  leave them where the app opens them (see
+ *                                  set_float_placement). true forces centring
+ *                                  under a config that turned it off
  *            The three together are the game preset: never tiled, borderless,
  *            covering the display, with no ring painted over its edges.
  * =========================================================================== */
@@ -1030,6 +1055,19 @@ static int lua_mshell_rule(lua_State *L) {
 
         lua_getfield(L, 3, "start_fullscreen");
         if (lua_isboolean(L, -1)) r->start_fullscreen = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        /* center = false — this app places its own floating windows well
+         * enough (a picture-in-picture player parked in a corner), so leave
+         * them alone. center = true opts one app in under a config that
+         * centres nothing. Only a real boolean counts: a missing key means
+         * "whatever set_float_placement says", which is not the same as false.
+         * Redundant beside `geometry`, which is already an exact rect. */
+        lua_getfield(L, 3, "center");
+        if (lua_isboolean(L, -1)) {
+            r->set_center = true;
+            r->center     = lua_toboolean(L, -1);
+        }
         lua_pop(L, 1);
     }
 
@@ -1539,15 +1577,22 @@ static int lua_mshell_log(lua_State *L) {
  * mshell.set_bar(opts) — the status bar.
  *   opts — table, any subset of:
  *     enabled  = true|false      show it at all                  (default true)
- *     position = "top"|"bottom"                                  (default top)
+ *     mode     = "top_bar"|"floating"                        (default top_bar)
+ *     position = "top"|"bottom"          top_bar mode only      (default top)
  *     height   = 28              design pixels at 96 DPI, scaled per monitor
  *     bg / fg / accent / dim = 0xRRGGBB
- *     modules  = {"desktops", "layout", "title", "clock"}   drawn left to right
+ *     modules  = {"desktops", "layout", "title", "clock", "notifications"}
  *
- * One bar per monitor, all showing the same thing — a desktop in mshell spans
- * every display, so there is no per-monitor desktop list to show. The bar
- * reserves its strip out of each monitor's work area, so tiled windows sit
+ * top_bar: one strip per monitor, all showing the same thing — a desktop in
+ * mshell spans every display, so there is no per-monitor desktop list to show.
+ * It reserves its strip out of each monitor's work area, so tiled windows sit
  * below it while a fullscreen window still covers it.
+ *
+ * floating: one panel in the middle of the focused monitor, sections stacked
+ * rather than in a row, reserving nothing — it floats over the windows instead
+ * of pushing them down. That extra room is what "notifications" needs, so in
+ * this mode the panel is where mshell's messages appear and notify.c stops
+ * raising its own toasts. `height` still drives the type scale.
  * =========================================================================== */
 static int lua_mshell_set_bar(lua_State *L) {
     reject_at_runtime(L, "set_bar");
@@ -1555,6 +1600,16 @@ static int lua_mshell_set_bar(lua_State *L) {
 
     lua_getfield(L, 1, "enabled");
     if (!lua_isnil(L, -1)) g.bar_enabled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "mode");
+    if (lua_isstring(L, -1)) {
+        const char *s = lua_tostring(L, -1);
+        if      (strcmp(s, "top_bar")  == 0) g.bar_mode = BAR_MODE_TOP_BAR;
+        else if (strcmp(s, "floating") == 0) g.bar_mode = BAR_MODE_FLOATING;
+        else return luaL_error(L, "set_bar: mode must be 'top_bar' or "
+                                  "'floating'");
+    }
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "position");
@@ -1600,11 +1655,13 @@ static int lua_mshell_set_bar(lua_State *L) {
             else if (m && strcmp(m, "layout")   == 0) mods |= BAR_MOD_LAYOUT;
             else if (m && strcmp(m, "title")    == 0) mods |= BAR_MOD_TITLE;
             else if (m && strcmp(m, "clock")    == 0) mods |= BAR_MOD_CLOCK;
+            else if (m && strcmp(m, "notifications") == 0)
+                mods |= BAR_MOD_NOTIFICATIONS;
             else {
                 lua_pop(L, 2);
                 return luaL_error(L, "set_bar: unknown module '%s' (expected "
-                                     "desktops, layout, title or clock)",
-                                  m ? m : "?");
+                                     "desktops, layout, title, clock or "
+                                     "notifications)", m ? m : "?");
             }
             lua_pop(L, 1);
         }
@@ -1959,6 +2016,7 @@ void lua_register_api(lua_State *L) {
         {"set_layout",      lua_mshell_set_layout},
         {"set_float_policy",lua_mshell_set_float_policy},
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
+        {"set_float_placement",lua_mshell_set_float_placement},
         {"set_attach",      lua_mshell_set_attach},
         {"set_mouse",       lua_mshell_set_mouse_tbl},
         {"set_animation",   lua_mshell_set_animation},
