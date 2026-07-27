@@ -28,6 +28,8 @@ static void config_apply_defaults(void) {
     g.corner_pref      = 1;   /* DWMWCP_DONOTROUND */
     g.background_color = DEFAULT_BACKGROUND_COLOR;
     g.mouse_enabled    = true;
+    g.mouse_follow     = false;
+    g.mouse_mod_drag   = false;
     g.bar_enabled      = true;
     g.bar_bottom       = false;
     g.bar_height       = DEFAULT_BAR_HEIGHT;
@@ -114,7 +116,7 @@ typedef struct {
     COLORREF  background_color;
     bool      block_system_keys;
     bool      auto_reload;
-    bool      mouse_enabled;
+    bool      mouse_enabled, mouse_follow, mouse_mod_drag;
     bool      bar_enabled, bar_bottom;
     int       bar_height;
     unsigned  bar_modules;
@@ -162,6 +164,8 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->block_system_keys = g.block_system_keys;
     s->auto_reload       = g.auto_reload;
     s->mouse_enabled     = g.mouse_enabled;
+    s->mouse_follow      = g.mouse_follow;
+    s->mouse_mod_drag    = g.mouse_mod_drag;
     s->bar_enabled       = g.bar_enabled;
     s->bar_bottom        = g.bar_bottom;
     s->bar_height        = g.bar_height;
@@ -248,6 +252,8 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.block_system_keys = s->block_system_keys;
     g.auto_reload       = s->auto_reload;
     g.mouse_enabled     = s->mouse_enabled;
+    g.mouse_follow      = s->mouse_follow;
+    g.mouse_mod_drag    = s->mouse_mod_drag;
     g.bar_enabled       = s->bar_enabled;
     g.bar_bottom        = s->bar_bottom;
     g.bar_height        = s->bar_height;
@@ -688,6 +694,7 @@ void config_reload(void) {
     update_work_area();
     bar_reconfigure();
     monitors_apply_rules();  /* the config's per-display overrides changed */
+    mouse_sync_hook();       /* Mod+drag may have been turned on or off */
     events_sync_urgency();   /* the setting may have flipped either way */
     desktop_reapply();
 }
