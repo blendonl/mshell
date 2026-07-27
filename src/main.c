@@ -419,16 +419,22 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         wchar_t cmd[MAX_PATH];
         wchar_t args[SPAWN_ARGS_MAX];
         wchar_t cwd[MAX_PATH];
+        int     count = 0;
 
         if (kb_take_pending((unsigned)lp, &action, &arg,
                             cmd, MAX_PATH, args, SPAWN_ARGS_MAX,
-                            cwd, MAX_PATH)) {
+                            cwd, MAX_PATH, &count)) {
             log_w(L"hook match: vk=0x%02X mods=0x%X -> action=%d",
                   (unsigned)(wp & 0xFFFF), (unsigned)((wp >> 16) & 0xFFFF),
                   (int)action);
-            execute_action(action, arg, cmd[0] ? cmd : NULL,
-                           args[0] ? args : NULL,
-                           cwd[0] ? cwd : NULL);
+            /* A vim-style count repeats motion and sizing only; anything
+             * else runs once however many digits preceded it, because "3q"
+             * must not be three quits. */
+            int reps = (count > 1 && action_is_repeatable(action)) ? count : 1;
+            for (int i = 0; i < reps; i++)
+                execute_action(action, arg, cmd[0] ? cmd : NULL,
+                               args[0] ? args : NULL,
+                               cwd[0] ? cwd : NULL);
         }
         return 0;
     }

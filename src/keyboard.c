@@ -353,6 +353,11 @@ static bool mod_lshift, mod_rshift, mod_lctrl, mod_rctrl, mod_lalt, mod_ralt;
  * chose via mshell.set_leader). `win_used` records whether any key was seen
  * while Win was held; if not, the Win-up is a bare tap. Reset on a
  * fresh Win-down, set by the first non-Win key observed while Win is held. */
+/* Pending vim-style repeat count, built from digits typed inside a submap and
+ * consumed by the next action. Hook-thread state, guarded by kb_lock like the
+ * map pointer it sits beside. */
+static int s_count;
+
 static bool win_used;
 
 static DWORD current_mods(void) {
@@ -392,6 +397,7 @@ void kb_reset_state(void) {
     mod_lalt = mod_ralt = false;
     win_used = false;
     kb_lock();
+    s_count = 0;              /* a half-typed count must not survive this */
     g.current_map = g.root_map;
     notify_submap();          /* drop the hint if a submap was showing */
     kb_unlock();
@@ -428,6 +434,7 @@ typedef struct {
     wchar_t  command[MAX_PATH];
     wchar_t  args[SPAWN_ARGS_MAX];
     wchar_t  cwd[MAX_PATH];
+    int      count;                /* vim-style repeat; 0 or 1 = once */
 } PendingAction;
 
 /* Bounded copy that does not zero-pad the destination (unlike wcsncpy). Used
@@ -457,6 +464,8 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
     pend_copy(p->command, MAX_PATH,        b->command);
     pend_copy(p->args,    SPAWN_ARGS_MAX,  b->args);
     pend_copy(p->cwd,     MAX_PATH,        b->cwd);
+    p->count  = s_count;
+    s_count   = 0;   /* consumed by this action, whatever it turns out to be */
     p->seq = seq;   /* last: the slot is only valid once fully written */
 
     /* wParam still carries the triggering key (low word) + modifiers (high
@@ -473,7 +482,7 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
 bool kb_take_pending(unsigned seq, Action *action, int *arg,
                      wchar_t *cmd, size_t cmd_cap,
                      wchar_t *args, size_t args_cap,
-                     wchar_t *cwd, size_t cwd_cap) {
+                     wchar_t *cwd, size_t cwd_cap, int *count) {
     bool ok = false;
 
     kb_lock();
@@ -493,6 +502,7 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
             pend_copy(cmd,  cmd_cap,  p->command);
             pend_copy(args, args_cap, p->args);
             pend_copy(cwd,  cwd_cap,  p->cwd);
+            *count = p->count;
             ok = true;
         }
     }
@@ -563,6 +573,7 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
             } else {
                 g.current_map = g.root_map;
             }
+            s_count = 0;              /* leaving the map abandons its count */
         }
         notify_submap();            /* show/hide the hint as the map changes */
         kb_unlock();
@@ -629,12 +640,34 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         DWORD exit_vk = map->exit_vk ? map->exit_vk : VK_ESCAPE;
         KeyBinding *b = keymap_find(map, kmods, vk);
 
+        /* ---- vim-style counts ----
+         * A digit typed inside a submap builds a repeat count for the next
+         * action: "3j" focuses down three times.
+         *
+         * It only applies to a digit the map does NOT bind, which is what keeps
+         * it from breaking any existing config — the shipped one puts the
+         * desktops on 1..9 inside the `go` map, and those keep working exactly
+         * as before because the binding is found first. A leading 0 is likewise
+         * left alone, so a desktop named "0" stays reachable; 0 only counts once
+         * a count is already being built ("10j").
+         *
+         * Root-map chords are deliberately excluded: they need Win held, and
+         * "Win+3 Win+j" is not a gesture anyone wants. Counts belong to the
+         * bare-key mode, which is what a submap is. */
+        if (!b && kmods == 0 && vk >= '0' && vk <= '9' &&
+            (s_count > 0 || vk > '0')) {
+            int d = (int)(vk - '0');
+            s_count = (s_count > 99) ? 999 : s_count * 10 + d;  /* cap, no wrap */
+            goto done;                    /* swallowed; the map is unchanged */
+        }
+
         if (map->persist) {
             /* Persisting: the exit key leaves (checked first so it can't be
              * shadowed by a binding); a bound key fires and, unless flagged
              * terminal, keeps us here; any other key is ignored — you stay. */
             if (vk == exit_vk) {
                 g.current_map = g.root_map;
+                s_count = 0;          /* abandon a half-typed count too */
             } else if (b) {
                 if (b->action == ACTION_ENTER_SUBMAP) {
                     g.current_map = b->submap;
@@ -871,6 +904,39 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     mw->has_applied  = true;
     mw->monitor      = monitor_of_window(mw->hwnd);
     border_refresh();
+}
+
+/* ---------------------------------------------------------------------------
+ * Which actions a repeat count applies to.
+ *
+ * A whitelist rather than a blacklist, deliberately: the failure mode of
+ * guessing wrong is "3q quit three times" or "3<Return> launched three
+ * terminals", so a new action has to opt in rather than inherit repetition it
+ * was never considered for. Everything here is motion, ordering or sizing —
+ * idempotent-ish, visibly reversible, and meaningless to do once when you asked
+ * for five.
+ * --------------------------------------------------------------------------- */
+bool action_is_repeatable(Action action) {
+    switch (action) {
+    case ACTION_FOCUS_LEFT:  case ACTION_FOCUS_DOWN:
+    case ACTION_FOCUS_UP:    case ACTION_FOCUS_RIGHT:
+    case ACTION_FOCUS_NEXT:  case ACTION_FOCUS_PREV:
+    case ACTION_MOVE_LEFT:   case ACTION_MOVE_DOWN:
+    case ACTION_MOVE_UP:     case ACTION_MOVE_RIGHT:
+    case ACTION_RESIZE_LEFT: case ACTION_RESIZE_DOWN:
+    case ACTION_RESIZE_UP:   case ACTION_RESIZE_RIGHT:
+    case ACTION_NEXT_DESKTOP: case ACTION_PREV_DESKTOP:
+    case ACTION_FOCUS_MONITOR_NEXT: case ACTION_FOCUS_MONITOR_PREV:
+    case ACTION_MOVE_TO_MONITOR_NEXT: case ACTION_MOVE_TO_MONITOR_PREV:
+    case ACTION_INC_MASTER:  case ACTION_DEC_MASTER:
+    case ACTION_INC_NMASTER: case ACTION_DEC_NMASTER:
+    case ACTION_INC_CFACT:   case ACTION_DEC_CFACT:
+    case ACTION_CYCLE_LAYOUT:
+    case ACTION_VOLUME_UP:   case ACTION_VOLUME_DOWN:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /* Grow/shrink the focused window within its stack (cfact). */
