@@ -191,7 +191,7 @@ check-lua:
 
 # Assemble dist/mshell-$(VERSION)-win64/ and zip it. Uses Python's zipfile so
 # no `zip` binary is required. The archive keeps the versioned top-level folder.
-dist: $(TARGET)
+dist: $(TARGET) $(HELPER)
 	@echo "  DIST  $(DISTNAME)"
 	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip"
 	mkdir -p "$(DISTDIR)/config"
