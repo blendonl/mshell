@@ -497,20 +497,44 @@ void window_hide(ManagedWindow *mw) {
     } else {
         /* Either the policy asked for it, or DWM refused (composition off,
          * which is possible in a VM or over some remote sessions). Falling
-         * back keeps desktops working; they just flicker the old way. */
+         * back keeps desktops working; they just flicker the old way.
+         *
+         * Said once and loudly when it was not asked for: a silent downgrade to
+         * the mechanism that turns windows black is the single most confusing
+         * way this can fail, and the log is the only place it would show. */
+        if (g.hide_policy == HIDE_CLOAK) {
+            static bool warned;
+            if (!warned) {
+                warned = true;
+                log_msg(LOG_WARN, L"hide: DWM refused to cloak a window — "
+                                  L"falling back to ShowWindow(SW_HIDE) for "
+                                  L"this session");
+            }
+        }
         ShowWindow(mw->hwnd, SW_HIDE);
         mw->cloaked = false;
     }
     mw->wm_hidden = true;
+    log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
+            mw->cloaked ? L"cloaked" : L"SW_HIDE");
 }
 
 void window_show(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->app_hidden) return;     /* not ours to reveal */
 
-    /* Uncloak unconditionally when we cloaked it, even if wm_hidden is already
-     * clear: the two can drift apart if the policy changed under a hidden
-     * window, and a window left cloaked is invisible with no way back. */
+    /* Was it actually off the screen? Asked before anything is undone, and of
+     * our own bookkeeping rather than of IsWindowVisible — a cloaked window is
+     * still WS_VISIBLE, so the window we most need to nudge is exactly the one
+     * IsWindowVisible would call fine. Getting this wrong is what shipped:
+     * the repaint below sat inside an `if (!IsWindowVisible)` and therefore
+     * never ran for a cloaked window at all. */
+    bool was_off_screen = mw->wm_hidden || mw->cloaked;
+    bool was_cloaked    = mw->cloaked;
+
+    /* Uncloak whenever we cloaked it, even if wm_hidden is already clear: the
+     * two can drift apart if the policy changed under a hidden window, and a
+     * window left cloaked is invisible with no way back. */
     if (mw->cloaked) {
         dwm_set_cloaked(mw->hwnd, false);
         mw->cloaked = false;
@@ -522,17 +546,49 @@ void window_show(ManagedWindow *mw) {
          * does not clear WS_MINIMIZE, so IsIconic still answers correctly. */
         ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE
                                                 : SW_SHOWNOACTIVATE);
+    }
 
-        /* Coming back from SW_HIDE is the case that renders black: DWM has a
-         * brand-new empty surface and the app has not been asked for a frame.
-         * Invalidating the whole window and its children queues the WM_PAINT
-         * that asks, and dropping has_applied makes the next tiling pass
-         * re-issue a real SetWindowPos instead of skipping the window for
-         * already being in the right place. Cheap, and only on this path —
-         * a cloaked window never lost its surface and needs neither. */
+    if (was_off_screen) {
+        /* Make the app repaint, whichever way it was hidden.
+         *
+         * A window coming back on screen is the case that renders black. The
+         * app has not been asked for a frame — it was told (by the hide, or by
+         * its own occlusion tracking noticing the cloak) that nobody was
+         * looking — and what is left in front of DWM is an empty or stale
+         * surface. Nothing else asks either: the window is by definition
+         * exactly where the layout already wants it, so flush_placements'
+         * rect_eq skip means it gets no SetWindowPos at all.
+         *
+         * So both halves of the nudge, always:
+         *   RedrawWindow  queues WM_PAINT on the window AND its children —
+         *                 RDW_ALLCHILDREN matters, because a Chromium window's
+         *                 content lives in a child HWND, not the top-level one.
+         *                 No RDW_UPDATENOW: that paints synchronously and would
+         *                 hang the WM on an app that is not answering.
+         *   has_applied   dropped so the next tiling pass issues a real
+         *                 SetWindowPos, and needs_repaint so that pass cannot
+         *                 skip it and adds SWP_NOCOPYBITS. */
         RedrawWindow(mw->hwnd, NULL, NULL,
                      RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
-        mw->has_applied = false;
+        mw->has_applied   = false;
+        mw->needs_repaint = true;
+
+        /* The tiler is what consumes needs_repaint, and the tiler never places
+         * a floating window — so for those, nobody would. Re-apply the rect it
+         * already has: a no-op move, but it carries SWP_FRAMECHANGED and
+         * SWP_NOCOPYBITS, which is the whole point. */
+        if (mw->is_floating) {
+            RECT r;
+            if (GetWindowRect(mw->hwnd, &r))
+                window_set_pos(mw->hwnd, r.left, r.top,
+                               r.right - r.left, r.bottom - r.top,
+                               SWP_NOZORDER | SWP_NOACTIVATE |
+                               SWP_FRAMECHANGED | SWP_NOCOPYBITS);
+            mw->needs_repaint = false;
+        }
+
+        log_msg(LOG_DEBUG, L"show: %p (was %ls)", (void *)mw->hwnd,
+                was_cloaked ? L"cloaked" : L"hidden");
     }
 
     mw->wm_hidden = false;

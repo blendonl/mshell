@@ -121,16 +121,23 @@ All notable changes to mshell are documented here. This project adheres to
   by definition exactly where it was, so no resize arrived to shake it out of
   it. A whole desktop's worth of windows could come back blank at once.
 
-  Windows are now taken off the screen by **cloaking** them through DWM
-  (`DWMWA_CLOAK`) instead. A cloaked window keeps its visible bit, keeps its
-  surface and goes on rendering; DWM simply stops compositing it. This is the
-  same mechanism Windows' own virtual desktops use, which is the point — every
-  application is already tested against it. Monocle and the scratchpad hide
-  windows the same way and get the same fix.
+  The fix is to **always ask the window to draw when it comes back** —
+  `RedrawWindow` over the window and its children (a Chromium window's content
+  is in a child HWND), plus a forced re-placement carrying `SWP_FRAMECHANGED`
+  and `SWP_NOCOPYBITS` so the tiler cannot skip it as a no-op move and Windows
+  cannot blit the stale bits forward. Monocle and the scratchpad reveal windows
+  through the same path and get the same fix.
 
-  `mshell.set_hide_policy("hide")` restores the old mechanism if cloaking ever
-  misbehaves for some app; that path now forces a repaint and a re-placement
-  when a window comes back, which fixes most of the blackness on its own.
+  Windows are also **cloaked** through DWM (`DWMWA_CLOAK`) rather than hidden
+  now, which is the mechanism Windows' own virtual desktops use and keeps the
+  window from being torn down while it is away. That change alone was NOT
+  enough and was briefly shipped as though it were: an app stops presenting
+  whether it learns it is invisible from the hide or from its own occlusion
+  tracking noticing the cloak. Being asked to draw on the way back is what
+  actually matters, and it now happens on both paths.
+
+  `mshell.set_hide_policy("hide")` restores the old `ShowWindow(SW_HIDE)`
+  mechanism; the repaint applies there too.
 
 - **Leaving monocle could strand its hidden windows.** `layout_hidden` was set
   by monocle and the BSP tree but never cleared by the layouts that hide

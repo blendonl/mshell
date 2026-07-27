@@ -484,10 +484,14 @@ mshell.set_hide_policy("cloak")   -- default
 mshell.set_hide_policy("hide")    -- pre-0.12.1 ShowWindow(SW_HIDE)
 ```
 
-`"hide"` is kept as an escape hatch, and on that path mshell now forces a repaint
-and a re-placement when a window comes back, which fixes most of the blackness
-but cannot make an app that shut its compositor down present a frame any sooner.
-Cloaking has no such problem, so there is rarely a reason to change this.
+Cloaking alone is **not** what fixes the blackness, though — an app stops
+presenting whether it learns it is invisible from the hide or from its own
+occlusion tracking noticing the cloak. What fixes it is that a window coming
+back is always *asked to draw*: `RedrawWindow` over it and its children, plus a
+forced re-placement carrying `SWP_FRAMECHANGED` and `SWP_NOCOPYBITS` so the
+tiler cannot skip it for already being in the right place. That applies to both
+policies, which is why `"hide"` is a usable escape hatch rather than a way back
+to the bug.
 
 **Desktop rules — what a desktop does.** `mshell.desktop_rule(pattern, opts)` is
 the desktop counterpart of `mshell.rule`. `pattern` is a desktop name or a

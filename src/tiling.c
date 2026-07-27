@@ -427,8 +427,14 @@ static void flush_placements(void) {
         ManagedWindow *mw = window_find(hwnd);
 
         /* Skip windows already parked exactly here — avoids flicker and the
-         * move→LOCATIONCHANGE→re-tile feedback loop. */
-        if (mw && mw->has_applied && rect_eq(mw->applied_rect, want)) continue;
+         * move→LOCATIONCHANGE→re-tile feedback loop.
+         *
+         * needs_repaint is the exception, and the reason it exists: a window
+         * that just came back on screen IS already parked exactly here — that
+         * is precisely why it would otherwise be skipped and never told to
+         * draw, which is what left a whole desktop black on the way back. */
+        if (mw && mw->has_applied && !mw->needs_repaint &&
+            rect_eq(mw->applied_rect, want)) continue;
 
         /* --- animation ---
          * anim_begin takes over the move and drives it over the next few
@@ -450,6 +456,16 @@ static void flush_placements(void) {
         int x = adj.left, y = adj.top;
         int w = adj.right - adj.left, h = adj.bottom - adj.top;
         UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
+
+        /* Freshly revealed: forbid Windows from blitting the client area's
+         * saved bits into the "new" position. They are the stale ones we are
+         * trying to get rid of, and copying them forward is exactly how a
+         * window keeps showing the wrong thing after a move that did not
+         * actually move it. */
+        if (mw && mw->needs_repaint) {
+            flags |= SWP_NOCOPYBITS;
+            mw->needs_repaint = false;
+        }
 
         /* Windows owned by a higher-integrity process cannot go through our
          * DeferWindowPos batch — the whole batch would fail — so they take the
