@@ -104,6 +104,7 @@
 #define SPAWN_ARGS_MAX            512   /* command-line arguments for a spawn */
 #define MAX_MANAGED_WINDOWS       512
 #define MAX_MONITORS              8
+#define MAX_MONITOR_RULES         8
 #define DESKTOP_NAME_MAX          64    /* incl. NUL; a desktop is never unnamed */
 
 #define DEFAULT_INNER_GAP         4
@@ -428,6 +429,10 @@ typedef struct {
     HWND      hwnd;
     int       desktop_id;            /* Desktop.id — stable across reordering */
     int       monitor;               /* which monitor it is tiled on        */
+    /* The display it was on, by name. An index is meaningless across a
+     * hotplug — the survivors renumber — so on replug this is what puts the
+     * window back where it was rather than wherever the index now points. */
+    wchar_t   monitor_device[CCHDEVICENAME];
     bool      is_floating;           /* exempt from tiling                  */
     bool      no_ring;               /* suppress the focus ring (games)     */
     bool      no_decor;              /* strip the frame even while floating,
@@ -599,7 +604,35 @@ typedef struct {
     HMONITOR handle;
     RECT     full;          /* full monitor bounds                        */
     RECT     work_area;     /* usable area (== full when we are the shell) */
+    UINT     dpi;
+
+    /* A STABLE identity, unlike the index or the HMONITOR — both of which
+     * change when a display is unplugged and plugged back in. This is what lets
+     * a per-monitor override, and a window's home, survive a hotplug instead of
+     * silently landing on whichever display took the vacated slot. */
+    wchar_t  device[CCHDEVICENAME];
+
+    /* Per-monitor overrides, -1 / LAYOUT_COUNT meaning "inherit". A desktop
+     * spans every display here (0.11.0 declined per-monitor tags and said why),
+     * so these describe the DISPLAY's habits: a vertical secondary that always
+     * wants columns, an ultrawide that wants a different master ratio. */
+    int      inner_gap, outer_gap;
+    int      n_master;
+    float    master_ratio;   /* <= 0 = inherit */
+    Layout   layout;         /* LAYOUT_COUNT = inherit */
 } Monitor;
+
+/* One monitor's configured overrides, matched by device name. Kept separate
+ * from Monitor because a config is loaded before the displays it names are
+ * necessarily attached, and has to survive them coming and going. */
+typedef struct {
+    wchar_t device[CCHDEVICENAME];   /* wildcard pattern, or "" for index form */
+    int     index;                   /* -1 when matched by name instead        */
+    bool    set_gaps;    int   inner_gap, outer_gap;
+    bool    set_nmaster; int   n_master;
+    bool    set_ratio;   float master_ratio;
+    bool    set_layout;  Layout layout;
+} MonitorRule;
 
 /* ---------------------------------------------------------------------------
  * WindowRule — match criteria → action
@@ -706,6 +739,12 @@ typedef struct {
      * EVENT_OBJECT_STATECHANGE, which fires for every control on the system.
      * 0.8.0 deliberately narrowed the object range to stop exactly that
      * traffic, so switching it back on is the user's call, not the default. */
+    /* "never" restores a window the moment it is minimized. Off by default
+     * because 0.8.0 added minimize/restore precisely so a window COULD be got
+     * out of the way when there is no taskbar, and 0.11.0 made minimise-to-tray
+     * work — this un-does both for people who would rather no window ever
+     * vanish. App-initiated tray hides are exempt either way. */
+    bool     minimize_never;
     bool     urgency_enabled;
     bool     notify_enabled;     /* show mshell's own on-screen notifications  */
     bool     notify_desktop;     /* announce a desktop switch (the bar usually
@@ -773,6 +812,8 @@ typedef struct {
 
     /* --- monitors (re-queried on display change) --- */
     Monitor  monitors[MAX_MONITORS];
+    MonitorRule monitor_rules[MAX_MONITOR_RULES];
+    int      monitor_rule_count;
     int      monitor_count;
     int      primary_monitor;
     int      focused_monitor;
@@ -847,7 +888,8 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 void     resolve_config_path(wchar_t *out, size_t out_len);
 
 /* monitors */
-void     monitors_update(void);           /* (re)enumerate physical displays */
+void     monitors_update(void);
+void     monitors_apply_rules(void);  /* per-display overrides, by device name */           /* (re)enumerate physical displays */
 
 /* Re-enumerate displays AND re-apply the bar's reservation, then refresh the
  * cached primary work area. Anything that changes the display set, the DPI, or
@@ -935,6 +977,9 @@ void     window_close(HWND hwnd);
 void     window_focus(HWND hwnd);
 HWND     window_get_focused(void);
 ManagedWindow *window_find(HWND hwnd);
+/* Assign a window's display AND remember it by name — see the definition for
+ * why an index alone does not survive a hotplug. */
+bool     window_set_monitor(ManagedWindow *mw, int mon);
 void     window_manage_existing(void);
 void     window_restore_all_decorations(void);
 

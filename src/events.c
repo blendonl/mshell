@@ -94,6 +94,40 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_SYSTEM_MINIMIZESTART:
+        /* set_minimize_policy("never"): put it straight back.
+         *
+         * Gated on app_hidden so a minimise-to-tray still works — an app hiding
+         * itself is its own window management, not a minimize, and fighting it
+         * would re-break closing Discord or Steam to the tray.
+         *
+         * The restore is suppressed so our own SW_RESTORE does not read as the
+         * app moving the window, and an app that re-minimizes in a loop is
+         * caught by the repeat guard rather than spinning: after three attempts
+         * inside a second we let it win and say so. */
+        if (g.minimize_never) {
+            ManagedWindow *mw = window_find(hwnd);
+            if (mw && !mw->app_hidden) {
+                static HWND      last;
+                static ULONGLONG first_at;
+                static int       tries;
+
+                ULONGLONG now = GetTickCount64();
+                if (hwnd != last || now - first_at > 1000) {
+                    last = hwnd; first_at = now; tries = 0;
+                }
+                if (++tries <= 3) {
+                    events_suppress_begin();
+                    ShowWindow(hwnd, SW_RESTORE);
+                    events_suppress_end();
+                    mw->has_applied = false;
+                } else if (tries == 4) {
+                    log_msg(LOG_WARN, L"minimize policy: a window keeps "
+                                      L"minimizing itself — letting it");
+                }
+            }
+        }
+        /* FALLTHROUGH: either way the layout has to reflect what happened */
+        __attribute__((fallthrough));
     case EVENT_SYSTEM_MINIMIZEEND:
         /* A window minimized or came back. Minimizing does NOT clear WS_VISIBLE
          * — it is not a hide — so nothing above notices it, and without this a

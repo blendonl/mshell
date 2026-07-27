@@ -1055,6 +1055,113 @@ static int lua_mshell_spawn(lua_State *L) {
 }
 
 /* ===========================================================================
+ * mshell.monitor_rule(which, opts)
+ *
+ *   which — a device-name pattern ("\\\\.\\DISPLAY2", "*DISPLAY2") or a
+ *           0-based index.
+ *   opts  — gaps, nmaster, master_ratio, layout.
+ *
+ * Prefer the name form. An index is easier to write and is also what changes
+ * when a display is unplugged: the rest renumber, and "monitor 1 uses columns"
+ * quietly starts describing a different screen. The name survives that.
+ *
+ * A desktop spans every display (per-monitor tags were declined in 0.11.0 and
+ * the README says why), so these describe the DISPLAY's habits — a vertical
+ * secondary that always wants columns, an ultrawide that wants a wider master.
+ * Rules layer like desktop rules; a desktop's own override still wins.
+ * =========================================================================== */
+static int lua_mshell_monitor_rule(lua_State *L) {
+    if (g.monitor_rule_count >= MAX_MONITOR_RULES)
+        return luaL_error(L, "too many monitor rules (max %d)",
+                          MAX_MONITOR_RULES);
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    MonitorRule *r = &g.monitor_rules[g.monitor_rule_count];
+    memset(r, 0, sizeof(*r));
+    r->index = -1;
+
+    if (lua_isnumber(L, 1)) {
+        r->index = (int)lua_tointeger(L, 1);
+        if (r->index < 0)
+            return luaL_error(L, "monitor_rule: index must be >= 0");
+    } else if (lua_isstring(L, 1)) {
+        u8_to_w(lua_tostring(L, 1), r->device, CCHDEVICENAME);
+        if (!r->device[0])
+            return luaL_error(L, "monitor_rule: the device pattern is empty");
+    } else {
+        return luaL_error(L, "monitor_rule: expected a device name or an index");
+    }
+
+    lua_getfield(L, 2, "gaps");
+    if (lua_isnumber(L, -1)) {
+        int v = clamp_i((int)lua_tointeger(L, -1), 0, 100);
+        r->set_gaps = true; r->inner_gap = v; r->outer_gap = v;
+    } else if (lua_istable(L, -1)) {
+        int t = lua_absindex(L, -1);
+        lua_rawgeti(L, t, 1);
+        lua_rawgeti(L, t, 2);
+        int inner = lua_isnumber(L, -2) ? (int)lua_tointeger(L, -2) : 0;
+        int outer = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : inner;
+        lua_pop(L, 2);
+        r->set_gaps  = true;
+        r->inner_gap = clamp_i(inner, 0, 100);
+        r->outer_gap = clamp_i(outer, 0, 100);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "nmaster");
+    if (lua_isnumber(L, -1)) {
+        r->set_nmaster = true;
+        r->n_master    = clamp_i((int)lua_tointeger(L, -1), 1, 20);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "master_ratio");
+    if (lua_isnumber(L, -1)) {
+        r->set_ratio     = true;
+        r->master_ratio  = clamp_f((float)lua_tonumber(L, -1), 0.2f, 0.9f);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "layout");
+    if (lua_isstring(L, -1)) {
+        Layout lay;
+        if (!layout_from_name(lua_tostring(L, -1), &lay)) {
+            const char *n = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: unknown layout '%s'", n);
+        }
+        r->set_layout = true;
+        r->layout     = lay;
+    }
+    lua_pop(L, 1);
+
+    g.monitor_rule_count++;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_minimize_policy("allow" | "never")
+ *
+ * "never" restores a window the moment it is minimized. Off by default, and
+ * deliberately: 0.8.0 ADDED minimize/restore precisely so a window could be got
+ * out of the way when there is no taskbar to retrieve it from. This is for
+ * people who would rather nothing ever vanish.
+ *
+ * An app hiding itself to the tray is exempt either way — that is the app's
+ * own window management, not a minimize, and fighting it would re-break
+ * closing Discord or Steam to the tray.
+ * =========================================================================== */
+static int lua_mshell_set_minimize_policy(lua_State *L) {
+    const char *p = luaL_checkstring(L, 1);
+    if      (!strcmp(p, "allow")) g.minimize_never = false;
+    else if (!strcmp(p, "never")) g.minimize_never = true;
+    else return luaL_error(L, "set_minimize_policy: expected \"allow\" or "
+                              "\"never\", got '%s'", p);
+    return 0;
+}
+
+/* ===========================================================================
  * mshell.set_urgency(enabled)
  *
  * Off by default, and deliberately: noticing that a window flashed for
@@ -1610,6 +1717,8 @@ void lua_register_api(lua_State *L) {
         {"spawn",           lua_mshell_spawn},
         {"setenv",          lua_mshell_setenv},
         {"set_urgency",     lua_mshell_set_urgency},
+        {"monitor_rule",    lua_mshell_monitor_rule},
+        {"set_minimize_policy", lua_mshell_set_minimize_policy},
         {"notify",          lua_mshell_notify},
         {"set_notify",      lua_mshell_set_notify},
         {"log",             lua_mshell_log},

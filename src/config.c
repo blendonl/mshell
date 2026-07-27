@@ -36,6 +36,7 @@ static void config_apply_defaults(void) {
     g.bar_fg           = DEFAULT_BAR_FG;
     g.bar_accent       = DEFAULT_BAR_ACCENT;
     g.bar_dim          = DEFAULT_BAR_DIM;
+    g.minimize_never   = false;   /* 0.8.0 added minimize FOR a reason */
     g.urgency_enabled  = false;   /* costs a system-wide STATECHANGE hook */
     g.notify_enabled   = true;
     g.notify_desktop   = false;   /* the bar already lists the desktops */
@@ -99,6 +100,8 @@ typedef struct {
     int       startup_count;
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
     int       desktop_rule_count;
+    MonitorRule monitor_rules[MAX_MONITOR_RULES];
+    int       monitor_rule_count;
     /* mshell.on() handlers. The refs belong to the old lua_State, which a
      * failed load leaves open — so restoring them restores working handlers. */
     LuaHook   lua_hooks[MAX_LUA_HOOKS];
@@ -116,6 +119,7 @@ typedef struct {
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
+    bool      minimize_never;
     bool      urgency_enabled;
     bool      notify_enabled, notify_desktop;
     bool      whichkey_enabled;
@@ -141,6 +145,8 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->startup_count = g.startup_count;
     memcpy(s->desktop_rules, g.desktop_rules, sizeof(g.desktop_rules));
     s->desktop_rule_count = g.desktop_rule_count;
+    memcpy(s->monitor_rules, g.monitor_rules, sizeof(g.monitor_rules));
+    s->monitor_rule_count = g.monitor_rule_count;
     memcpy(s->lua_hooks, g.lua_hooks, sizeof(g.lua_hooks));
     s->lua_hook_count = g.lua_hook_count;
     wcscpy(s->start_desktop, g.start_desktop);
@@ -164,6 +170,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->bar_fg            = g.bar_fg;
     s->bar_accent        = g.bar_accent;
     s->bar_dim           = g.bar_dim;
+    s->minimize_never    = g.minimize_never;
     s->urgency_enabled   = g.urgency_enabled;
     s->notify_enabled    = g.notify_enabled;
     s->notify_desktop    = g.notify_desktop;
@@ -200,6 +207,7 @@ static void config_detach(void) {
      * whole teardown — the live desktops they describe are runtime state and
      * deliberately survive a reload (desktop_reapply re-resolves them). */
     g.desktop_rule_count = 0;
+    g.monitor_rule_count = 0;
     g.lua_hook_count     = 0;   /* refs die with the lua_State */
     g.start_desktop[0]   = L'\0';
     g.root_map      = NULL;
@@ -223,6 +231,8 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.startup_count = s->startup_count;
     memcpy(g.desktop_rules, s->desktop_rules, sizeof(g.desktop_rules));
     g.desktop_rule_count = s->desktop_rule_count;
+    memcpy(g.monitor_rules, s->monitor_rules, sizeof(g.monitor_rules));
+    g.monitor_rule_count = s->monitor_rule_count;
     memcpy(g.lua_hooks, s->lua_hooks, sizeof(g.lua_hooks));
     g.lua_hook_count = s->lua_hook_count;
     wcscpy(g.start_desktop, s->start_desktop);
@@ -246,6 +256,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.bar_fg            = s->bar_fg;
     g.bar_accent        = s->bar_accent;
     g.bar_dim           = s->bar_dim;
+    g.minimize_never    = s->minimize_never;
     g.urgency_enabled   = s->urgency_enabled;
     g.notify_enabled    = s->notify_enabled;
     g.notify_desktop    = s->notify_desktop;
@@ -676,6 +687,7 @@ void config_reload(void) {
      * re-measure the work areas first, then rebuild it, then re-tile. */
     update_work_area();
     bar_reconfigure();
+    monitors_apply_rules();  /* the config's per-display overrides changed */
     events_sync_urgency();   /* the setting may have flipped either way */
     desktop_reapply();
 }

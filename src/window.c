@@ -304,6 +304,28 @@ const WindowRule *window_rule_lookup(HWND hwnd) {
 /* ===========================================================================
  * Find a ManagedWindow by HWND
  * =========================================================================== */
+/* Move a window to a display and remember which display that IS, by name.
+ *
+ * Every assignment to mw->monitor goes through here, because the index alone
+ * does not survive a hotplug: unplug a display and the rest renumber, so a
+ * remembered index comes to mean a different screen. The name is what
+ * monitors_update matches on to put the window back.
+ *
+ * Returns true when something changed, so callers can skip a needless re-tile. */
+bool window_set_monitor(ManagedWindow *mw, int mon) {
+    if (!mw) return false;
+    if (mon < 0 || mon >= g.monitor_count) mon = g.primary_monitor;
+    if (mon < 0 || mon >= g.monitor_count) return false;   /* no monitors yet */
+
+    bool changed = (mw->monitor != mon);
+    mw->monitor = mon;
+    if (changed) mw->has_applied = false;
+
+    wcsncpy(mw->monitor_device, g.monitors[mon].device, CCHDEVICENAME - 1);
+    mw->monitor_device[CCHDEVICENAME - 1] = L'\0';
+    return changed;
+}
+
 ManagedWindow *window_find(HWND hwnd) {
     int idx = window_index_of(hwnd);
     return (idx >= 0) ? &g.managed[idx] : NULL;
@@ -499,8 +521,8 @@ void window_manage(HWND hwnd) {
     mw->desktop_id = dt->id;
     /* Tile it where it opened — unless the desktop is pinned to a display, in
      * which case that is where the desktop's windows go. */
-    mw->monitor    = (dt->monitor >= 0 && dt->monitor < g.monitor_count)
-                       ? dt->monitor : monitor_of_window(hwnd);
+    window_set_monitor(mw, (dt->monitor >= 0 && dt->monitor < g.monitor_count)
+                             ? dt->monitor : monitor_of_window(hwnd));
     mw->cfact      = 1.0f;
     mw->no_ring    = rule ? rule->no_ring    : false;
     mw->no_decor   = rule ? rule->no_decor   : false;
