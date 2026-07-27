@@ -39,8 +39,9 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
 # symbols in uuid.
 # advapi32: the IPC pipe's DACL (ConvertSidToStringSid,
 # ConvertStringSecurityDescriptorToSecurityDescriptor).
+# powrprof: SetSuspendState (sleep/hibernate actions in system.c).
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lm
+           -ladvapi32 -lpowrprof -lm
 
 # --- Paths ---
 SRC_DIR  = src
@@ -65,7 +66,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c \
               $(SRC_DIR)/log.c \
-              $(SRC_DIR)/overlay.c
+              $(SRC_DIR)/overlay.c \
+              $(SRC_DIR)/system.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:

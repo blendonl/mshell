@@ -94,6 +94,22 @@ static const KeyNameEntry key_names[] = {
     {"PrintScreen", VK_SNAPSHOT},
     {"Pause",     VK_PAUSE},
     {"CapsLock",  VK_CAPITAL},
+
+    /* Media and browser keys, so a keyboard that HAS them can rebind them —
+     * bare, without a modifier, since that is how they are pressed. The
+     * volume and media ACTIONS are the other direction: they synthesise these
+     * same keys for a keyboard that lacks them. */
+    {"VolumeUp",   VK_VOLUME_UP},
+    {"VolumeDown", VK_VOLUME_DOWN},
+    {"VolumeMute", VK_VOLUME_MUTE},
+    {"MediaPlay",  VK_MEDIA_PLAY_PAUSE},
+    {"MediaNext",  VK_MEDIA_NEXT_TRACK},
+    {"MediaPrev",  VK_MEDIA_PREV_TRACK},
+    {"MediaStop",  VK_MEDIA_STOP},
+    {"BrowserBack",    VK_BROWSER_BACK},
+    {"BrowserForward", VK_BROWSER_FORWARD},
+    {"BrowserRefresh", VK_BROWSER_REFRESH},
+    {"BrowserHome",    VK_BROWSER_HOME},
     {"NumLock",   VK_NUMLOCK},
     {"ScrollLock", VK_SCROLL},
 
@@ -200,6 +216,19 @@ static const ActionNameEntry action_names[] = {
     {"reload",           ACTION_RELOAD},
     {"quit",             ACTION_QUIT},
     {"panic",            ACTION_PANIC},
+    {"lock",             ACTION_LOCK},
+    {"logoff",           ACTION_LOGOFF},
+    {"reboot",           ACTION_REBOOT},
+    {"shutdown",         ACTION_SHUTDOWN},
+    {"sleep",            ACTION_SLEEP},
+    {"hibernate",        ACTION_HIBERNATE},
+    {"volume_up",        ACTION_VOLUME_UP},
+    {"volume_down",      ACTION_VOLUME_DOWN},
+    {"volume_mute",      ACTION_VOLUME_MUTE},
+    {"media_play",       ACTION_MEDIA_PLAY},
+    {"media_next",       ACTION_MEDIA_NEXT},
+    {"media_prev",       ACTION_MEDIA_PREV},
+    {"media_stop",       ACTION_MEDIA_STOP},
     {NULL, ACTION_NONE}
 };
 
@@ -1257,6 +1286,22 @@ void execute_action(Action action, int arg, const wchar_t *command,
         tile_current();
         whichkey_hide();   /* colors/enabled may have changed; drop any stale hint */
         log_w(L"Config reloaded");
+        break;
+
+    /* -- session / power ------------------------------------------------ */
+    case ACTION_LOCK:      system_lock();      break;
+    case ACTION_LOGOFF:    system_logoff();    break;
+    case ACTION_REBOOT:    system_reboot();    break;
+    case ACTION_SHUTDOWN:  system_shutdown();  break;
+    case ACTION_SLEEP:     system_sleep();     break;
+    case ACTION_HIBERNATE: system_hibernate(); break;
+
+    /* -- media ----------------------------------------------------------- */
+    case ACTION_VOLUME_UP:   case ACTION_VOLUME_DOWN:
+    case ACTION_VOLUME_MUTE: case ACTION_MEDIA_PLAY:
+    case ACTION_MEDIA_NEXT:  case ACTION_MEDIA_PREV:
+    case ACTION_MEDIA_STOP:
+        system_media_key(action);
         break;
 
     case ACTION_QUIT:
