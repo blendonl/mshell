@@ -1,7 +1,8 @@
 # Manual test checklist
 
-`make test` covers the logic with no Windows in it — rule pattern matching and
-the tiling split arithmetic. Everything below needs a real Windows machine,
+`make test` covers the logic with no Windows in it — rule pattern matching, the
+tiling split arithmetic and the which-key panel's grid. Everything below needs
+a real Windows machine,
 because it involves the shell, the window manager, or hardware.
 
 Run these against `mshell.exe --test` (alongside Explorer, so quitting exits
@@ -27,6 +28,8 @@ exists, so they are worth re-running before any release.
 
 ## Status bar (0.10.0)
 
+With `mode = "top_bar"` (the default):
+
 - It appears on **every** monitor, at the top, and tiled windows start below it
   rather than underneath it.
 - The desktop list updates as desktops are created and destroyed; the current
@@ -38,6 +41,32 @@ exists, so they are worth re-running before any release.
 - On a scaled display the bar is proportionate, not tiny or huge.
 - `modules = {"desktops"}` leaves only the desktop list.
 - `enabled = false`, save: the bar disappears and windows reclaim the space.
+
+## Floating bar mode
+
+With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
+
+- One panel, in the **middle of the screen**, showing the time large with the
+  date under it, then the desktops and layout, then the focused title.
+- Tiled windows fill the whole monitor: the panel reserves nothing and sits
+  over them.
+- Clicking where the panel is reaches the window **underneath** it — it never
+  takes focus and never swallows a click.
+- Only one panel on a multi-monitor desk. Focus a window on another display and
+  it moves there.
+- `mshell.exe --msg 'notify hello'` appears **in the panel**, not as a separate
+  toast, and the panel grows to fit it and shrinks again when it expires. A
+  warn/error notification's dot is yellow/red.
+- Several messages list newest-first; long ones wrap rather than being clipped.
+- Bind `toggle_bar`: the panel disappears and comes back. While it is hidden, a
+  notification appears as an ordinary toast again.
+- Switching to `mode = "top_bar"` and back at reload leaves no stray window and
+  no duplicate notifications.
+- On a scaled display, the panel and its type are proportionate.
+- A window that opens floating is centred on the same spot the panel occupies —
+  floats centre on the work area, and floating mode reserves none of it. The
+  panel is drawn over it and passes clicks through, so this is a look, not a
+  loss of function; `toggle_bar` gets it out of the way.
 
 ## Control channel (0.10.0)
 
@@ -202,6 +231,40 @@ The three modes are distinct and each key is its own toggle:
 - **setenv**: `mshell.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
   %FOO%`.
 
+## Submap routes for those actions
+
+With `init.full.lua`. Every one of these starts with a bare `Win` TAP — nothing
+below asks for two keys held at once, and any sequence can be abandoned with
+`Esc`. The tests above say what each action should do; this says how to fire it.
+
+- **which-key lists the new maps**: tap `Win` and confirm `+media`, `+system`,
+  `+capture` and `+bsp` appear alongside `+window`, `+resize`, `+desktop`,
+  `+launch`, `+go` and `+move`.
+- **media** (`u`, persisting): `u` then `k`/`j` moves the volume with Windows'
+  own indicator; `m` mutes; `Space` plays/pauses; `h`/`l` change track; `s`
+  stops. Still in the map afterwards — `Esc` leaves. `u` then `10k` is ten
+  volume steps (counts apply; `volume_up`/`down` are on the repeat allowlist).
+- **system** (`x`, one-shot): `x` then `r` reloads, `q` quits, `x` panics (see
+  "Panic and safe mode"), `i` raises a notification naming the current desktop,
+  layout, window count and focused process. `i` is a function binding, so it is
+  deliberately ABSENT from the which-key panel — the other four are listed.
+- **power** (`x` `p`, one-shot, nested): the panel shows `+power` under `p`.
+  `x p l` locks. `x p s`/`h` sleep/hibernate. `x p o`/`r`/`d` log off, reboot
+  and shut down — test those only if you mean it. Confirm an unbound key inside
+  the map (say `z`) drops back to root having done nothing, and that `Esc` at
+  any depth returns to root rather than to the parent map.
+- **capture** (`c`, one-shot): `c s` for the whole virtual screen, `c w` for the
+  focused window; both land in `Pictures\Screenshots` and on the clipboard.
+- **bsp** (`b`, persisting): `b b` puts the desktop in the manual layout, then
+  `h`/`v` set the next split's direction, `r` rotates, `t`/`s` make the split a
+  tabbed/stacked container, `n`/`p` cycle its children, `=`/`-` resize it. The
+  hint panel labels those last two "grow split" / "shrink split".
+- **folded into existing maps**: `w Tab` = last window, `w o` = always on top,
+  `d u` = jump to urgent (needs `mshell.set_urgency(true)` uncommented, or
+  nothing is ever urgent), `o p` = the built-in launcher. Confirm the launcher
+  takes your typing immediately — the `launch` map is one-shot, so it has
+  already dropped to root by the time the search box is up.
+
 ## Notifications
 
 - A syntax error in `init.lua` while mshell is running shows a red-striped toast
@@ -236,6 +299,32 @@ The three modes are distinct and each key is its own toggle:
   (the default), no STATECHANGE hook is installed — check the log.
 - `rule({ title = "Picture-in-Picture" }, "float")` floats only that window of a
   browser, leaving the main window tiled.
+
+## Floating placement
+
+- Open a window with a `"float"` rule (Task Manager will do). It appears in the
+  **middle** of the monitor at its own size, in one step — no frame in the
+  corner followed by a jump.
+- `Win+f` on a tiled window: it keeps the size of the tile it left and moves to
+  the centre. `Win+f` again re-tiles it.
+- Open a file picker (`Ctrl+O` in any app, with the default `dialog = true`
+  rule): centred too.
+- On a second monitor, a float centres on the monitor it opened on, not on the
+  primary. With `desktop_rule(..., { monitor = 1 })` it centres on the pinned
+  display.
+- With the bar at the top (and again with `position = "bottom"`), a centred
+  float sits in the middle of the space *beside* the bar, never under it.
+- A window taller or wider than the work area is pinned to the top-left corner
+  of it rather than hanging off two edges.
+- `set_float_placement("none")`, save, open a float: it stays exactly where the
+  app put it. Windows already open are unaffected until they float again.
+- `rule({ process = "Flow.Launcher.exe" }, "float", { center = false })` — that
+  overlay keeps its own position while other floats still centre.
+- A rule with `geometry = {x, y, w, h}` still lands on that exact rect, and one
+  with `fullscreen = true` still covers the monitor.
+- Maximise a floating window (its own button, or `Win+Up`): it stays maximised
+  rather than being shrunk to a centred rect. Same for a minimised one — it does
+  not pop back open to be centred.
 - `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
   the others keep the global gaps.
 
@@ -253,6 +342,38 @@ The three modes are distinct and each key is its own toggle:
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
+
+## Which-key panel
+
+`make test` covers the grid arithmetic (`whichkey_math`), so what is left here
+is everything a number cannot tell you: whether it is where you asked for it,
+and whether it is still readable.
+
+- Enter a submap with no `set_whichkey` call in the config: the panel is at the
+  bottom centre, as it has always been. This is the upgrade check — an existing
+  config must look untouched.
+- `position` through all nine values, saving between each: `top`, `center`,
+  `left`, `right` and the four corners each land where the name says, with the
+  same gap to the edge. On a **secondary** monitor too — focus a window there
+  first, since the panel follows the focus, not the primary display.
+- `margin = 0`: it sits flush against the edge. A large `margin` moves it in
+  without letting it grow off the far side.
+- `max_width = 0.3` on a wide submap: labels are ellipsized with "…" at a
+  character boundary, never cut mid-glyph. Narrow it further until columns are
+  dropped, then check the log — it must name how many bindings did not fit.
+- `max_height = 0.2`: the panel wraps into more columns rather than growing
+  past it.
+- `max_rows = 4`: columns break every 4 rows.
+- `font = "Consolas"` (or any installed family) and `font_size = 28`: the panel
+  re-measures around them — nothing is clipped and the columns still line up.
+  A **missing** family (`font = "Nope UI"`) falls back and still renders.
+- `border_width = 6`: the outline is 6px on all four sides, none of it clipped.
+  `border_width = 0`: no outline at all.
+- `opacity = 120`: the desktop shows through. `rounded = false`: square corners.
+- All of the above on a **scaled display** (150%+): spacing and font grow with
+  it, and the same config gives the same proportions as at 100%.
+- Change any of these and save — the panel picks them up on the next submap
+  without a restart.
 
 ## Launcher
 
@@ -296,6 +417,22 @@ The three modes are distinct and each key is its own toggle:
 - Apply a tweak whose value did not previously exist, then revert: the value is
   **deleted**, not set to a default.
 - `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
+
+## Floating windows stay on top
+
+Open one tiled window and one floating one (`Win+f`), overlapping.
+
+- Focus the tiled window with `Win+h`/`Win+l`: the float stays visible on top.
+- Click the tiled window where the float does *not* cover it: same — the float
+  comes straight back over it rather than staying buried.
+- Two overlapping floats: focusing the lower one raises it, and focusing a tiled
+  window afterwards leaves the two floats in that same order instead of
+  swapping them.
+- `toggle_always_on_top` on one of two floats keeps it over the other one.
+- `mshell.set_float_on_top(false)` and reload: the old behaviour is back — the
+  float sinks behind whatever you focus.
+- A float minimized and restored is still on top; one moved to another desktop
+  does not raise itself over the desktop you are looking at.
 
 ## Hiding a desktop (cloak vs hide)
 

@@ -23,6 +23,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
   across monitors (`Win+,` / `Win+.`).
 - **Force-tiled mode** (`set_float_policy("never")`) so *every* window joins the
   grid and nothing is ever stacked on top of another window.
+- **Floating windows are centred** on their monitor rather than left wherever
+  the app opened them — `set_float_placement` and a per-rule `center` decide.
 - **Flicker-free placement**: a whole layout pass is applied in one
   `DeferWindowPos` batch, windows already in place are skipped, and geometry is
   computed against DWM's real visible frame so gaps are pixel-accurate.
@@ -44,16 +46,20 @@ tiled, driven entirely from the keyboard and configured in Lua.
   chords still work too. Submaps are **persisting**
   (stay until an exit key) or **one-shot** (next key drops back to root),
   expressive enough to spawn programs, switch desktops, and nest — with an
-  optional **which-key hint** that lists the active submap's keys (configurable
-  delay; `set_whichkey`).
+  optional **which-key hint** that lists the active submap's keys (delay,
+  placement, maximum size, spacing, font and chrome; `set_whichkey`).
 - **Lua configuration** that reloads **when you save it** (or on `Win+Shift+R`)
   and is *atomic* — a broken config keeps the previous one instead of
   stranding you.
-- **Status bar**, one per monitor: the live desktop set with the current one
-  marked, the active layout, the focused window's title, and a clock. It
-  reserves its strip from each monitor's work area, so tiled windows sit below
-  it and a fullscreen window still covers it. Configurable via `set_bar`, and
-  the module list can be trimmed or turned off entirely.
+- **Status bar** in two modes. `top_bar` is a strip on every monitor — the live
+  desktop set with the current one marked, the active layout, the focused
+  window's title, and a clock — reserving its strip from each monitor's work
+  area, so tiled windows sit below it and a fullscreen window still covers it.
+  `floating` is instead one panel in the middle of the focused monitor: a large
+  clock, the date, the desktops, and mshell's live notifications listed inline.
+  It reserves nothing, passes clicks through, and follows the focus between
+  displays. Configurable via `set_bar`, the module list can be trimmed or
+  turned off entirely, and `toggle_bar` hides it without a reload.
 - **Focus ring** around the active window and a **solid desktop backdrop**
   (there is no Explorer to paint one).
 - **Window rules** matching class, process or full install path as wildcard
@@ -69,6 +75,12 @@ tiled, driven entirely from the keyboard and configured in Lua.
   admits only the owning user.
 - **Sticky windows**, a **scratchpad**, dwm-style **zoom**, and mouse
   drag-to-swap between tiles.
+- **The things replacing Explorer takes away**: lock, log off, reboot, shut
+  down, sleep and hibernate, because there is no Start menu to pick them from;
+  volume and media keys, because every `Win+*` combo belongs to mshell and a
+  keyboard without dedicated media keys would otherwise have no route to volume
+  at all; and screenshots to `Pictures\Screenshots` and the clipboard. The
+  worked config reaches all of them through submaps, so none needs a chord.
 - **Session persistence**: per-desktop layout, master ratio and master count
   survive a restart, and you come back to the desktop you left.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
@@ -143,7 +155,7 @@ The release ships two, and they are for different moments:
 | File | What it is |
 |------|-----------|
 | `config/init.lua` | **The default.** ~130 lines, assumes nothing is installed but Windows, and opens `cmd.exe` because that is the one terminal every machine has. This is what `install.bat` puts at `%APPDATA%\mshell\init.lua`. |
-| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
+| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key layout and styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
 
 A default that launched Alacritty, Firefox, Discord and Valorant would greet
 most new users with a log full of launch failures, so it doesn't. Everything
@@ -196,13 +208,32 @@ On top of the core bindings above, it adds four submaps and a game desktop:
 
 | Keys | Action |
 |------|--------|
-| `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts) |
+| `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts, `Tab` = last window, `o` = always on top) |
 | `Win+r` | **resize** submap (persisting; ratio + per-window `cfact`; `Esc` exits) |
-| `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop) |
-| `Win+o` | **launch** submap (one-shot; terminal, browser, files, launcher) |
+| `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop, `u` = jump to urgent) |
+| `Win+o` | **launch** submap (one-shot; terminal, browser, files, `p` = the built-in launcher) |
 | `Win+v` / `Win+Shift+v` | Go to / send window to the `game` desktop (Valorant) |
 | `Win+Alt+f` | Fullscreen: **both** (the minimal config puts this on `Win+F11`) |
 | `Win+Ctrl+i` | A Lua-function binding: logs the current desktop and window |
+
+Everything a shell is expected to have but a tiling WM has no chord left for —
+power, volume, screenshots, manual tiling — lives in five more submaps that are
+deliberately **leader-only**. A tap and two bare keys reaches any of them, so
+nothing needs three keys held at once:
+
+| Keys | Action |
+|------|--------|
+| **Tap `Win`** then `u` | **media** submap (persisting; `k`/`j` volume, `m` mute, `Space` play, `h`/`l` track, `s` stop) |
+| **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `x` panic, `i` notify current state) |
+| **Tap `Win`** then `x p` | **power** submap (one-shot; `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `d` shut down) |
+| **Tap `Win`** then `c` | **capture** submap (one-shot; `s` whole screen, `w` focused window) |
+| **Tap `Win`** then `b` | **bsp** submap (persisting; `b` manual layout, `h`/`v` splits, `t`/`s` tabbed/stacked, `n`/`p` cycle, `=`/`-` resize) |
+
+Counts work in the persisting maps, so `u` then `10k` is ten volume steps. The
+destructive power actions are nested a layer deeper on purpose: mshell has no
+confirmation dialog, so `Win` `x` `p` `d` being four deliberate taps — `Esc`
+bailing out at every one — is what stands between you and an accidental
+shutdown.
 
 ## Configuration
 
@@ -228,6 +259,7 @@ mshell.desktop_rule("chat", { layout = "monocle", monitor = 1 })
 mshell.set_layout("tiling")       -- tiling|monocle|grid|spiral|centered|bstack|columns
 mshell.set_nmaster(1)             -- windows in the master area
 mshell.set_float_policy("never")  -- force EVERY window into the grid
+mshell.set_float_placement("center")  -- floats land mid-monitor ("none" = don't move them)
 mshell.set_attach("master")       -- new windows become master (dwm-style)
 
 mshell.bind({"LWin"}, "h", "focus_left")
@@ -269,7 +301,8 @@ API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
-`set_float_policy`, `set_fullscreen_policy`, `set_hide_policy`, `set_attach`, `set_mouse`,
+`set_float_policy`, `set_fullscreen_policy`, `set_float_placement`,
+`set_hide_policy`, `set_attach`, `set_mouse`,
 `set_manage_owned`, `set_float_on_top`,
 `set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
 `set_animation`, `set_dim`, `set_minimize_policy`, `set_update_check`,
@@ -282,10 +315,12 @@ takes, and any split can become a **tabbed** or **stacked** container showing on
 window at a time. The tree does not replace the window list — it is an index
 over it — so a desktop moves between `bsp` and the dynamic layouts freely.
 
-**A launcher.** `mshell.bind({mod}, "p", "launcher")` opens a filter over your
-Start-menu shortcuts; anything that matches nothing is run as typed, so it is a
-Run box too. It types without ever taking focus, because the keyboard hook hands
-it keys directly.
+**A launcher.** The `launcher` action opens a filter over your Start-menu
+shortcuts; anything that matches nothing is run as typed, so it is a Run box too.
+It types without ever taking focus, because the keyboard hook hands it keys
+directly. `init.full.lua` puts it on `Win` `o` `p` — in the one-shot `launch`
+submap rather than on the persisting leader, because a map you are still *in*
+would be swallowing keys the moment the launcher closed.
 
 **Registry tweaks you can undo.** `mshell.exe --tweaks list` shows what is
 applied and why; `apply` records the previous value before writing, so `revert`
@@ -299,8 +334,8 @@ raises one yourself, and `mshell.exe --msg 'notify hello'` from a script does th
 same. It is deliberately mshell's own messages only: real Windows toasts are
 WinRT/WNS and require being a registered Explorer-class shell.
 
-**A panic key.** `mshell.bind({mod, shft}, "Escape", "panic")` starts Explorer
-alongside mshell and stops the hook binding anything, so a shell that is
+**A panic key.** The `panic` action — `Win` `x` `x` in `init.full.lua` — starts
+Explorer alongside mshell and stops the hook binding anything, so a shell that is
 misbehaving does not need Task Manager to escape. It deliberately does not quit —
 exiting as the shell ends the session, which is the thing you were avoiding. Any
 reload undoes it (`mshell.exe --msg reload`, or saving `init.lua`); no keybinding
@@ -374,8 +409,26 @@ re-asserted whenever the window moves, not just once when it opens.
 `"float"` rule is downgraded to `"manage"` and `Win+f` becomes a no-op, so
 nothing is ever stacked on top of a tiled window. (Owned/modal dialogs are
 still left alone unless you also set `set_manage_owned(true)`, which is
-aggressive — many dialogs are fixed-size and tile poorly.) When windows *do*
-float, `set_float_on_top(true)` keeps them above the tiled grid.
+aggressive — many dialogs are fixed-size and tile poorly.)
+
+**A float is an overlay.** Floating windows stay above the tiled grid — that is
+the default, and it holds across focus changes: focusing a tiled window, with a
+keybind or with the mouse, does not bury the float you were looking at, because
+activation raising the tiled window is undone on the spot. Floats keep their own
+order among themselves, with the focused one on top, and a float that has been
+promoted to always-on-top or fullscreen sits above the rest of them. Pass
+`mshell.set_float_on_top(false)` for the old behaviour, where a float is an
+ordinary window in the stack and sinks behind whatever you focus next.
+
+**Floating windows land in the middle.** A float is the window you deliberately
+kept out of the grid, so mshell centres it on its monitor's work area rather
+than leaving it wherever the app opened it — both a window that opens floating
+and one `Win+f` just untiled. Only the position is decided: the size stays the
+app's own, clamped to fit. `mshell.set_float_placement("none")` turns it off,
+and `center = false` (or `true`) in a rule's opts answers for one app — useful
+for an overlay that already positions itself well. A rule with an explicit
+`geometry = {x, y, w, h}` or `fullscreen = true` places the window itself and is
+unaffected either way.
 
 **Desktops are dynamic, and a desktop is its name.** There is no desktop count
 to configure and no `1..9`: a desktop is a *name* — a word (`"web"`) or a number

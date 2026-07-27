@@ -234,6 +234,7 @@ static const ActionNameEntry action_names[] = {
     {"notify",           ACTION_NOTIFY},
     {"jump_urgent",      ACTION_JUMP_URGENT},
     {"launcher",         ACTION_LAUNCHER},
+    {"toggle_bar",       ACTION_TOGGLE_BAR},
     {"split_h",          ACTION_SPLIT_H},
     {"split_v",          ACTION_SPLIT_V},
     {"rotate_split",     ACTION_ROTATE_SPLIT},
@@ -1448,6 +1449,10 @@ void execute_action(Action action, int arg, const wchar_t *command,
      * you are not on, which is the case the flag exists for. */
     case ACTION_LAUNCHER:
         launcher_open();
+        break;
+
+    case ACTION_TOGGLE_BAR:
+        bar_toggle();
         break;
 
     /* -- manual (BSP) tiling ------------------------------------------- */

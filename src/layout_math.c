@@ -28,3 +28,13 @@ void split_span(int span, const float *facts, int n, int *out) {
         }
     }
 }
+
+int center_axis(int origin, int span, int size) {
+    /* A box at least as big as the span cannot be centred inside it — the best
+     * answer is the span's own start, which is also what keeps a float that is
+     * wider than the monitor anchored to the left edge instead of hanging off
+     * both. Covers span <= 0 too, so no display metric can produce a stray
+     * coordinate here. */
+    if (size >= span) return origin;
+    return origin + (span - size) / 2;
+}

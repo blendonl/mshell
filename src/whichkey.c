@@ -4,8 +4,14 @@
  * When you enter a submap (Win+r resize, Win+x window, …) mshell can pop up a
  * small panel listing that submap's keys and what each one does, the way
  * which-key does in Emacs/Neovim. It is a non-activating layered overlay (same
- * family as border.c / background.c) docked to the bottom-centre of the focused
- * monitor, and it disappears the moment you leave the submap.
+ * family as border.c / background.c) anchored to the focused monitor —
+ * bottom-centre unless mshell.set_whichkey{position=…} says otherwise — and it
+ * disappears the moment you leave the submap.
+ *
+ * Everything about its shape is configurable (placement, maximum size,
+ * spacing, font, chrome), so this file measures and paints while the grid
+ * arithmetic that decides what fits lives in whichkey_math.c, where `make
+ * test` can reach it without a Windows machine.
  *
  * Threading: g.current_map flips inside the low-level keyboard hook, on the
  * hook thread; GDI and window calls must run on the main thread. So the hook
@@ -19,23 +25,18 @@
 
 #include "mshell.h"
 #include "overlay.h"
+#include "whichkey_math.h"
 
 static const wchar_t *WK_CLASS = L"mshell_WhichKey";
 
 #define WK_TIMER_ID    1
-#define WK_MAX_ROWS    64
-
-/* layout metrics, device pixels */
-#define WK_PAD         14   /* panel inner padding                     */
-#define WK_ROW_VPAD    6    /* extra vertical space per row            */
-#define WK_HDR_GAP     8    /* gap under the header                    */
-#define WK_KEY_GAP     10   /* gap between a key and its label         */
-#define WK_COL_GAP     30   /* gap between columns                     */
-#define WK_MAX_PERCOL  12   /* wrap into a new column past this many   */
 
 /* Win11 rounded corners; harmless (ignored) on older Windows. */
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_DONOTROUND
+#define DWMWCP_DONOTROUND 1
 #endif
 #ifndef DWMWCP_ROUND
 #define DWMWCP_ROUND 2
@@ -48,32 +49,44 @@ typedef struct {
 
 /* Prepared state: filled by whichkey_show, consumed by WM_PAINT. Only ever
  * touched on the main thread. */
-static OverlayFont s_font;      /* caches the DPI it was built for */
-static WkRow   s_rows[WK_MAX_ROWS];
+static OverlayFont s_font;      /* caches the DPI and face it was built for */
+static WkRow   s_rows[WHICHKEY_MAX_ROWS];
 static int     s_count;
 static int     s_cols, s_per_col;
 static int     s_key_w, s_label_w, s_row_h, s_header_h;
 static wchar_t s_title[80];
 
-/* Metrics above are design pixels at 96 DPI; these are the same values scaled
- * for the monitor the panel is about to appear on. mshell is per-monitor DPI
- * aware, so nothing scales them for us — without this the panel renders at a
- * third of its intended size on a 300% display. */
-static int     s_pad, s_key_gap, s_col_gap, s_row_vpad, s_hdr_gap;
+/* The configured metrics (design pixels at 96 DPI) scaled for the monitor the
+ * panel is about to appear on. mshell is per-monitor DPI aware, so nothing
+ * scales them for us — without this the panel renders at a third of its
+ * intended size on a 300% display. */
+static int     s_pad, s_key_gap, s_col_gap, s_row_vpad, s_hdr_gap, s_border_w;
 
 #define wk_dpi_scale(px, dpi) overlay_scale((px), (dpi))
 
 /* Rebuild the font and the scaled metrics for `dpi`, if they aren't already. */
 static void wk_apply_dpi(UINT dpi) {
-    s_pad      = wk_dpi_scale(WK_PAD,      dpi);
-    s_key_gap  = wk_dpi_scale(WK_KEY_GAP,  dpi);
-    s_col_gap  = wk_dpi_scale(WK_COL_GAP,  dpi);
-    s_row_vpad = wk_dpi_scale(WK_ROW_VPAD, dpi);
-    s_hdr_gap  = wk_dpi_scale(WK_HDR_GAP,  dpi);
+    s_pad      = wk_dpi_scale(g.whichkey_padding,  dpi);
+    s_key_gap  = wk_dpi_scale(g.whichkey_key_gap,  dpi);
+    s_col_gap  = wk_dpi_scale(g.whichkey_col_gap,  dpi);
+    s_row_vpad = wk_dpi_scale(g.whichkey_row_gap,  dpi);
+    s_hdr_gap  = wk_dpi_scale(g.whichkey_hdr_gap,  dpi);
+    s_border_w = wk_dpi_scale(g.whichkey_border_w, dpi);
 
-    /* 18 design px; overlay_font rebuilds only when dpi or size actually
+    /* overlay_font_face rebuilds only when dpi, size or family actually
      * changed, so calling this on every show is free. */
-    overlay_font(&s_font, dpi, wk_dpi_scale(18, dpi));
+    overlay_font_face(&s_font, dpi, wk_dpi_scale(g.whichkey_font_size, dpi),
+                      g.whichkey_font);
+}
+
+/* max_width / max_height are deliberately one field each rather than two:
+ * 0 means "the monitor is the only limit", a value up to 1 is a fraction of
+ * the monitor, and anything larger is design pixels. Returns device pixels,
+ * or 0 for "unbounded". */
+static int wk_resolve_max(float v, int mon_px, UINT dpi) {
+    if (v <= 0.0f) return 0;
+    if (v <= 1.0f) return (int)((float)mon_px * v);
+    return wk_dpi_scale((int)v, dpi);
 }
 
 /* The human-readable label for one binding. spawn shows its command, the
@@ -125,13 +138,14 @@ static void whichkey_show(KeyMap *map) {
     /* --- which monitor, and therefore at what DPI ---
      * Resolved first: the font and every metric below depend on it, and the
      * text measuring further down has to happen with the final font. */
-    int mi = (g.focused_monitor >= 0 && g.focused_monitor < g.monitor_count)
-             ? g.focused_monitor : g.primary_monitor;
-    wk_apply_dpi(monitor_dpi(mi));
+    int  mi = (g.focused_monitor >= 0 && g.focused_monitor < g.monitor_count)
+              ? g.focused_monitor : g.primary_monitor;
+    UINT dpi = monitor_dpi(mi);
+    wk_apply_dpi(dpi);
 
     /* --- gather the rows we can actually label --- */
     s_count = 0;
-    for (int i = 0; i < map->count && s_count < WK_MAX_ROWS; i++) {
+    for (int i = 0; i < map->count && s_count < WHICHKEY_MAX_ROWS; i++) {
         const KeyBinding *b = &map->bindings[i];
         const char *kn = vk_to_key_name(b->vk);
         if (!kn) continue;                      /* no display name — skip */
@@ -148,7 +162,7 @@ static void whichkey_show(KeyMap *map) {
      * config was written rather than anything the reader knows — so a panel of
      * twenty keys was previously a list to scan rather than read. Prefixes
      * first because they are the ones that lead somewhere else, and an
-     * insertion sort because the list is at most WK_MAX_ROWS long. */
+     * insertion sort because the list is at most WHICHKEY_MAX_ROWS long. */
     for (int i = 1; i < s_count; i++) {
         WkRow key = s_rows[i];
         bool  key_pfx = (key.label[0] == L'+');
@@ -167,10 +181,10 @@ static void whichkey_show(KeyMap *map) {
 
     /* Say so rather than silently showing a subset: a map with more keys than
      * fit is exactly when the panel matters most. */
-    if (map->count > WK_MAX_ROWS)
+    if (map->count > WHICHKEY_MAX_ROWS)
         log_msg(LOG_WARN, L"which-key: '%ls' has %d bindings; showing the "
                           L"first %d", map->name ? map->name : L"?",
-                map->count, WK_MAX_ROWS);
+                map->count, WHICHKEY_MAX_ROWS);
 
     /* Header suffix tells you how to leave: a persisting map names its exit key
      * (Escape unless a custom one replaced it); a one-shot map just says so. */
@@ -188,12 +202,9 @@ static void whichkey_show(KeyMap *map) {
                map->name ? map->name : L"submap", hint);
     s_title[79] = L'\0';
 
-    /* --- grid shape: wrap into columns so the panel never gets too tall --- */
-    s_cols = (s_count + WK_MAX_PERCOL - 1) / WK_MAX_PERCOL;
-    if (s_cols < 1) s_cols = 1;
-    s_per_col = (s_count + s_cols - 1) / s_cols;
-
-    /* --- measure text with our font --- */
+    /* --- measure text with our font ---
+     * Before the grid shape, which needs the row height to know how many rows
+     * a configured max_height leaves room for. */
     HDC   dc  = GetDC(g.whichkey_window);
     HFONT old = (HFONT)SelectObject(dc, s_font.font);
 
@@ -218,20 +229,88 @@ static void whichkey_show(KeyMap *map) {
     SelectObject(dc, old);
     ReleaseDC(g.whichkey_window, dc);
 
-    int cell_w  = s_key_w + s_key_gap + s_label_w;
-    int inner_w = s_cols * cell_w + (s_cols - 1) * s_col_gap;
-    if (hsz.cx > inner_w) inner_w = hsz.cx;       /* don't clip the header */
-    int w = inner_w + s_pad * 2;
-    int h = s_header_h + s_per_col * s_row_h + s_pad * 2;
-
-    /* --- position: bottom-centre of the focused monitor (`mi` resolved at the
-     *     top, since the DPI it implies drove everything measured above) --- */
+    /* --- the box the panel has to fit inside ---
+     * (`mi` was resolved at the top, since the DPI it implies drove everything
+     * measured above.) The margin is both the gap to the monitor edge and the
+     * inset the panel may never grow past, so a panel pinned to a corner keeps
+     * the same breathing room a centred one gets. */
     RECT mon   = g.monitors[mi].full;
     int  mon_w = mon.right - mon.left;
     int  mon_h = mon.bottom - mon.top;
-    if (w > mon_w - 20) w = mon_w - 20;           /* never wider than the screen */
-    int x = mon.left + (mon_w - w) / 2;
-    int y = mon.bottom - h - mon_h / 20;          /* a small bottom margin */
+
+    int margin = (g.whichkey_margin >= 0)
+                 ? wk_dpi_scale(g.whichkey_margin, dpi)
+                 : mon_h / 20;    /* auto — the historical bottom margin */
+    if (margin * 2 >= mon_w || margin * 2 >= mon_h) margin = 0;
+
+    int max_w = wk_resolve_max(g.whichkey_max_w, mon_w, dpi);
+    int max_h = wk_resolve_max(g.whichkey_max_h, mon_h, dpi);
+    if (max_w <= 0 || max_w > mon_w - margin * 2) max_w = mon_w - margin * 2;
+    if (max_h <= 0 || max_h > mon_h - margin * 2) max_h = mon_h - margin * 2;
+
+    /* --- grid shape and panel size (pure arithmetic; see whichkey_math.c) --- */
+    WkMetrics wm = {
+        .count     = s_count,
+        .max_rows  = g.whichkey_max_rows,
+        .key_w     = s_key_w,
+        .label_w   = s_label_w,
+        .header_w  = hsz.cx,
+        .row_h     = s_row_h,
+        .header_h  = s_header_h,
+        .pad       = s_pad,
+        .key_gap   = s_key_gap,
+        .col_gap   = s_col_gap,
+        .min_label = wk_dpi_scale(48, dpi),   /* ~6 characters */
+        .max_w     = max_w,
+        .max_h     = max_h,
+    };
+    WkLayout lay;
+    wk_layout(&wm, &lay);
+
+    s_cols    = lay.cols;
+    s_per_col = lay.per_col;
+    s_label_w = lay.label_w;
+
+    /* Say which keys went missing rather than showing a subset that looks
+     * complete — a panel is worth less than nothing if it is quietly partial. */
+    if (lay.shown < s_count) {
+        log_msg(LOG_WARN, L"which-key: '%ls' — %d of %d bindings do not fit "
+                          L"the configured max_width/max_height",
+                map->name ? map->name : L"?", s_count - lay.shown, s_count);
+        s_count = lay.shown;
+    }
+
+    /* --- placement: the configured anchor on the focused monitor --- */
+    int halign, valign;
+    switch (g.whichkey_pos) {
+    case WK_POS_LEFT: case WK_POS_TOP_LEFT: case WK_POS_BOTTOM_LEFT:
+        halign = 0; break;
+    case WK_POS_RIGHT: case WK_POS_TOP_RIGHT: case WK_POS_BOTTOM_RIGHT:
+        halign = 2; break;
+    default:
+        halign = 1; break;
+    }
+    switch (g.whichkey_pos) {
+    case WK_POS_TOP: case WK_POS_TOP_LEFT: case WK_POS_TOP_RIGHT:
+        valign = 0; break;
+    case WK_POS_CENTER: case WK_POS_LEFT: case WK_POS_RIGHT:
+        valign = 1; break;
+    default:
+        valign = 2; break;
+    }
+
+    int w = lay.w, h = lay.h, x, y;
+    wk_anchor(halign, valign, mon.left, mon.top, mon_w, mon_h, w, h, margin,
+              &x, &y);
+
+    /* Chrome that a reload may have changed. Both are cheap, and applying them
+     * here rather than at init is what makes set_whichkey take effect without
+     * a restart. */
+    SetLayeredWindowAttributes(g.whichkey_window, 0, g.whichkey_opacity,
+                               LWA_ALPHA);
+    DWORD corner = g.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(g.whichkey_window, DWMWA_WINDOW_CORNER_PREFERENCE,
+                          &corner, sizeof(corner));
 
     SetWindowPos(g.whichkey_window, HWND_TOPMOST, x, y, w, h,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -285,21 +364,36 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         overlay_fill(mdc, &rc, g.whichkey_bg);
 
-        /* 1px outline in the accent colour */
-        HPEN   pen = CreatePen(PS_SOLID, 1, g.whichkey_border);
-        HPEN   opn = (HPEN)SelectObject(mdc, pen);
-        HBRUSH obr = (HBRUSH)SelectObject(mdc, GetStockObject(NULL_BRUSH));
-        Rectangle(mdc, 0, 0, W, H);
-        SelectObject(mdc, obr);
-        SelectObject(mdc, opn);
-        DeleteObject(pen);
+        /* Outline in the accent colour, as four fills rather than a wide pen:
+         * GDI centres a pen on its path, so half of anything thicker than a
+         * pixel would fall outside the client area and be clipped away. */
+        int bw = s_border_w;
+        if (bw > 0) {
+            if (bw * 2 > H) bw = H / 2;
+            if (bw * 2 > W) bw = W / 2;
+            RECT e;
+            e = (RECT){ 0, 0, W, bw };          overlay_fill(mdc, &e, g.whichkey_border);
+            e = (RECT){ 0, H - bw, W, H };      overlay_fill(mdc, &e, g.whichkey_border);
+            e = (RECT){ 0, 0, bw, H };          overlay_fill(mdc, &e, g.whichkey_border);
+            e = (RECT){ W - bw, 0, W, H };      overlay_fill(mdc, &e, g.whichkey_border);
+        }
 
         HFONT of = (HFONT)SelectObject(mdc, s_font.font);
         SetBkMode(mdc, TRANSPARENT);
 
+        /* Text is drawn through DrawTextW with DT_END_ELLIPSIS so that a
+         * configured max_width truncates at a character boundary with an "…"
+         * rather than mid-glyph. DT_NOPREFIX because labels are arbitrary
+         * strings — a spawn command containing '&' must not turn into an
+         * accelerator underline. */
+        const UINT fmt = DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS |
+                         DT_TOP | DT_LEFT;
+        const int  right = W - s_pad;
+
         /* header */
         SetTextColor(mdc, g.whichkey_key_fg);
-        TextOutW(mdc, s_pad, s_pad, s_title, (int)wcslen(s_title));
+        RECT hr = { s_pad, s_pad, right, s_pad + s_header_h };
+        DrawTextW(mdc, s_title, -1, &hr, fmt);
 
         /* rows, laid out column-major */
         int cell_w = s_key_w + s_key_gap + s_label_w;
@@ -319,9 +413,14 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                      s_rows[i].key, (int)wcslen(s_rows[i].key));
 
             /* label: left-aligned after the gap, in the normal text colour */
-            SetTextColor(mdc, g.whichkey_fg);
-            TextOutW(mdc, cx + s_key_w + s_key_gap, cy,
-                     s_rows[i].label, (int)wcslen(s_rows[i].label));
+            int lx = cx + s_key_w + s_key_gap;
+            int lr = cx + cell_w;
+            if (lr > right) lr = right;
+            if (lx < lr) {
+                SetTextColor(mdc, g.whichkey_fg);
+                RECT rr = { lx, cy, lr, cy + s_row_h };
+                DrawTextW(mdc, s_rows[i].label, -1, &rr, fmt);
+            }
         }
 
         SelectObject(mdc, of);
@@ -343,10 +442,13 @@ bool whichkey_init(void) {
         WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
     if (!g.whichkey_window) return false;
 
-    /* Slight translucency, like the focus ring. */
-    SetLayeredWindowAttributes(g.whichkey_window, 0, 235, LWA_ALPHA);
+    /* Slight translucency by default, like the focus ring. Both of these are
+     * re-applied on every show, so a reload changes them live; setting them
+     * here just means the first frame is already right. */
+    SetLayeredWindowAttributes(g.whichkey_window, 0, g.whichkey_opacity,
+                               LWA_ALPHA);
 
-    DWORD corner = DWMWCP_ROUND;
+    DWORD corner = g.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
     DwmSetWindowAttribute(g.whichkey_window, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
 
