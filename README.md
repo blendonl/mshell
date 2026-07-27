@@ -263,15 +263,32 @@ mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 ```
 
-API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `setenv`, `set_gaps`,
+API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
+`set_gaps`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
 `set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_mouse`,
 `set_manage_owned`, `set_float_on_top`,
 `set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
+`set_animation`, `set_dim`, `set_minimize_policy`, `set_update_check`,
 `block_system_keys`, `log`, `on`, `get_monitors`, `get_desktops`,
 `get_current_desktop`, `get_focused_window`.
+
+**Manual tiling.** Alongside the seven dynamic layouts there is `bsp`: windows
+split wherever you were, `split_h`/`split_v` decide the direction the next one
+takes, and any split can become a **tabbed** or **stacked** container showing one
+window at a time. The tree does not replace the window list — it is an index
+over it — so a desktop moves between `bsp` and the dynamic layouts freely.
+
+**A launcher.** `mshell.bind({mod}, "p", "launcher")` opens a filter over your
+Start-menu shortcuts; anything that matches nothing is run as typed, so it is a
+Run box too. It types without ever taking focus, because the keyboard hook hands
+it keys directly.
+
+**Registry tweaks you can undo.** `mshell.exe --tweaks list` shows what is
+applied and why; `apply` records the previous value before writing, so `revert`
+restores exactly what you had rather than Microsoft's default.
 
 **Notifications.** There is no Explorer, so there is no toast host and no tray —
 mshell paints its own. A config that fails to reload says so on screen with the
