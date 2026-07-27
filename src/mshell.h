@@ -395,6 +395,35 @@ typedef enum {
 } FloatPolicy;
 
 /* ---------------------------------------------------------------------------
+ * Hide policy — HOW a window is taken off the screen.
+ *
+ * Virtual desktops, monocle and the scratchpad all work by removing a window
+ * from view, and there are two ways to do that. They are not equivalent:
+ *
+ *   HIDE_CLOAK (default)
+ *       DwmSetWindowAttribute(DWMWA_CLOAK). The window keeps WS_VISIBLE and
+ *       keeps its DWM redirection surface — it goes on rendering, DWM simply
+ *       stops compositing it onto the screen. This is precisely the mechanism
+ *       Windows' own virtual desktops use, so every application is already
+ *       tested against it.
+ *
+ *   HIDE_SHOWWINDOW
+ *       ShowWindow(SW_HIDE), which is what mshell used to do unconditionally.
+ *       Clearing WS_VISIBLE makes DWM tear the window's redirection surface
+ *       down, and apps that render off the UI thread — anything Chromium or
+ *       Electron based, WPF, Qt on D3D — additionally see it as "occluded" and
+ *       shut their compositor down. On the way back a fresh, EMPTY surface is
+ *       created and nothing asks the app to present into it, so the window
+ *       comes back BLACK until something forces a repaint. Kept as an escape
+ *       hatch for a setup where cloaking misbehaves; the show path forces the
+ *       repaint that this mode needs.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    HIDE_CLOAK = 0,
+    HIDE_SHOWWINDOW,
+} HidePolicy;
+
+/* ---------------------------------------------------------------------------
  * Fullscreen mode — what "fullscreen" means for one window.
  *
  * Two different things can go fullscreen, and they are independent: the
@@ -528,6 +557,16 @@ typedef struct {
                                       * window leaves the layout and must not be
                                       * shown again until the app shows it —
                                       * see the EVENT_OBJECT_HIDE handler.     */
+    bool      wm_hidden;             /* MSHELL has it off the screen: another
+                                      * desktop, monocle, a stowed scratchpad.
+                                      * Tracked rather than derived, because
+                                      * under HIDE_CLOAK the window is still
+                                      * WS_VISIBLE and IsWindowVisible can no
+                                      * longer answer the question.            */
+    bool      cloaked;               /* ...and we did it by cloaking. Recorded
+                                      * per window so a policy change mid-
+                                      * session still un-hides the way the
+                                      * window was hidden.                     */
     bool      made_topmost;          /* WE put it in the topmost band to keep
                                       * always-on-top windows off a fullscreen
                                       * one — so only WE take it back out. A
@@ -840,6 +879,7 @@ typedef struct {
 
     /* --- tiling policy --- */
     FloatPolicy  float_policy;   /* FLOAT_RULES (default) or FLOAT_NEVER      */
+    HidePolicy   hide_policy;    /* HIDE_CLOAK (default) or HIDE_SHOWWINDOW   */
     FullscreenMode fullscreen_policy; /* what an app that fullscreens ITSELF
                                        * gets when the window has no explicit
                                        * mode: FS_CONTENT = keep it in its tile
@@ -1072,6 +1112,13 @@ void     window_restore_decorations(HWND hwnd);
 void     window_kill(HWND hwnd);
 void     window_close(HWND hwnd);
 void     window_focus(HWND hwnd);
+
+/* Focus nothing — hand the foreground to the backdrop and hide the focus ring.
+ * Call it where there is no window to focus (an empty desktop): a CLOAKED
+ * window keeps the foreground, so without this the window you just left would
+ * still be taking your keystrokes, invisibly. Replaces the bare border_hide()
+ * such places used to do. */
+void     window_focus_none(void);
 HWND     window_get_focused(void);
 ManagedWindow *window_find(HWND hwnd);
 /* Assign a window's display AND remember it by name — see the definition for
@@ -1080,11 +1127,34 @@ bool     window_set_monitor(ManagedWindow *mw, int mon);
 void     window_manage_existing(void);
 void     window_restore_all_decorations(void);
 
+/* Uncloak windows a previous mshell died without releasing. Called by
+ * window_manage_existing() before it enumerates, because is_manageable rejects
+ * cloaked windows and would otherwise leave them stranded and invisible. */
+void     window_uncloak_strays(void);
+
 /* Re-show everything mshell hid (other desktops, monocle's non-focused
  * windows). A hidden window has no taskbar button and no Alt+Tab entry, so
  * without this they are unreachable once mshell exits. Call it before
  * window_restore_all_decorations(). */
 void     window_restore_all_visibility(void);
+
+/* ---------------------------------------------------------------------------
+ * Taking a window off the screen, and putting it back.
+ *
+ * The single door for every "mshell removes this window from view" — desktop
+ * switches, monocle, the scratchpad — so that WHICH mechanism is used
+ * (see HidePolicy) is decided in exactly one place. Both are idempotent, so
+ * callers may hide a window that is already hidden.
+ *
+ * Neither touches a window the APP hid (app_hidden): that one is not ours.
+ * --------------------------------------------------------------------------- */
+void     window_hide(ManagedWindow *mw);
+void     window_show(ManagedWindow *mw);
+
+/* Is this window actually on the screen right now? Under HIDE_CLOAK a hidden
+ * window is still WS_VISIBLE, so IsWindowVisible() alone answers "yes" for
+ * every window on every desktop. */
+bool     window_on_screen(const ManagedWindow *mw);
 void     window_set_floating(HWND hwnd, bool floating);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 bool     window_frame_rect(HWND hwnd, RECT *out);  /* DWM visible-frame bounds  */

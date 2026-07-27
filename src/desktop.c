@@ -1,8 +1,11 @@
 /*
  * desktop.c — dynamic, name-identified virtual desktops.
  *
- * Desktops are implemented by ShowWindow(SW_HIDE) / ShowWindow(SW_SHOW).
- * No dependency on the Windows 10 virtual-desktop API.
+ * Desktops are implemented by taking windows off the screen and putting them
+ * back — window_hide() / window_show(), which by default cloak through DWM
+ * rather than ShowWindow(SW_HIDE) (see HidePolicy in mshell.h; SW_HIDE is what
+ * makes GPU-composited apps come back black). No dependency on the Windows 10
+ * virtual-desktop API either way.
  *
  * The model (see the Desktop comment in mshell.h): a desktop IS its name, and
  * the set of desktops is whatever exists at this instant. Switching to a name
@@ -335,14 +338,13 @@ void desktop_reapply(void) {
             HWND h = dt->windows[i];
             if (!h || !IsWindow(h)) continue;
             /* A window the app hid itself stays hidden wherever it lives —
-             * a reload must not drag every tray-minimised app back on screen. */
+             * a reload must not drag every tray-minimised app back on screen.
+             * window_hide/window_show both refuse such a window themselves;
+             * the find is needed for the handle either way. */
             ManagedWindow *mw = window_find(h);
-            if (mw && mw->app_hidden) continue;
-            if (d == cur)
-                ShowWindow(h, IsIconic(h) ? SW_SHOWMINNOACTIVE
-                                          : SW_SHOWNOACTIVATE);
-            else
-                ShowWindow(h, SW_HIDE);
+            if (!mw) continue;
+            if (d == cur) window_show(mw);
+            else          window_hide(mw);
         }
     }
     events_suppress_end();
@@ -351,6 +353,7 @@ void desktop_reapply(void) {
 
     HWND focus = desktop_get_focused();
     if (focus) window_focus(focus);
+    else       window_focus_none();
 
     /* A reload may have given the current desktop an `app` it didn't have. */
     desktop_launch_app_if_empty(desktop_current_slot());
@@ -378,8 +381,10 @@ void desktop_switch(const wchar_t *name) {
     /* desktop_ensure may have inserted and re-sorted; `cur` is stale now. */
     int target_id = g.desktops[slot].id;
 
-    /* Suppress WinEvent callbacks — ShowWindow(SW_HIDE) generates
-     * EVENT_OBJECT_HIDE which would otherwise trigger a re-tile. */
+    /* Suppress WinEvent callbacks — the ShowWindow fallback inside
+     * window_hide generates EVENT_OBJECT_HIDE, which would otherwise be read
+     * as the app hiding itself. Cloaking raises no event we subscribe to, but
+     * the guard has to cover the path that does. */
     events_suppress_begin();
 
     Desktop *old_dt = desktop_by_id(from_id);
@@ -415,26 +420,30 @@ void desktop_switch(const wchar_t *name) {
         }
     }
 
-    /* 1. Hide all windows on the desktop we're leaving */
+    /* 1. Take every window on the desktop we're leaving off the screen.
+     *
+     *    window_hide decides how (cloak by default — see HidePolicy) and is
+     *    idempotent, so a window monocle already had hidden stays as it is. */
     if (old_dt) {
         for (int i = 0; i < old_dt->count; i++) {
-            HWND h = old_dt->windows[i];
-            if (h && IsWindow(h)) ShowWindow(h, SW_HIDE);
+            window_hide(window_find(old_dt->windows[i]));
         }
     }
 
-    /* 2. Show all windows on the target desktop — except the ones their own
-     *    app hid (minimise-to-tray). Those are not ours to reveal; switching
-     *    to a desktop must not un-tray everything parked on it. */
+    /* 2. Put the target desktop's windows back — except the ones their own app
+     *    hid (minimise-to-tray), which window_show refuses on its own: those
+     *    are not ours to reveal, and switching to a desktop must not un-tray
+     *    everything parked on it.
+     *
+     *    A window the LAYOUT is holding back (monocle's unfocused windows, the
+     *    unshown side of a tabbed container) is skipped too, so it is not
+     *    revealed here only for the tile pass below to hide it again a frame
+     *    later. collect_clients recomputes the flag every pass, so a stale one
+     *    cannot strand a window: the tiler clears it and this then shows it. */
     for (int i = 0; i < new_dt->count; i++) {
-        HWND h = new_dt->windows[i];
-        if (!h || !IsWindow(h)) continue;
-        ManagedWindow *mw = window_find(h);
-        if (mw && mw->app_hidden) continue;
-        /* SW_SHOWNOACTIVATE restores a minimized window, which would quietly
-         * un-minimize everything every time you came back to a desktop. Hiding
-         * does not clear WS_MINIMIZE, so IsIconic still answers correctly. */
-        ShowWindow(h, IsIconic(h) ? SW_SHOWMINNOACTIVE : SW_SHOWNOACTIVATE);
+        ManagedWindow *mw = window_find(new_dt->windows[i]);
+        if (!mw || mw->layout_hidden) continue;
+        window_show(mw);
     }
 
     g.current_desktop_id = target_id;
@@ -456,10 +465,13 @@ void desktop_switch(const wchar_t *name) {
     tile_current();
 
     /* 6. Focus the active window (window_focus handles the foreground-lock
-     *    dance and updates the focus ring). */
+     *    dance and updates the focus ring). An empty desktop focuses NOTHING,
+     *    which has to be done deliberately: the windows we just took off the
+     *    screen are cloaked, not hidden, so the one you were using still holds
+     *    the foreground until somebody takes it away. */
     HWND focus = desktop_get_focused();
     if (focus) window_focus(focus);
-    else       border_hide();
+    else       window_focus_none();
 
     /* 7. If we just landed on an empty desktop that has a configured app,
      *    launch it. Must happen after current_desktop_id is updated so the new
@@ -576,7 +588,7 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     bool was_visible = (old_id == g.current_desktop_id);
     if (was_visible) {
         events_suppress_begin();
-        ShowWindow(hwnd, SW_HIDE);
+        window_hide(mw);
         events_suppress_end();
     }
 
@@ -606,7 +618,9 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
         tile_current();
         HWND next = desktop_get_focused();
         if (next) window_focus(next);
-        else      border_hide();
+        else      window_focus_none();   /* the window we sent away is cloaked,
+                                          * and would otherwise keep the
+                                          * keyboard from the other desktop */
     }
 }
 

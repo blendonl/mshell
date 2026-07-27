@@ -399,24 +399,25 @@ static bool rect_eq(RECT a, RECT b) {
 static void flush_placements(void) {
     if (s_place_n <= 0) return;
 
-    /* ShowWindow can't be deferred, so hiding and revealing both happen here,
-     * before anything moves.
+    /* Showing and hiding can't be deferred into the batch, so both happen
+     * here, before anything moves.
      *
      * layout_hidden is the layout's own decision (monocle's unfocused windows,
      * the unshown side of a tabbed container) and is deliberately distinct from
      * app_hidden, which is the APP hiding itself to the tray — mshell must not
-     * un-hide the latter. */
+     * un-hide the latter. window_hide/window_show enforce that themselves. */
     Desktop *cur = desktop_current();
     for (int i = 0; i < cur->count; i++) {
         ManagedWindow *mw = window_find(cur->windows[i]);
-        if (!mw || mw->is_floating || mw->app_hidden) continue;
-        if (mw->layout_hidden && IsWindowVisible(mw->hwnd))
-            ShowWindow(mw->hwnd, SW_HIDE);
+        if (!mw || mw->is_floating) continue;
+        if (mw->layout_hidden) window_hide(mw);
     }
 
+    /* Anything with a tile belongs on the screen. Note this runs AFTER the
+     * loop above, so a window that was layout_hidden a moment ago and has a
+     * tile again this pass ends up shown, not hidden. */
     for (int i = 0; i < s_place_n; i++)
-        if (!IsWindowVisible(s_place[i].hwnd))
-            ShowWindow(s_place[i].hwnd, SW_SHOWNOACTIVATE);
+        window_show(window_find(s_place[i].hwnd));
 
     HDWP hdwp = BeginDeferWindowPos(s_place_n);
 

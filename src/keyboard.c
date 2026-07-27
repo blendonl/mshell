@@ -1283,17 +1283,17 @@ void execute_action(Action action, int arg, const wchar_t *command,
         if (!IsWindow(sp->hwnd)) { sp->scratchpad = false; break; }
 
         bool here    = (sp->desktop_id == g.current_desktop_id);
-        bool showing = here && IsWindowVisible(sp->hwnd) && !sp->app_hidden;
+        bool showing = here && window_on_screen(sp);
 
         events_suppress_begin();
         if (showing) {
-            ShowWindow(sp->hwnd, SW_HIDE);
+            window_hide(sp);
         } else {
             /* Summon it onto the desktop you are looking at, rather than
              * making you go to where it happens to live. */
             sp->desktop_id = g.current_desktop_id;
             sp->app_hidden = false;
-            ShowWindow(sp->hwnd, SW_SHOWNOACTIVATE);
+            window_show(sp);
         }
         events_suppress_end();
 

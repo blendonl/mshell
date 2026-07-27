@@ -57,6 +57,7 @@ static void config_apply_defaults(void) {
     g.auto_reload      = true;
 
     g.float_policy     = FLOAT_RULES;
+    g.hide_policy      = HIDE_CLOAK;    /* cloak, not SW_HIDE — see HidePolicy */
     g.fullscreen_policy = FS_CONTENT;   /* app fullscreen stays in its tile */
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
@@ -139,6 +140,7 @@ typedef struct {
     int       whichkey_delay;
     COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
     FloatPolicy  float_policy;
+    HidePolicy   hide_policy;
     FullscreenMode fullscreen_policy;
     AttachPolicy attach_policy;
     bool      manage_owned, float_on_top;
@@ -201,6 +203,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->whichkey_key_fg   = g.whichkey_key_fg;
     s->whichkey_border   = g.whichkey_border;
     s->float_policy      = g.float_policy;
+    s->hide_policy       = g.hide_policy;
     s->fullscreen_policy = g.fullscreen_policy;
     s->attach_policy     = g.attach_policy;
     s->manage_owned      = g.manage_owned;
@@ -294,6 +297,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.whichkey_key_fg   = s->whichkey_key_fg;
     g.whichkey_border   = s->whichkey_border;
     g.float_policy      = s->float_policy;
+    g.hide_policy       = s->hide_policy;
     g.fullscreen_policy = s->fullscreen_policy;
     g.attach_policy     = s->attach_policy;
     g.manage_owned      = s->manage_owned;
