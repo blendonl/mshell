@@ -3,7 +3,18 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
-## Unreleased
+## 0.12.0 — 2026-07-27
+
+The release that fills in what a tiling WM is expected to have and what a shell
+replacement is expected to survive: manual tiling with containers, a launcher,
+notifications, and the pieces that make a bad day recoverable — a log that is
+still there after a crash, a safe mode when the config is what crashed, and a
+panic key for everything else.
+
+**Upgrading from 0.11.0:** nothing in your `init.lua` has to change. One thing
+moved: the log is now `%LOCALAPPDATA%\mshell\mshell.log` rather than
+`%TEMP%\mshell.log`, and it is appended to rather than truncated on every start.
+`mshell.set_verbose(true)` still works and now means `set_log_level("debug")`.
 
 ### Changed
 
