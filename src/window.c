@@ -896,7 +896,12 @@ void window_enforce_zorder(void) {
         ManagedWindow *mw = window_find(dt->windows[i]);
         if (!mw || !IsWindow(mw->hwnd)) continue;
 
-        if (window_is_screen_fullscreen(mw) && IsWindowVisible(mw->hwnd)) {
+        /* Two independent reasons to be up there — covering the monitor, or the
+         * user having asked for it. made_topmost records only whether WE did
+         * it, so the demotion below has to wait for BOTH reasons to lapse. */
+        bool want_topmost = window_is_screen_fullscreen(mw) || mw->always_on_top;
+
+        if (want_topmost && IsWindowVisible(mw->hwnd)) {
             if (!mw->made_topmost &&
                 !(GetWindowLongPtrW(mw->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
                 mw->made_topmost = true;
