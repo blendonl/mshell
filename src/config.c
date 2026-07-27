@@ -59,9 +59,11 @@ static void config_apply_defaults(void) {
 
     g.float_policy     = FLOAT_RULES;
     g.fullscreen_policy = FS_CONTENT;   /* app fullscreen stays in its tile */
+    g.float_placement  = FLOAT_PLACE_CENTER;  /* a float is the window you are
+                                               * looking at — put it in front  */
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
-    g.float_on_top     = false;
+    g.float_on_top     = true;   /* a float is an overlay, not a peer */
     g.min_win_w        = DEFAULT_MIN_WIN_W;
     g.min_win_h        = DEFAULT_MIN_WIN_H;
 
@@ -142,6 +144,7 @@ typedef struct {
     COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
     FloatPolicy  float_policy;
     FullscreenMode fullscreen_policy;
+    FloatPlacement float_placement;
     AttachPolicy attach_policy;
     bool      manage_owned, float_on_top;
     int       min_win_w, min_win_h;
@@ -205,6 +208,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->whichkey_border   = g.whichkey_border;
     s->float_policy      = g.float_policy;
     s->fullscreen_policy = g.fullscreen_policy;
+    s->float_placement   = g.float_placement;
     s->attach_policy     = g.attach_policy;
     s->manage_owned      = g.manage_owned;
     s->float_on_top      = g.float_on_top;
@@ -299,6 +303,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.whichkey_border   = s->whichkey_border;
     g.float_policy      = s->float_policy;
     g.fullscreen_policy = s->fullscreen_policy;
+    g.float_placement   = s->float_placement;
     g.attach_policy     = s->attach_policy;
     g.manage_owned      = s->manage_owned;
     g.float_on_top      = s->float_on_top;

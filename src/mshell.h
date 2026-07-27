@@ -423,6 +423,22 @@ typedef enum {
 } FloatPolicy;
 
 /* ---------------------------------------------------------------------------
+ * Float placement — where a window that is NOT tiled ends up
+ *   FLOAT_PLACE_CENTER : centred on its monitor's work area (default)
+ *   FLOAT_PLACE_NONE   : left exactly where the app put it
+ *
+ * A tiled window's rect belongs to the layout, so this only ever describes a
+ * floating one: the window that opened floating, and the one Win+f just took
+ * out of the grid. A rule's `geometry` names an exact rect and is more specific
+ * than either, so it wins; `fullscreen = true` parks over the monitor and wins
+ * too. Only the position is decided here — the size stays the app's own.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    FLOAT_PLACE_CENTER = 0,
+    FLOAT_PLACE_NONE,
+} FloatPlacement;
+
+/* ---------------------------------------------------------------------------
  * Fullscreen mode — what "fullscreen" means for one window.
  *
  * Two different things can go fullscreen, and they are independent: the
@@ -522,6 +538,10 @@ typedef struct {
     bool      no_decor;              /* strip the frame even while floating,
                                       * and never add the thin WS_BORDER    */
     bool      fullscreen;            /* while floating: cover the monitor   */
+    /* Centre it whenever it floats. Resolved once, at manage time, from the
+     * rule's `center` and set_float_placement — so it travels with the window
+     * and Win+f years later still does what the config asked for. */
+    bool      center_float;
     bool      decorations_stripped;  /* did we strip WS_CAPTION etc?        */
     LONG_PTR  orig_style;            /* style before stripping              */
     LONG_PTR  orig_exstyle;          /* extended style before stripping     */
@@ -763,6 +783,10 @@ typedef struct {
     bool       set_monitor;  int monitor;  /* pin to a display                */
     bool       set_geometry;               /* fixed rect for a FLOATING window */
     int        x, y, w, h;
+    /* Per-app answer to set_float_placement, in both directions: a window that
+     * places itself well opts out of centring, one app can opt in under a
+     * config that centres nothing. Unset = follow the global default. */
+    bool       set_center;   bool center;
     bool       start_fullscreen;           /* claim the monitor on open        */
 } WindowRule;
 
@@ -878,6 +902,9 @@ typedef struct {
                                        * (default), FS_BOTH = give it the
                                        * monitor until it leaves fullscreen   */
     AttachPolicy attach_policy;  /* where new windows land in the order       */
+    FloatPlacement float_placement;  /* where a floating window goes: centred
+                                      * on its monitor (default) or wherever
+                                      * the app opened it                     */
     bool     manage_owned;    /* also tile owned windows (dialogs); risky     */
     bool     float_on_top;    /* keep floating windows above tiled ones       */
     int      min_win_w;       /* ignore windows narrower than this            */
@@ -1118,7 +1145,12 @@ void     window_restore_all_decorations(void);
  * window_restore_all_decorations(). */
 void     window_restore_all_visibility(void);
 void     window_set_floating(HWND hwnd, bool floating);
+void     window_center_float(HWND hwnd);  /* no-op unless it should be centred */
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
+/* The float half of the pass on its own — every focus change re-asserts it,
+ * because activating a tiled window raises it over the floats. No-op unless
+ * float_on_top is set. */
+void     window_raise_floats(void);
 bool     window_frame_rect(HWND hwnd, RECT *out);  /* DWM visible-frame bounds  */
 
 /* Expand a desired *visible* frame into the window rect SetWindowPos wants,
