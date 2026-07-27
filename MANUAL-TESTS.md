@@ -214,6 +214,64 @@ The three modes are distinct and each key is its own toggle:
 - `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
   the others keep the global gaps.
 
+## Manual tiling (BSP) and containers
+
+- `layout_bsp`, then open three terminals: each splits the one that was focused,
+  in the direction `split_h` / `split_v` last named.
+- `rotate_split` flips the split holding the focused window.
+- `split_grow` / `split_shrink` resize that split, and grow means grow from
+  either side of it.
+- `toggle_tabbed` on a split shows one window at a time; `container_next` swaps
+  which, and focus follows the tab.
+- Pressing `toggle_tabbed` again on the same split returns it to a plain split.
+- Close a window inside a container: its sibling takes the space, no gap left.
+- Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
+  between and the tree is rebuilt on return.
+- Move a window to another desktop while in bsp — it leaves the tree cleanly.
+
+## Launcher
+
+- `launcher` opens it; type "fire" and Firefox is selected.
+- Up/Down move the selection, Return runs it, Escape closes.
+- Backspace edits the query; the list refilters.
+- A query matching nothing ("notepad" if unindexed, or a path) is run as typed.
+- **The stuck-capture check**: while it is open, confirm no other keybinding
+  fires. Then press Escape and confirm they all work again.
+- Open it, then kill mshell from Task Manager and restart: the keyboard is
+  normal (capture cannot outlive the process).
+
+## Animation and dimming
+
+- `set_animation(120)`: windows glide to their new tiles rather than jumping.
+- During the motion, confirm windows are NOT snapped back — the drift detector
+  must not fight the animation.
+- `set_animation(0)` restores instant placement.
+- `set_dim{enabled = true}`: everything but the focused window is dimmed, and
+  the dimming follows the focus.
+- Dim with a **GPU-accelerated app** focused (a game, a video, a browser playing
+  video) and confirm it still renders — this is the failure mode the punched
+  scrim exists to avoid.
+- Clicking a dimmed window still reaches it (the scrim is click-through).
+
+## Per-monitor rules and hotplug
+
+- `monitor_rule("*DISPLAY2", { layout = "columns" })` — that display uses
+  columns while the other keeps the desktop's layout.
+- `monitor_rule(0, { gaps = 0 })` by index also works.
+- **Hotplug**: put windows on a secondary display, unplug it — they move to the
+  primary. Plug it back in — they RETURN. This is the case an index cannot
+  survive.
+
+## Tweaks
+
+- `mshell.exe --tweaks list` prints each tweak, its group and why it exists.
+- `--tweaks apply input`, then `list`: those rows say "applied".
+- Set one of the tweaked values to something custom yourself first, then apply
+  and revert: your custom value comes back, not Windows' default.
+- Apply a tweak whose value did not previously exist, then revert: the value is
+  **deleted**, not set to a default.
+- `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
+
 ## Shell-mode only
 
 These cannot be tested with `--test` and need a real install. Have Task Manager

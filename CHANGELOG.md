@@ -98,12 +98,71 @@ All notable changes to mshell are documented here. This project adheres to
   different token than the shell, so one file would mean two processes
   appending under different ACLs.
 
+- **Manual (BSP) tiling with tabbed and stacked containers.** `layout_bsp`, plus
+  `split_h`/`split_v` (which state where the *next* window goes — there is
+  nothing to split until one arrives), `rotate_split`, `toggle_tabbed`,
+  `toggle_stacked`, `container_next`/`prev`, `split_grow`/`shrink`.
+
+  The tree deliberately does **not** own the windows: `Desktop.windows[]` stays
+  the membership store and the tree is an index reconciled against it on every
+  pass. Making it authoritative would have meant rewriting attach policy,
+  promote, zoom and the mouse swap, and leaving one layout that works
+  differently from the other seven.
+
+- **An app launcher** (`launcher`). Typed through a keyboard-hook capture mode,
+  because no overlay here takes focus and the hook swallows keys system-wide —
+  taking the foreground instead is the thing Windows makes hardest. Escape, the
+  panic key and a sanity timer are the three guards against a stuck capture.
+
+- **Window animation** (`set_animation(ms)`) and **unfocused-window dimming**
+  (`set_dim{}`), both off by default. Dimming never makes another process's
+  window layered — that changes how it is composited and can leave a
+  GPU-accelerated app rendering black; it is a scrim per monitor with the
+  focused window punched out of its region.
+
+- **Per-monitor overrides** (`monitor_rule`) for gaps, nmaster, master ratio and
+  layout — matched by device name, which is also the hotplug fix: unplugging a
+  display renumbers the rest, so windows now remember their display by name and
+  return to it on replug instead of piling up on the primary.
+
+- **Rules can place a window**, not just describe it: `desktop`, `monitor`,
+  `geometry` and `start_fullscreen`.
+
+- **`set_minimize_policy("never")`** — off by default, since 0.8.0 added
+  minimize precisely so a window *could* be got out of the way with no taskbar.
+  App-initiated tray hides stay exempt.
+
+- **Focus-follows-mouse and `Mod`+drag** (`set_mouse{follow=, mod_drag=}`).
+  Follow is polled rather than hooked; only `mod_drag` installs a WH_MOUSE_LL
+  hook, and only while it is enabled.
+
+- **Which-key descriptions** (`desc` in a binding payload) and sorted rows.
+
+- **Reversible registry tweaks** (`mshell --tweaks list|apply|revert`). Applying
+  records the previous value first, so reverting restores what you had —
+  including "the value did not exist", which a `.reg` undo cannot express. The
+  `.reg` files are now generated from the same table by `make regs`.
+
+- **`install.bat /machine`** for a machine-wide (HKLM) install, behind an
+  elevation check and a confirmation.
+
+- **An MSI** (`make msi`, via wixl on Linux) that installs the files and
+  deliberately does *not* set the Winlogon key — those are different decisions.
+  Unsigned.
+
+- **An opt-in update check** (`set_update_check(true)`), notify-only: nothing is
+  ever downloaded or applied, because a bad automatic update to the *shell* is a
+  black screen at sign-in.
+
 ### Internal
 
 - **`overlay.c`** — the backdrop, focus ring, which-key panel and status bar had
   each hand-rolled the same class registration, DPI scaling, font cache and
   double-buffered paint. Shared now, before the notification surface became a
   fifth copy.
+- **`layout_hidden`** — monocle's inline `ShowWindow(SW_HIDE)` becomes a flag the
+  layout sets and `flush_placements` applies, shared with tabbed containers. It
+  stays distinct from `app_hidden`, which is the app hiding *itself* to the tray.
 - **`LayoutParams`** — the layout functions read `dt->n_master` and
   `dt->master_ratio` directly, so every knob was per-desktop by construction and
   a per-monitor value had nowhere to come from. They now take parameters
