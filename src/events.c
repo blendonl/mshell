@@ -53,6 +53,19 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                  * layout. */
                 mw->app_hidden  = false;
                 mw->has_applied = false;
+                events_suppress_begin();
+                if (mw->desktop_id == g.current_desktop_id) {
+                    /* Clear anything WE were also doing to keep it off the
+                     * screen. A window can be both app-hidden and cloaked: the
+                     * app trayed it while it sat on a desktop we had hidden,
+                     * and the switch back skipped it for being app_hidden. */
+                    window_show(mw);
+                } else {
+                    /* It came back on a desktop you are not looking at. Left
+                     * alone it would appear over the desktop you ARE on. */
+                    window_hide(mw);
+                }
+                events_suppress_end();
                 if (mw->desktop_id == g.current_desktop_id) tile_current();
             }
         }
