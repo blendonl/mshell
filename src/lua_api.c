@@ -156,11 +156,12 @@ static bool layout_from_name(const char *s, Layout *out) {
 static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
                                  const char *action_str, bool has_num, int num_arg,
                                  const char *str_arg, const char *args_str,
-                                 bool default_terminal) {
+                                 const char *cwd_str, bool default_terminal) {
     int      arg      = 0;
     KeyMap  *submap   = NULL;
     wchar_t *command  = NULL;
     wchar_t *cmd_args = NULL;
+    wchar_t *cmd_cwd  = NULL;
     bool     terminal = default_terminal;
     Action   action;
 
@@ -178,9 +179,13 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
         if (!str_arg) luaL_error(L, "spawn requires a command string");
         command = u8_to_w_dup(str_arg);
         if (args_str && args_str[0]) cmd_args = u8_to_w_dup(args_str);
+        if (cwd_str  && cwd_str[0])  cmd_cwd  = u8_to_w_dup(cwd_str);
     } else {
         if (args_str)
             luaL_error(L, "%s takes no arguments string — only spawn does",
+                       action_str);
+        if (cwd_str)
+            luaL_error(L, "%s takes no working directory — only spawn does",
                        action_str);
         action = action_name_to_enum(action_str);
         if (action == ACTION_NONE) luaL_error(L, "unknown action: %s", action_str);
@@ -198,9 +203,10 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
     }
 
     keymap_add_binding(map, mods, vk, action, arg, submap, command, cmd_args,
-                       terminal);
+                       cmd_cwd, terminal);
     free(command);    /* keymap_add_binding takes its own copies */
     free(cmd_args);
+    free(cmd_cwd);
 }
 
 /* ===========================================================================
@@ -216,8 +222,9 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
  * caller must lua_pop() that many only after it is finished with them.
  * =========================================================================== */
 static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
-                        const char **str, const char **args) {
-    *has_num = false; *num_arg = 0; *str = NULL; *args = NULL;
+                        const char **str, const char **args,
+                        const char **cwd) {
+    *has_num = false; *num_arg = 0; *str = NULL; *args = NULL; *cwd = NULL;
 
     if (lua_isnumber(L, idx)) {
         *has_num = true;
@@ -232,9 +239,14 @@ static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
         int t = lua_absindex(L, idx);   /* idx may be relative; pushing shifts it */
         lua_rawgeti(L, t, 1);
         lua_rawgeti(L, t, 2);
-        *str  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
-        *args = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
-        return 2;
+        /* Third slot is the working directory. Also accepts the named form,
+         * because {"cmd", nil, "C:\\x"} to give only a cwd reads badly. */
+        lua_rawgeti(L, t, 3);
+        if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_getfield(L, t, "cwd"); }
+        *str  = lua_isstring(L, -3) ? lua_tostring(L, -3) : NULL;
+        *args = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
+        *cwd  = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+        return 3;
     }
     return 0;
 }
@@ -283,7 +295,7 @@ static int lua_mshell_bind(lua_State *L) {
         int ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
         keymap_add_binding(g.root_map, mods, vk, ACTION_LUA_CALL, ref,
-                           NULL, NULL, NULL, terminal);
+                           NULL, NULL, NULL, NULL, terminal);
         return 0;
     }
 
@@ -292,10 +304,11 @@ static int lua_mshell_bind(lua_State *L) {
     /* Payload: a number, a string, or {command, arguments} for spawn. */
     bool        has_num = false;
     int         num_arg = 0;
-    const char *str_arg = NULL, *args_str = NULL;
+    const char *str_arg = NULL, *args_str = NULL, *cwd_str = NULL;
     int         pushed  = 0;
     if (nargs >= 4)
-        pushed = read_payload(L, 4, &has_num, &num_arg, &str_arg, &args_str);
+        pushed = read_payload(L, 4, &has_num, &num_arg, &str_arg, &args_str,
+                              &cwd_str);
 
     bool terminal = true;   /* most actions return to root after firing */
     if (nargs >= 5 && lua_isboolean(L, 5)) terminal = (bool)lua_toboolean(L, 5);
@@ -303,7 +316,8 @@ static int lua_mshell_bind(lua_State *L) {
     if (!g.root_map) return luaL_error(L, "root keymap not initialized");
 
     add_resolved_binding(L, g.root_map, mods, vk, action_str,
-                         has_num, num_arg, str_arg, args_str, terminal);
+                         has_num, num_arg, str_arg, args_str, cwd_str,
+                         terminal);
     lua_pop(L, pushed);
     return 0;
 }
@@ -401,11 +415,11 @@ static int lua_mshell_submap(lua_State *L) {
             lua_pushvalue(L, -1);
             int ref = luaL_ref(L, LUA_REGISTRYINDEX);
             keymap_add_binding(km, 0, vk, ACTION_LUA_CALL, ref,
-                               NULL, NULL, NULL, term);
+                               NULL, NULL, NULL, NULL, term);
         } else if (lua_isstring(L, -1)) {
             /*  key = "action"  */
             add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
-                                 false, 0, NULL, NULL, term);
+                                 false, 0, NULL, NULL, NULL, term);
         } else if (lua_istable(L, -1)) {
             /*  key = {"action", payload}  — payload may itself be
              *  {command, arguments} for spawn. */
@@ -419,12 +433,13 @@ static int lua_mshell_submap(lua_State *L) {
 
             lua_rawgeti(L, t, 2);
             bool        has_num; int num_arg;
-            const char *str_arg, *args_str;
+            const char *str_arg, *args_str, *cwd_str;
             int pushed = read_payload(L, -1, &has_num, &num_arg,
-                                      &str_arg, &args_str);
+                                      &str_arg, &args_str, &cwd_str);
 
             add_resolved_binding(L, km, 0, vk, action_str,
-                                 has_num, num_arg, str_arg, args_str, term);
+                                 has_num, num_arg, str_arg, args_str, cwd_str,
+                                 term);
 
             lua_pop(L, pushed + 2);  /* payload parts + payload + action */
         } else {
@@ -637,7 +652,13 @@ static int lua_mshell_desktop_rule(lua_State *L) {
         lua_rawgeti(L, t, 2);
         if (lua_isstring(L, -1))
             u8_to_w(lua_tostring(L, -1), r->app_args, SPAWN_ARGS_MAX);
-        lua_pop(L, 2);
+        /* Third slot, or a named cwd = — the same shapes a spawn payload
+         * accepts, so the two do not have to be remembered separately. */
+        lua_rawgeti(L, t, 3);
+        if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_getfield(L, t, "cwd"); }
+        if (lua_isstring(L, -1))
+            u8_to_w(lua_tostring(L, -1), r->app_cwd, MAX_PATH);
+        lua_pop(L, 3);
     }
     lua_pop(L, 1);
 
@@ -911,6 +932,7 @@ static int lua_mshell_spawn(lua_State *L) {
     reject_at_runtime(L, "spawn");
     const char *cmd  = luaL_checkstring(L, 1);
     const char *args = luaL_optstring(L, 2, NULL);
+    const char *cwd  = luaL_optstring(L, 3, NULL);
 
     if (g.startup_count >= MAX_STARTUP_COMMANDS) {
         return luaL_error(L, "too many startup commands (max %d)",
@@ -926,9 +948,55 @@ static int lua_mshell_spawn(lua_State *L) {
         if (!wargs) { free(wcmd); return luaL_error(L, "out of memory"); }
     }
 
+    wchar_t *wcwd = NULL;
+    if (cwd && cwd[0]) {
+        wcwd = u8_to_w_dup(cwd);
+        if (!wcwd) { free(wcmd); free(wargs);
+                     return luaL_error(L, "out of memory"); }
+    }
+
     g.startup_commands[g.startup_count].cmd  = wcmd;
     g.startup_commands[g.startup_count].args = wargs;
+    g.startup_commands[g.startup_count].cwd  = wcwd;
     g.startup_count++;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.setenv(name, value)
+ *
+ * The environment half of "spawn with an environment". Deliberately
+ * process-wide rather than per-spawn: children inherit our block, so one call
+ * covers every launch — a keybinding, a startup program and a desktop's `app`
+ * alike — and there is no per-binding storage to keep in step. Passing nil
+ * removes the variable.
+ *
+ * It changes OUR environment, which is the mechanism, so keep it to things a
+ * child should see (PATH additions, EDITOR, a toolchain root).
+ * =========================================================================== */
+static int lua_mshell_setenv(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    if (!name[0]) return luaL_error(L, "setenv: the name is empty");
+    if (strchr(name, '='))
+        return luaL_error(L, "setenv: '%s' contains '=', which cannot be part "
+                             "of a variable name", name);
+
+    wchar_t wname[256];
+    u8_to_w(name, wname, 256);
+
+    if (lua_isnoneornil(L, 2)) {
+        SetEnvironmentVariableW(wname, NULL);   /* NULL deletes it */
+        return 0;
+    }
+
+    const char *value = luaL_checkstring(L, 2);
+    wchar_t *wvalue = u8_to_w_dup(value);
+    if (!wvalue) return luaL_error(L, "out of memory");
+    bool ok = SetEnvironmentVariableW(wname, wvalue) != 0;
+    free(wvalue);
+
+    if (!ok) return luaL_error(L, "setenv: could not set %s (error %lu)",
+                               name, GetLastError());
     return 0;
 }
 
@@ -1389,6 +1457,7 @@ void lua_register_api(lua_State *L) {
         {"block_system_keys",lua_mshell_block_system_keys},
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
+        {"setenv",          lua_mshell_setenv},
         {"log",             lua_mshell_log},
         {"on",              lua_mshell_on},
 
