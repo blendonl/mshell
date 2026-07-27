@@ -134,23 +134,41 @@ mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
 mshell.set_background(0x000000)     -- solid desktop backdrop color
 mshell.set_master_ratio(0.60)
 
--- Status bar — one per monitor, along the top by default. It reserves its
--- strip out of each monitor's work area, so tiled windows sit below it and a
--- fullscreen window still covers it.
+-- Status bar. Two modes, same content in two shapes:
+--
+--   "top_bar"   one strip per monitor, along the top by default. It reserves
+--               its strip out of each monitor's work area, so tiled windows
+--               sit below it and a fullscreen window still covers it.
+--   "floating"  one panel in the middle of the FOCUSED monitor: a large clock,
+--               the date, the desktop list, the focused title, and mshell's
+--               live notifications stacked under each other. It reserves
+--               nothing and floats over the windows (click-through), and it
+--               follows the focus between monitors rather than appearing on
+--               all of them. Bind `toggle_bar` to dismiss it when it is in the
+--               way.
+--
+-- `height` sizes the strip in top_bar mode and the type scale in both.
 --
 -- `modules` REPLACES the default set rather than adding to it, so listing only
 -- some of them turns the rest off: modules = {"desktops"} gives a bar with
--- nothing but the desktop list.
+-- nothing but the desktop list. "notifications" applies to floating mode only
+-- — a one-line strip has nowhere to wrap a message — and with it on the panel
+-- becomes the surface mshell's messages appear on instead of its own toasts.
 mshell.set_bar({
     enabled  = true,
-    position = "top",        -- or "bottom"
+    mode     = "top_bar",    -- or "floating"
+    position = "top",        -- or "bottom"; top_bar mode only
     height   = 28,           -- design pixels at 96 DPI; scaled per monitor
     bg       = 0x1e1e2e,
     fg       = 0xcdd6f4,
-    accent   = 0x7aa2f7,     -- the current desktop
-    dim      = 0x6c7086,     -- the other desktops
-    modules  = { "desktops", "layout", "title", "clock" },
+    accent   = 0x7aa2f7,     -- the current desktop (and the panel's outline)
+    dim      = 0x6c7086,     -- the other desktops (and the date)
+    modules  = { "desktops", "layout", "title", "clock", "notifications" },
 })
+
+-- Show/hide the bar without a reload — mostly for floating mode, where the
+-- panel sits over the middle of the screen:
+-- mshell.bind({"win"}, "b", "toggle_bar")
 
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call

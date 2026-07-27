@@ -27,6 +27,8 @@ exists, so they are worth re-running before any release.
 
 ## Status bar (0.10.0)
 
+With `mode = "top_bar"` (the default):
+
 - It appears on **every** monitor, at the top, and tiled windows start below it
   rather than underneath it.
 - The desktop list updates as desktops are created and destroyed; the current
@@ -38,6 +40,28 @@ exists, so they are worth re-running before any release.
 - On a scaled display the bar is proportionate, not tiny or huge.
 - `modules = {"desktops"}` leaves only the desktop list.
 - `enabled = false`, save: the bar disappears and windows reclaim the space.
+
+## Floating bar mode
+
+With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
+
+- One panel, in the **middle of the screen**, showing the time large with the
+  date under it, then the desktops and layout, then the focused title.
+- Tiled windows fill the whole monitor: the panel reserves nothing and sits
+  over them.
+- Clicking where the panel is reaches the window **underneath** it — it never
+  takes focus and never swallows a click.
+- Only one panel on a multi-monitor desk. Focus a window on another display and
+  it moves there.
+- `mshell.exe --msg 'notify hello'` appears **in the panel**, not as a separate
+  toast, and the panel grows to fit it and shrinks again when it expires. A
+  warn/error notification's dot is yellow/red.
+- Several messages list newest-first; long ones wrap rather than being clipped.
+- Bind `toggle_bar`: the panel disappears and comes back. While it is hidden, a
+  notification appears as an ordinary toast again.
+- Switching to `mode = "top_bar"` and back at reload leaves no stray window and
+  no duplicate notifications.
+- On a scaled display, the panel and its type are proportionate.
 
 ## Control channel (0.10.0)
 

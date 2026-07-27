@@ -3,6 +3,34 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Added
+
+- **The status bar has modes: `top_bar` and `floating`.** `set_bar{ mode =
+  ... }` picks between them and nothing else about the call changes; `top_bar`
+  is the default and is exactly the bar that already existed. `floating` is one
+  panel in the middle of the FOCUSED monitor instead of a strip on every one:
+  the time large, the date under it, the desktops and layout, the focused
+  title. It reserves nothing out of the work area — it floats over the windows
+  rather than pushing them down — is click-through, and follows the focus
+  between displays rather than putting three copies of the same clock on three
+  screens. The mode is a named enum rather than a bool because more shapes are
+  expected here.
+- **The floating panel lists notifications inline**, via a `"notifications"`
+  module. That module is what the extra height buys: a one-line strip has
+  nowhere to wrap a message, which is why notifications had to be their own
+  window in the first place. When the panel is showing them, notify.c stands
+  its own toasts down rather than showing everything twice; turn the module
+  off, switch modes, or hide the bar and the toasts come straight back. The
+  toast stack remains the state either way, so expiry and stacking behave
+  identically on both surfaces.
+- **`toggle_bar`** — show or hide the bar without a config reload, re-measuring
+  the work area and re-tiling so a hidden `top_bar` gives its strip back. It
+  exists mostly for floating mode, where the panel sits over the middle of the
+  screen and wanting it gone for a moment is the normal case. Bindable, and
+  reachable over the control channel as `mshell.exe --msg toggle_bar`.
+
 ## 0.12.0 — 2026-07-27
 
 The release that fills in what a tiling WM is expected to have and what a shell
