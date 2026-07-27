@@ -584,7 +584,14 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         tile_current();
         return 0;
 
+    case WM_MSHELL_MOUSE:
+        /* Mod+drag delta, applied here rather than in the hook: SetWindowPos
+         * from the hook thread would run inside the input timeout. */
+        mouse_mod_drag_apply((int)(LONG)wp, (int)(LONG)lp);
+        return 0;
+
     case WM_TIMER:
+        if (wp == TIMER_FOLLOW_MOUSE) { mouse_poll_focus(); return 0; }
         /* We have been up long enough to count as a healthy run, so the
          * launches recorded before this one were not a loop. One-shot: kill the
          * timer so this is the only time it fires. */
@@ -881,6 +888,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * as the real shell: under --test a crash costs you a process, not a
      * session, and repeatedly starting and stopping a test instance is a normal
      * thing to do that must not trip safe mode. */
+    /* Focus-follows-mouse is polled rather than hooked — see mouse.c. The timer
+     * runs unconditionally and the poll returns immediately when the feature is
+     * off, so a reload can turn it on without touching the timer. */
+    SetTimer(g.message_window, TIMER_FOLLOW_MOUSE, FOLLOW_MOUSE_MS, NULL);
+
     if (!g.test_mode) {
         warn_if_no_autorestart();
         g.safe_mode = crashloop_record_launch();
@@ -947,6 +959,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* --- manage windows that already exist --- */
     events_sync_urgency();   /* honours whatever the config just set */
+    mouse_sync_hook();       /* ditto for Mod+drag's WH_MOUSE_LL hook */
 
     window_manage_existing();
 

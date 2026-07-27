@@ -1451,6 +1451,53 @@ void execute_action(Action action, int arg, const wchar_t *command,
  * never starved by focus/tiling work on the main thread (which is what let a
  * held-Win autorepeat leak and stick — see the file header).
  * =========================================================================== */
+/* ---------------------------------------------------------------------------
+ * WH_MOUSE_LL — only while Mod+drag is enabled.
+ *
+ * It shares the keyboard hook's thread, so it is on the same LowLevelHooksTimeout
+ * budget: the first thing it does for a non-modifier-held event is return. That
+ * matters because this fires on every pixel of every mouse movement, and the
+ * thread it runs on is the one that has to answer keystrokes.
+ * --------------------------------------------------------------------------- */
+static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode != HC_ACTION)
+        return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+    /* Cheapest possible early-out: unless a drag is in flight, nothing here is
+     * interesting without the modifier. mod_lwin is the hook thread's own
+     * state, already tracked for the keyboard. */
+    if (!g.mod_drag_hwnd && !mod_lwin)
+        return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+    MSLLHOOKSTRUCT *ms = (MSLLHOOKSTRUCT *)lParam;
+    if (mouse_mod_drag_event(wParam, ms->pt, mod_lwin))
+        return 1;                       /* swallow: the app must not see it */
+
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
+/* Install or remove the mouse hook to match the setting. Must run ON the hook
+ * thread, so it is driven by a posted message rather than called directly. */
+static void mouse_sync_hook_here(void) {
+    if (g.mouse_mod_drag && !g.mouse_hook) {
+        g.mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_hook_proc,
+                                         g.hinst, 0);
+        if (g.mouse_hook) log_msg(LOG_INFO, L"mouse: Mod+drag on");
+        else log_msg(LOG_WARN, L"SetWindowsHookEx(WH_MOUSE_LL) failed: %lu",
+                     GetLastError());
+    } else if (!g.mouse_mod_drag && g.mouse_hook) {
+        UnhookWindowsHookEx(g.mouse_hook);
+        g.mouse_hook    = NULL;
+        g.mod_drag_hwnd = NULL;
+        log_msg(LOG_INFO, L"mouse: Mod+drag off");
+    }
+}
+
+/* Ask the hook thread to reconcile its mouse hook with the config. */
+void mouse_sync_hook(void) {
+    if (g_kb_thread_id) PostThreadMessageW(g_kb_thread_id, WM_MSHELL_MOUSE, 0, 0);
+}
+
 static DWORD WINAPI kb_thread_proc(LPVOID param) {
     (void)param;
 
@@ -1484,10 +1531,21 @@ static DWORD WINAPI kb_thread_proc(LPVOID param) {
      * WM_QUIT to break out. */
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        /* A thread message (hwnd == NULL) is ours: the only one is the request
+         * to reconcile the mouse hook, which has to happen on this thread
+         * because that is where its callbacks must run. */
+        if (!msg.hwnd && msg.message == WM_MSHELL_MOUSE) {
+            mouse_sync_hook_here();
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
 
+    if (g.mouse_hook) {
+        UnhookWindowsHookEx(g.mouse_hook);
+        g.mouse_hook = NULL;
+    }
     if (g.kb_hook) {
         UnhookWindowsHookEx(g.kb_hook);
         g.kb_hook = NULL;

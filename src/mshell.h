@@ -82,6 +82,8 @@
 /* Timer ids on the message window. The first one there has ever been — the
  * message pump previously handled no WM_TIMER at all. */
 #define TIMER_CRASHLOOP_HEALTHY  1
+#define TIMER_FOLLOW_MOUSE       2
+#define FOLLOW_MOUSE_MS          120   /* human-speed; see mouse.c */
 #define WM_MSHELL_SUBMAP  (WM_APP + 2)
 #define WM_MSHELL_CONFIG_CHANGED  (WM_APP + 3)
 
@@ -89,6 +91,11 @@
  * main thread because everything it can touch is main-thread state; the pipe
  * thread waits on the request's event and then writes the reply. */
 #define WM_MSHELL_IPC             (WM_APP + 4)
+
+/* Posted by the mouse hook during a Mod+drag: wParam/lParam are the cursor's
+ * offset from where the drag started. Applied on the main thread, because
+ * SetWindowPos from the hook thread runs inside the input timeout. */
+#define WM_MSHELL_MOUSE           (WM_APP + 5)
 
 /* ---------------------------------------------------------------------------
  * Constants
@@ -800,6 +807,7 @@ typedef struct {
 
     /* --- hooks --- */
     HHOOK         kb_hook;
+    HHOOK         mouse_hook;   /* WH_MOUSE_LL, only while mouse_mod_drag */
     /* Four narrow WinEvent hooks rather than one wide one. The ranges between
      * them (REORDER, OBJECT_FOCUS, SELECTION*, STATECHANGE, and most of the
      * system range) fire constantly across every process on the machine and
@@ -817,7 +825,13 @@ typedef struct {
      * So a drag is interpreted instead — dropped onto another tile, the two
      * swap; dragged along the master split, the ratio follows. drag_hwnd is the
      * window a drag is in progress on, NULL when none. */
-    bool     mouse_enabled;
+    bool     mouse_enabled;      /* drag a tile onto another to swap them     */
+    bool     mouse_follow;       /* focus follows the pointer (polled)        */
+    bool     mouse_mod_drag;     /* Win+drag moves / Win+right-drag resizes a
+                                  * FLOATING window. Opt-in: it is the one part
+                                  * that needs a WH_MOUSE_LL hook, on the thread
+                                  * that must also answer the keyboard hook. */
+    HWND     mod_drag_hwnd;      /* window being Mod+dragged, or NULL          */
     HWND     drag_hwnd;
     POINT    drag_start;
 
@@ -1145,6 +1159,10 @@ const wchar_t *session_start_desktop(void);  /* last desktop, or NULL          *
 /* Mouse drag handling (events.c). A tiled drag is not a move — see the note on
  * g.drag_hwnd. */
 void     mouse_drag_begin(HWND hwnd);
+void     mouse_poll_focus(void);
+bool     mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held);
+void     mouse_mod_drag_apply(int dx, int dy);
+void     mouse_sync_hook(void);   /* install/remove the WH_MOUSE_LL hook */
 void     mouse_drag_end(HWND hwnd);
 
 bool     bar_init(void);

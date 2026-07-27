@@ -859,16 +859,6 @@ static int lua_mshell_set_attach(lua_State *L) {
     return 0;
 }
 
-/* mshell.set_mouse(enabled) — dragging a TILED window onto another swaps them.
- * A tiled window cannot really be moved (the layout owns its geometry), so the
- * drag is interpreted rather than obeyed. Floating windows are dragged normally
- * either way. Default on; false restores the old snap-back-only behaviour. */
-static int lua_mshell_set_mouse(lua_State *L) {
-    reject_at_runtime(L, "set_mouse");
-    g.mouse_enabled = lua_toboolean(L, 1);
-    return 0;
-}
-
 /* mshell.set_manage_owned(enabled) — also tile owned/dialog windows (risky) */
 static int lua_mshell_set_manage_owned(lua_State *L) {
     g.manage_owned = lua_toboolean(L, 1);
@@ -1105,6 +1095,41 @@ static int lua_mshell_spawn(lua_State *L) {
     g.startup_commands[g.startup_count].args = wargs;
     g.startup_commands[g.startup_count].cwd  = wcwd;
     g.startup_count++;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_mouse(enabled)  |  mshell.set_mouse{ drag_swap=, follow=,
+ *                                                 mod_drag= }
+ *
+ * follow (focus-follows-mouse) is polled on a timer, not hooked — a
+ * WH_MOUSE_LL hook fires on every pixel of movement, on the thread that has to
+ * answer the keyboard hook inside LowLevelHooksTimeout.
+ *
+ * mod_drag is the one part that genuinely needs that hook, because it has to
+ * swallow the button-down. Hence opt-in, and hence the hook existing only while
+ * it is on.
+ * =========================================================================== */
+static int lua_mshell_set_mouse_tbl(lua_State *L) {
+    reject_at_runtime(L, "set_mouse");
+    /* Bare boolean is the original form: dragging a TILED window onto another
+     * swaps them. A tiled window cannot really be moved (the layout owns its
+     * geometry), so the drag is interpreted rather than obeyed. */
+    if (!lua_istable(L, 1)) {
+        g.mouse_enabled = lua_toboolean(L, 1);
+        return 0;
+    }
+    lua_getfield(L, 1, "drag_swap");
+    if (!lua_isnil(L, -1)) g.mouse_enabled = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "follow");
+    if (!lua_isnil(L, -1)) g.mouse_follow = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "mod_drag");
+    if (!lua_isnil(L, -1)) g.mouse_mod_drag = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
     return 0;
 }
 
@@ -1759,7 +1784,7 @@ void lua_register_api(lua_State *L) {
         {"set_float_policy",lua_mshell_set_float_policy},
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
         {"set_attach",      lua_mshell_set_attach},
-        {"set_mouse",       lua_mshell_set_mouse},
+        {"set_mouse",       lua_mshell_set_mouse_tbl},
         {"set_manage_owned",lua_mshell_set_manage_owned},
         {"set_float_on_top",lua_mshell_set_float_on_top},
         {"set_min_window_size",lua_mshell_set_min_window_size},
