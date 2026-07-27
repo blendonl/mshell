@@ -299,16 +299,63 @@ static BOOL CALLBACK mon_enum_proc(HMONITOR hmon, HDC dc, LPRECT rc, LPARAM lp) 
     (void)dc; (void)rc; (void)lp;
     if (g.monitor_count >= MAX_MONITORS) return TRUE;
 
-    MONITORINFO mi = { .cbSize = sizeof(mi) };
-    if (!GetMonitorInfoW(hmon, &mi)) return TRUE;
+    /* MONITORINFOEXW rather than MONITORINFO: szDevice is the stable name a
+     * per-monitor override and a hotplug are matched on. */
+    MONITORINFOEXW mi = { .cbSize = sizeof(mi) };
+    if (!GetMonitorInfoW(hmon, (LPMONITORINFO)&mi)) return TRUE;
 
     Monitor *m = &g.monitors[g.monitor_count];
     m->handle    = hmon;
     m->full      = mi.rcMonitor;
     m->work_area = mi.rcWork;
+    wcsncpy(m->device, mi.szDevice, CCHDEVICENAME - 1);
+    m->device[CCHDEVICENAME - 1] = L'\0';
     if (mi.dwFlags & MONITORINFOF_PRIMARY) g.primary_monitor = g.monitor_count;
     g.monitor_count++;
     return TRUE;
+}
+
+/* ---------------------------------------------------------------------------
+ * Apply the config's per-monitor overrides to the displays that are actually
+ * attached right now.
+ *
+ * Matched by DEVICE NAME by preference. An index is what the config can most
+ * easily write, but it is also what changes when a display is unplugged — the
+ * remaining monitors renumber, and "monitor 1 uses columns" silently starts
+ * describing a different screen. A name pattern survives that; the index form
+ * stays supported because on a fixed desk it is what people will write.
+ *
+ * Runs on every enumeration, so a hotplug re-resolves rather than leaving a
+ * stale override on whichever display inherited the slot.
+ * --------------------------------------------------------------------------- */
+void monitors_apply_rules(void) {
+    for (int i = 0; i < g.monitor_count; i++) {
+        Monitor *m = &g.monitors[i];
+
+        /* Inherit-everything is the baseline; a rule then overrides fields. */
+        m->inner_gap    = -1;
+        m->outer_gap    = -1;
+        m->n_master     = -1;
+        m->master_ratio = -1.f;
+        m->layout       = LAYOUT_COUNT;
+
+        for (int r = 0; r < g.monitor_rule_count; r++) {
+            const MonitorRule *mr = &g.monitor_rules[r];
+
+            bool hit = (mr->device[0])
+                     ? wildcard_match(mr->device, m->device)
+                     : (mr->index == i);
+            if (!hit) continue;
+
+            /* Layered like the desktop rules: every match applies, in
+             * declaration order, each overwriting only what it names. */
+            if (mr->set_gaps)    { m->inner_gap = mr->inner_gap;
+                                   m->outer_gap = mr->outer_gap; }
+            if (mr->set_nmaster)   m->n_master     = mr->n_master;
+            if (mr->set_ratio)     m->master_ratio = mr->master_ratio;
+            if (mr->set_layout)    m->layout       = mr->layout;
+        }
+    }
 }
 
 void monitors_update(void) {
@@ -330,12 +377,58 @@ void monitors_update(void) {
         g.monitor_count = 1;
     }
 
-    /* Clamp anything referring to a now-gone monitor back onto the primary. */
+    monitors_apply_rules();
+
     if (g.focused_monitor < 0 || g.focused_monitor >= g.monitor_count)
         g.focused_monitor = g.primary_monitor;
-    for (int i = 0; i < g.managed_count; i++)
-        if (g.managed[i].monitor < 0 || g.managed[i].monitor >= g.monitor_count)
-            g.managed[i].monitor = g.primary_monitor;
+
+    /* --- re-home every window by DEVICE NAME ---
+     *
+     * Indices are not stable across a hotplug: unplug the middle display and
+     * the ones after it renumber, so a window "on monitor 2" silently becomes a
+     * window on a different screen. Each window remembers the name of the
+     * display it was on, so:
+     *
+     *   - if that display is still attached (possibly at a new index), the
+     *     window follows it there;
+     *   - if it is gone, the window falls back to the primary but KEEPS the
+     *     remembered name, so plugging the display back in returns it.
+     *
+     * That last part is the whole point: a laptop docked and undocked all day
+     * otherwise accumulates every window on the built-in panel. */
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+
+        if (mw->monitor_device[0]) {
+            int found = -1;
+            for (int m = 0; m < g.monitor_count; m++)
+                if (_wcsicmp(g.monitors[m].device, mw->monitor_device) == 0) {
+                    found = m; break;
+                }
+            if (found >= 0) {
+                if (mw->monitor != found) {
+                    mw->monitor     = found;
+                    mw->has_applied = false;
+                }
+                continue;
+            }
+            /* Its display is not here. Park it on the primary WITHOUT
+             * forgetting where it belongs. */
+            if (mw->monitor != g.primary_monitor) {
+                mw->monitor     = g.primary_monitor;
+                mw->has_applied = false;
+            }
+            continue;
+        }
+
+        /* No remembered display yet (a window managed before this ran):
+         * clamp, then adopt whatever it is on now as its home. */
+        if (mw->monitor < 0 || mw->monitor >= g.monitor_count)
+            mw->monitor = g.primary_monitor;
+        wcsncpy(mw->monitor_device, g.monitors[mw->monitor].device,
+                CCHDEVICENAME - 1);
+        mw->monitor_device[CCHDEVICENAME - 1] = L'\0';
+    }
 }
 
 /* ---------------------------------------------------------------------------

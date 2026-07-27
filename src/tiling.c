@@ -324,8 +324,16 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
      * that monitor's own client count. A per-desktop or per-monitor override
      * belongs in this block and nowhere else. */
     LayoutParams lp;
-    int inner = (dt->inner_gap >= 0) ? dt->inner_gap : g.inner_gap;
-    int outer = (dt->outer_gap >= 0) ? dt->outer_gap : g.outer_gap;
+    /* Precedence, most specific first: the desktop's own override, then the
+     * monitor's, then the global. A desktop that asked for zero gaps means it
+     * on every display it spans; a monitor override describes a screen's
+     * habits and should not overrule that. */
+    const Monitor *M = (mon >= 0 && mon < g.monitor_count) ? &g.monitors[mon]
+                                                           : NULL;
+    int inner = (dt->inner_gap >= 0) ? dt->inner_gap
+              : (M && M->inner_gap >= 0) ? M->inner_gap : g.inner_gap;
+    int outer = (dt->outer_gap >= 0) ? dt->outer_gap
+              : (M && M->outer_gap >= 0) ? M->outer_gap : g.outer_gap;
     if (g.smart_gaps && n == 1) { inner = 0; outer = 0; }
 
     int pre = outer - inner / 2;
@@ -333,12 +341,18 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
 
     lp.area         = inset_rect(work, pre);
     lp.inner        = inner;
-    lp.master_ratio = dt->master_ratio;
-    lp.n_master     = dt->n_master;
+    lp.master_ratio = (M && M->master_ratio > 0.f) ? M->master_ratio
+                                                    : dt->master_ratio;
+    lp.n_master     = (M && M->n_master > 0) ? M->n_master : dt->n_master;
 
     s_inner = lp.inner;   /* emit() reads this for the per-cell half-gap */
 
-    switch (dt->layout) {
+    /* A vertical secondary that always wants columns is the case this exists
+     * for: the desktop spans both displays, so the layout has to be able to
+     * differ per screen even though the desktop is one thing. */
+    Layout lay = (M && M->layout != LAYOUT_COUNT) ? M->layout : dt->layout;
+
+    switch (lay) {
     case LAYOUT_TILING:   layout_master_stack(&lp, cs, n); break;
     case LAYOUT_MONOCLE:  layout_monocle(&lp, cs, n);      break;
     case LAYOUT_GRID:     layout_grid(&lp, cs, n);         break;

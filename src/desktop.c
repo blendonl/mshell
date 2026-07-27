@@ -119,10 +119,7 @@ static void desktop_resolve_monitor(Desktop *dt) {
 
     for (int i = 0; i < dt->count; i++) {
         ManagedWindow *mw = window_find(dt->windows[i]);
-        if (mw && mw->monitor != dt->monitor) {
-            mw->monitor     = dt->monitor;
-            mw->has_applied = false;
-        }
+        if (mw) window_set_monitor(mw, dt->monitor);
     }
 }
 
@@ -593,7 +590,7 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     /* The target desktop may be pinned to a display; a window arriving on it
      * belongs there too. */
     if (new_dt->monitor >= 0 && new_dt->monitor < g.monitor_count)
-        mw->monitor = new_dt->monitor;
+        window_set_monitor(mw, new_dt->monitor);
 
     /* Sending away the last window empties the desktop we're standing on — that
      * one survives (see desktop_gc), but a window moved off a BACKGROUND

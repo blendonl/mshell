@@ -848,9 +848,8 @@ static void move_focused_to_monitor(int delta) {
 
     int cur = mw->monitor;
     if (cur < 0 || cur >= g.monitor_count) cur = 0;
-    mw->monitor     = (((cur + delta) % g.monitor_count) + g.monitor_count)
-                      % g.monitor_count;
-    mw->has_applied = false;
+    window_set_monitor(mw, (((cur + delta) % g.monitor_count) +
+                            g.monitor_count) % g.monitor_count);
     g.focused_monitor = mw->monitor;
     tile_current();
     if (focus) window_focus(focus);
@@ -906,7 +905,7 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
 
     mw->applied_rect = want;
     mw->has_applied  = true;
-    mw->monitor      = monitor_of_window(mw->hwnd);
+    window_set_monitor(mw, monitor_of_window(mw->hwnd));
     border_refresh();
 }
 
