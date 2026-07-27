@@ -596,6 +596,7 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_TIMER:
         if (wp == TIMER_FOLLOW_MOUSE) { mouse_poll_focus(); return 0; }
+        if (wp == TIMER_ANIM)          { anim_tick();        return 0; }
         /* We have been up long enough to count as a healthy run, so the
          * launches recorded before this one were not a loop. One-shot: kill the
          * timer so this is the only time it fires. */
@@ -935,6 +936,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     whichkey_init();
     notify_init();
     launcher_init();
+    anim_dim_init();
     bar_init();
     /* Monitors were measured before the config was read, so the work areas do
      * not yet account for a bar the config just enabled. Re-measure, then
@@ -1022,6 +1024,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* tear down our own helper windows */
     bar_shutdown();
+    anim_cancel_all();
+    anim_dim_shutdown();
     launcher_shutdown();
     notify_shutdown();
     whichkey_shutdown();

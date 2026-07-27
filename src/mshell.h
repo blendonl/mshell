@@ -83,6 +83,7 @@
  * message pump previously handled no WM_TIMER at all. */
 #define TIMER_CRASHLOOP_HEALTHY  1
 #define TIMER_FOLLOW_MOUSE       2
+#define TIMER_ANIM               3
 #define FOLLOW_MOUSE_MS          120   /* human-speed; see mouse.c */
 #define WM_MSHELL_SUBMAP  (WM_APP + 2)
 #define WM_MSHELL_CONFIG_CHANGED  (WM_APP + 3)
@@ -805,6 +806,14 @@ typedef struct {
      * work — this un-does both for people who would rather no window ever
      * vanish. App-initiated tray hides are exempt either way. */
     SplitMode next_split;     /* direction the next BSP insertion uses     */
+
+    /* Both off by default: they are the two features that cost frames rather
+     * than bytes, and a tiling WM's appeal is that windows are where you put
+     * them instantly. 0 disables the animation entirely. */
+    int      anim_ms;         /* movement duration; 0 = place instantly     */
+    bool     dim_enabled;     /* scrim over everything but the focused window */
+    COLORREF dim_color;
+    BYTE     dim_alpha;       /* the scrim's alpha, not any window's       */
     bool     minimize_never;
     bool     urgency_enabled;
     bool     notify_enabled;     /* show mshell's own on-screen notifications  */
@@ -1104,6 +1113,17 @@ void     layout_tree_set_container(SplitMode mode);
 void     layout_tree_cycle_container(int delta);
 void     layout_tree_resize(float delta);
 void     layout_tree_forget(int desktop_id);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — anim.c (movement animation, unfocused-window dimming)
+ * --------------------------------------------------------------------------- */
+bool     anim_begin(HWND hwnd, RECT from, RECT to);
+void     anim_tick(void);
+bool     anim_is_animating(HWND hwnd);
+void     anim_cancel_all(void);
+bool     anim_dim_init(void);
+void     anim_dim_shutdown(void);
+void     anim_dim_refresh(void);
 void     tile_current(void);
 
 /* ===========================================================================

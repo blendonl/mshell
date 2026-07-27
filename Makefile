@@ -74,7 +74,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/notify.c \
               $(SRC_DIR)/mouse.c \
               $(SRC_DIR)/launcher.c \
-              $(SRC_DIR)/layout_tree.c
+              $(SRC_DIR)/layout_tree.c \
+              $(SRC_DIR)/anim.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:

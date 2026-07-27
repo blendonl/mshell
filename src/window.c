@@ -201,6 +201,9 @@ static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
         L"mshell_MessageWindow",/* our own message window     */
         L"mshell_Bar",          /* our own status bar         */
         L"mshell_WhichKey",     /* our own submap hint        */
+        L"mshell_Notify",       /* our own toasts             */
+        L"mshell_Launcher",     /* our own app launcher       */
+        L"mshell_Dim",          /* our own unfocused scrim    */
         NULL
     };
     for (const wchar_t **p = ignore_classes; *p; p++) {

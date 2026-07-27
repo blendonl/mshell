@@ -422,6 +422,18 @@ static void flush_placements(void) {
          * move→LOCATIONCHANGE→re-tile feedback loop. */
         if (mw && mw->has_applied && rect_eq(mw->applied_rect, want)) continue;
 
+        /* --- animation ---
+         * anim_begin takes over the move and drives it over the next few
+         * frames. applied_rect is still set to the TARGET below, not to the
+         * frame currently on screen: the layout's bookkeeping stays truthful
+         * about where the window is going, and the drift detector compares
+         * against that — so a window in flight is not mistaken for one that
+         * escaped. */
+        if (mw && mw->has_applied && anim_begin(hwnd, mw->applied_rect, want)) {
+            mw->applied_rect = want;
+            continue;
+        }
+
         /* A window we have already had to route through the helper stays on
          * that path: batching it would fail the batch for everything else. */
         bool mw_needs_helper = mw && mw->needs_helper;
