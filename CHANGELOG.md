@@ -3,6 +3,61 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Fixed
+
+- **Every app on a desktop came back black after switching away and back.**
+  Desktops were implemented with `ShowWindow(SW_HIDE)` / `SW_SHOWNOACTIVATE`,
+  and clearing a window's visible bit is not a neutral act: DWM destroys the
+  window's redirection surface, and every app that renders off the UI thread —
+  anything Chromium or Electron based (Chrome, VS Code, Discord, Spotify), WPF,
+  Qt on D3D — additionally treats it as being occluded and shuts its renderer
+  down. On the way back there was a brand-new empty surface and nothing had
+  asked the app to draw into it. Nothing else nudged them either: the tiler
+  skips windows that are already in the right place, and a re-shown window is
+  by definition exactly where it was, so no resize arrived to shake it out of
+  it. A whole desktop's worth of windows could come back blank at once.
+
+  Windows are now taken off the screen by **cloaking** them through DWM
+  (`DWMWA_CLOAK`) instead. A cloaked window keeps its visible bit, keeps its
+  surface and goes on rendering; DWM simply stops compositing it. This is the
+  same mechanism Windows' own virtual desktops use, which is the point — every
+  application is already tested against it. Monocle and the scratchpad hide
+  windows the same way and get the same fix.
+
+  `mshell.set_hide_policy("hide")` restores the old mechanism if cloaking ever
+  misbehaves for some app; that path now forces a repaint and a re-placement
+  when a window comes back, which fixes most of the blackness on its own.
+
+- **Leaving monocle could strand its hidden windows.** `layout_hidden` was set
+  by monocle and the BSP tree but never cleared by the layouts that hide
+  nothing, so it survived a layout change and each pass hid the window again
+  before re-showing it. It is now recomputed on every tiling pass, which also
+  removes a hide/show flicker on every desktop switch.
+
+- **An app un-traying itself while you were elsewhere put its window on the
+  desktop you were looking at.** Clicking Discord's tray icon from another
+  desktop showed it over your current one instead of on the desktop it lives
+  on. It is now put back off-screen where it belongs.
+
+- **Floating a window monocle was holding back lost it for good.** The tiler
+  skips floating windows on both the hide and the show side, so the flag that
+  kept it off the screen had nothing left to clear it. Floating a window now
+  clears it and reveals the window.
+
+- **Switching to an empty desktop now defocuses deliberately.** It used to
+  happen as a side effect of hiding the last window — Windows hands the
+  foreground on when a window is hidden, but not when it is cloaked, so the
+  window you left would have kept taking your keystrokes invisibly. The
+  foreground is parked on the backdrop instead, as Windows' own virtual desktops
+  do. Same for sending the last window off the desktop you are on.
+
+### Added
+
+- **`mshell.set_hide_policy("cloak" | "hide")`** — how a window is removed from
+  view for a desktop you are not on. Defaults to `"cloak"`; see above.
+
 ## 0.12.0 — 2026-07-27
 
 The release that fills in what a tiling WM is expected to have and what a shell

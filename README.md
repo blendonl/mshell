@@ -269,7 +269,7 @@ API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
-`set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_mouse`,
+`set_float_policy`, `set_fullscreen_policy`, `set_hide_policy`, `set_attach`, `set_mouse`,
 `set_manage_owned`, `set_float_on_top`,
 `set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
 `set_animation`, `set_dim`, `set_minimize_policy`, `set_update_check`,
@@ -409,6 +409,32 @@ Since the set changes under you, `next_desktop` / `prev_desktop` step through
 whatever exists at that moment, in name order — numbers first and numerically
 (`1, 2, 10`), then words alphabetically. That's how you get back to a desktop you
 made on the fly and never bound a key to.
+
+**How a desktop is taken off the screen (`set_hide_policy`).** A desktop you are
+not on is a set of windows that have been removed from view, and *how* they are
+removed decides whether they come back looking right. mshell **cloaks** them
+through DWM — the window keeps rendering and DWM simply stops compositing it,
+which is exactly the mechanism Windows' own virtual desktops use.
+
+The obvious alternative, `ShowWindow(SW_HIDE)`, is what mshell did before 0.12.1
+and it has a visible failure mode: clearing a window's visible bit makes DWM
+throw away its redirection surface, and every app that renders off the UI thread
+— anything Chromium or Electron based (Chrome, VS Code, Discord, Spotify), WPF,
+Qt on D3D — *also* reads it as being occluded and shuts its renderer down. On the
+way back there is a fresh, empty surface and nothing has asked the app to draw
+into it, so the window comes back **black**. Because the tiler skips windows that
+are already in the right place, no resize arrived to shake them out of it either,
+and a whole desktop's worth of apps could come back blank at once.
+
+```lua
+mshell.set_hide_policy("cloak")   -- default
+mshell.set_hide_policy("hide")    -- pre-0.12.1 ShowWindow(SW_HIDE)
+```
+
+`"hide"` is kept as an escape hatch, and on that path mshell now forces a repaint
+and a re-placement when a window comes back, which fixes most of the blackness
+but cannot make an app that shut its compositor down present a frame any sooner.
+Cloaking has no such problem, so there is rarely a reason to change this.
 
 **Desktop rules — what a desktop does.** `mshell.desktop_rule(pattern, opts)` is
 the desktop counterpart of `mshell.rule`. `pattern` is a desktop name or a
