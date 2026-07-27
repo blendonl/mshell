@@ -231,6 +231,40 @@ The three modes are distinct and each key is its own toggle:
 - **setenv**: `mshell.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
   %FOO%`.
 
+## Submap routes for those actions
+
+With `init.full.lua`. Every one of these starts with a bare `Win` TAP — nothing
+below asks for two keys held at once, and any sequence can be abandoned with
+`Esc`. The tests above say what each action should do; this says how to fire it.
+
+- **which-key lists the new maps**: tap `Win` and confirm `+media`, `+system`,
+  `+capture` and `+bsp` appear alongside `+window`, `+resize`, `+desktop`,
+  `+launch`, `+go` and `+move`.
+- **media** (`u`, persisting): `u` then `k`/`j` moves the volume with Windows'
+  own indicator; `m` mutes; `Space` plays/pauses; `h`/`l` change track; `s`
+  stops. Still in the map afterwards — `Esc` leaves. `u` then `10k` is ten
+  volume steps (counts apply; `volume_up`/`down` are on the repeat allowlist).
+- **system** (`x`, one-shot): `x` then `r` reloads, `q` quits, `x` panics (see
+  "Panic and safe mode"), `i` raises a notification naming the current desktop,
+  layout, window count and focused process. `i` is a function binding, so it is
+  deliberately ABSENT from the which-key panel — the other four are listed.
+- **power** (`x` `p`, one-shot, nested): the panel shows `+power` under `p`.
+  `x p l` locks. `x p s`/`h` sleep/hibernate. `x p o`/`r`/`d` log off, reboot
+  and shut down — test those only if you mean it. Confirm an unbound key inside
+  the map (say `z`) drops back to root having done nothing, and that `Esc` at
+  any depth returns to root rather than to the parent map.
+- **capture** (`c`, one-shot): `c s` for the whole virtual screen, `c w` for the
+  focused window; both land in `Pictures\Screenshots` and on the clipboard.
+- **bsp** (`b`, persisting): `b b` puts the desktop in the manual layout, then
+  `h`/`v` set the next split's direction, `r` rotates, `t`/`s` make the split a
+  tabbed/stacked container, `n`/`p` cycle its children, `=`/`-` resize it. The
+  hint panel labels those last two "grow split" / "shrink split".
+- **folded into existing maps**: `w Tab` = last window, `w o` = always on top,
+  `d u` = jump to urgent (needs `mshell.set_urgency(true)` uncommented, or
+  nothing is ever urgent), `o p` = the built-in launcher. Confirm the launcher
+  takes your typing immediately — the `launch` map is one-shot, so it has
+  already dropped to root by the time the search box is up.
+
 ## Notifications
 
 - A syntax error in `init.lua` while mshell is running shows a red-striped toast
