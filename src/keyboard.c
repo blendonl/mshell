@@ -229,6 +229,8 @@ static const ActionNameEntry action_names[] = {
     {"media_next",       ACTION_MEDIA_NEXT},
     {"media_prev",       ACTION_MEDIA_PREV},
     {"media_stop",       ACTION_MEDIA_STOP},
+    {"screenshot",       ACTION_SCREENSHOT},
+    {"screenshot_window", ACTION_SCREENSHOT_WINDOW},
     {NULL, ACTION_NONE}
 };
 
@@ -1378,6 +1380,10 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_MEDIA_STOP:
         system_media_key(action);
         break;
+
+    /* -- screenshots ----------------------------------------------------- */
+    case ACTION_SCREENSHOT:        screenshot_screen(); break;
+    case ACTION_SCREENSHOT_WINDOW: screenshot_window(); break;
 
     case ACTION_QUIT:
         g.running = false;

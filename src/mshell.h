@@ -252,6 +252,12 @@ typedef enum {
     ACTION_MEDIA_PREV,
     ACTION_MEDIA_STOP,
 
+    /* Screenshots. PrintScreen is remapped to Snip by a shell setting, and
+     * Win+Shift+S is a Win chord and therefore ours — so without these there
+     * is no screenshot at all. */
+    ACTION_SCREENSHOT,          /* the whole virtual screen */
+    ACTION_SCREENSHOT_WINDOW,   /* just the focused window  */
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -958,6 +964,12 @@ void     system_shutdown(void);
 void     system_sleep(void);
 void     system_hibernate(void);
 void     system_media_key(Action action);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — screenshot.c
+ * --------------------------------------------------------------------------- */
+void     screenshot_screen(void);
+void     screenshot_window(void);
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything
  * that can empty a desktop; it decides for itself whether there's work to do. */
