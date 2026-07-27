@@ -31,6 +31,7 @@ static void config_apply_defaults(void) {
     g.mouse_follow     = false;
     g.mouse_mod_drag   = false;
     g.bar_enabled      = true;
+    g.bar_mode         = DEFAULT_BAR_MODE;
     g.bar_bottom       = false;
     g.bar_height       = DEFAULT_BAR_HEIGHT;
     g.bar_modules      = BAR_MOD_DEFAULT;
@@ -53,15 +54,32 @@ static void config_apply_defaults(void) {
     g.whichkey_fg      = DEFAULT_WHICHKEY_FG;
     g.whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
     g.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
+    g.whichkey_pos     = WK_POS_BOTTOM;
+    g.whichkey_margin  = DEFAULT_WHICHKEY_MARGIN;
+    g.whichkey_max_w   = 0.0f;   /* the monitor is the only limit */
+    g.whichkey_max_h   = 0.0f;
+    g.whichkey_max_rows = DEFAULT_WHICHKEY_MAX_ROWS;
+    g.whichkey_padding = DEFAULT_WHICHKEY_PADDING;
+    g.whichkey_row_gap = DEFAULT_WHICHKEY_ROW_GAP;
+    g.whichkey_col_gap = DEFAULT_WHICHKEY_COL_GAP;
+    g.whichkey_key_gap = DEFAULT_WHICHKEY_KEY_GAP;
+    g.whichkey_hdr_gap = DEFAULT_WHICHKEY_HDR_GAP;
+    wcscpy(g.whichkey_font, DEFAULT_WHICHKEY_FONT);
+    g.whichkey_font_size = DEFAULT_WHICHKEY_FONT_SIZE;
+    g.whichkey_border_w  = DEFAULT_WHICHKEY_BORDER_W;
+    g.whichkey_opacity   = DEFAULT_WHICHKEY_OPACITY;
+    g.whichkey_rounded   = true;
     g.block_system_keys = true;
     g.auto_reload      = true;
 
     g.float_policy     = FLOAT_RULES;
     g.hide_policy      = HIDE_CLOAK;    /* cloak, not SW_HIDE — see HidePolicy */
     g.fullscreen_policy = FS_CONTENT;   /* app fullscreen stays in its tile */
+    g.float_placement  = FLOAT_PLACE_CENTER;  /* a float is the window you are
+                                               * looking at — put it in front  */
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
-    g.float_on_top     = false;
+    g.float_on_top     = true;   /* a float is an overlay, not a peer */
     g.min_win_w        = DEFAULT_MIN_WIN_W;
     g.min_win_h        = DEFAULT_MIN_WIN_H;
 
@@ -125,6 +143,7 @@ typedef struct {
     bool      auto_reload;
     bool      mouse_enabled, mouse_follow, mouse_mod_drag;
     bool      bar_enabled, bar_bottom;
+    BarMode   bar_mode;
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
@@ -139,9 +158,19 @@ typedef struct {
     bool      whichkey_enabled;
     int       whichkey_delay;
     COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
+    WhichKeyPos whichkey_pos;
+    int       whichkey_margin, whichkey_max_rows;
+    float     whichkey_max_w, whichkey_max_h;
+    int       whichkey_padding, whichkey_row_gap, whichkey_col_gap;
+    int       whichkey_key_gap, whichkey_hdr_gap;
+    wchar_t   whichkey_font[LF_FACESIZE];
+    int       whichkey_font_size, whichkey_border_w;
+    BYTE      whichkey_opacity;
+    bool      whichkey_rounded;
     FloatPolicy  float_policy;
     HidePolicy   hide_policy;
     FullscreenMode fullscreen_policy;
+    FloatPlacement float_placement;
     AttachPolicy attach_policy;
     bool      manage_owned, float_on_top;
     int       min_win_w, min_win_h;
@@ -180,6 +209,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->mouse_follow      = g.mouse_follow;
     s->mouse_mod_drag    = g.mouse_mod_drag;
     s->bar_enabled       = g.bar_enabled;
+    s->bar_mode          = g.bar_mode;
     s->bar_bottom        = g.bar_bottom;
     s->bar_height        = g.bar_height;
     s->bar_modules       = g.bar_modules;
@@ -202,9 +232,25 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->whichkey_fg       = g.whichkey_fg;
     s->whichkey_key_fg   = g.whichkey_key_fg;
     s->whichkey_border   = g.whichkey_border;
+    s->whichkey_pos      = g.whichkey_pos;
+    s->whichkey_margin   = g.whichkey_margin;
+    s->whichkey_max_w    = g.whichkey_max_w;
+    s->whichkey_max_h    = g.whichkey_max_h;
+    s->whichkey_max_rows = g.whichkey_max_rows;
+    s->whichkey_padding  = g.whichkey_padding;
+    s->whichkey_row_gap  = g.whichkey_row_gap;
+    s->whichkey_col_gap  = g.whichkey_col_gap;
+    s->whichkey_key_gap  = g.whichkey_key_gap;
+    s->whichkey_hdr_gap  = g.whichkey_hdr_gap;
+    wcscpy(s->whichkey_font, g.whichkey_font);
+    s->whichkey_font_size = g.whichkey_font_size;
+    s->whichkey_border_w  = g.whichkey_border_w;
+    s->whichkey_opacity   = g.whichkey_opacity;
+    s->whichkey_rounded   = g.whichkey_rounded;
     s->float_policy      = g.float_policy;
     s->hide_policy       = g.hide_policy;
     s->fullscreen_policy = g.fullscreen_policy;
+    s->float_placement   = g.float_placement;
     s->attach_policy     = g.attach_policy;
     s->manage_owned      = g.manage_owned;
     s->float_on_top      = g.float_on_top;
@@ -274,6 +320,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.mouse_follow      = s->mouse_follow;
     g.mouse_mod_drag    = s->mouse_mod_drag;
     g.bar_enabled       = s->bar_enabled;
+    g.bar_mode          = s->bar_mode;
     g.bar_bottom        = s->bar_bottom;
     g.bar_height        = s->bar_height;
     g.bar_modules       = s->bar_modules;
@@ -296,9 +343,25 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.whichkey_fg       = s->whichkey_fg;
     g.whichkey_key_fg   = s->whichkey_key_fg;
     g.whichkey_border   = s->whichkey_border;
+    g.whichkey_pos      = s->whichkey_pos;
+    g.whichkey_margin   = s->whichkey_margin;
+    g.whichkey_max_w    = s->whichkey_max_w;
+    g.whichkey_max_h    = s->whichkey_max_h;
+    g.whichkey_max_rows = s->whichkey_max_rows;
+    g.whichkey_padding  = s->whichkey_padding;
+    g.whichkey_row_gap  = s->whichkey_row_gap;
+    g.whichkey_col_gap  = s->whichkey_col_gap;
+    g.whichkey_key_gap  = s->whichkey_key_gap;
+    g.whichkey_hdr_gap  = s->whichkey_hdr_gap;
+    wcscpy(g.whichkey_font, s->whichkey_font);
+    g.whichkey_font_size = s->whichkey_font_size;
+    g.whichkey_border_w  = s->whichkey_border_w;
+    g.whichkey_opacity   = s->whichkey_opacity;
+    g.whichkey_rounded   = s->whichkey_rounded;
     g.float_policy      = s->float_policy;
     g.hide_policy       = s->hide_policy;
     g.fullscreen_policy = s->fullscreen_policy;
+    g.float_placement   = s->float_placement;
     g.attach_policy     = s->attach_policy;
     g.manage_owned      = s->manage_owned;
     g.float_on_top      = s->float_on_top;

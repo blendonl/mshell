@@ -53,17 +53,24 @@ int overlay_scale(int px, UINT dpi);
 
 /* --- fonts -------------------------------------------------------------- */
 
-/* A font plus the DPI and pixel height it was built for, so a rebuild happens
- * only when one of those actually changed. Zero-initialise it. */
+/* A font plus the DPI, pixel height and face it was built for, so a rebuild
+ * happens only when one of those actually changed. Zero-initialise it. */
 typedef struct {
-    HFONT font;
-    UINT  dpi;
-    int   px;
+    HFONT   font;
+    UINT    dpi;
+    int     px;
+    wchar_t face[LF_FACESIZE];
 } OverlayFont;
 
 /* Segoe UI at `px` pixels (a negative height is applied internally, so pass a
  * positive number). Returns the cached font when dpi and px are unchanged. */
 HFONT overlay_font(OverlayFont *of, UINT dpi, int px);
+
+/* Same, in a named family — `face` NULL or empty means Segoe UI. An unknown
+ * family is GDI's problem, not ours: it substitutes silently, which is the
+ * right failure mode for a cosmetic setting. */
+HFONT overlay_font_face(OverlayFont *of, UINT dpi, int px, const wchar_t *face);
+
 void  overlay_font_free(OverlayFont *of);
 
 /* --- painting ----------------------------------------------------------- */

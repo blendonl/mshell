@@ -134,34 +134,89 @@ mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
 mshell.set_background(0x000000)     -- solid desktop backdrop color
 mshell.set_master_ratio(0.60)
 
--- Status bar — one per monitor, along the top by default. It reserves its
--- strip out of each monitor's work area, so tiled windows sit below it and a
--- fullscreen window still covers it.
+-- Status bar. Two modes, same content in two shapes:
+--
+--   "top_bar"   one strip per monitor, along the top by default. It reserves
+--               its strip out of each monitor's work area, so tiled windows
+--               sit below it and a fullscreen window still covers it.
+--   "floating"  one panel in the middle of the FOCUSED monitor: a large clock,
+--               the date, the desktop list, the focused title, and mshell's
+--               live notifications stacked under each other. It reserves
+--               nothing and floats over the windows (click-through), and it
+--               follows the focus between monitors rather than appearing on
+--               all of them. Bind `toggle_bar` to dismiss it when it is in the
+--               way.
+--
+-- `height` sizes the strip in top_bar mode and the type scale in both.
 --
 -- `modules` REPLACES the default set rather than adding to it, so listing only
 -- some of them turns the rest off: modules = {"desktops"} gives a bar with
--- nothing but the desktop list.
+-- nothing but the desktop list. "notifications" applies to floating mode only
+-- — a one-line strip has nowhere to wrap a message — and with it on the panel
+-- becomes the surface mshell's messages appear on instead of its own toasts.
 mshell.set_bar({
     enabled  = true,
-    position = "top",        -- or "bottom"
+    mode     = "top_bar",    -- or "floating"
+    position = "top",        -- or "bottom"; top_bar mode only
     height   = 28,           -- design pixels at 96 DPI; scaled per monitor
     bg       = 0x1e1e2e,
     fg       = 0xcdd6f4,
-    accent   = 0x7aa2f7,     -- the current desktop
-    dim      = 0x6c7086,     -- the other desktops
-    modules  = { "desktops", "layout", "title", "clock" },
+    accent   = 0x7aa2f7,     -- the current desktop (and the panel's outline)
+    dim      = 0x6c7086,     -- the other desktops (and the date)
+    modules  = { "desktops", "layout", "title", "clock", "notifications" },
 })
+
+-- Show/hide the bar without a reload — mostly for floating mode, where the
+-- panel sits over the middle of the screen:
+-- mshell.bind({"win"}, "b", "toggle_bar")
 
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call
 -- just shows the knobs (values below are the defaults).
+--
+-- Every pixel value here is a DESIGN pixel at 96 DPI and is scaled for the
+-- monitor the panel appears on, so one number is right on every display.
 mshell.set_whichkey({
     enabled = true,
     delay   = 150,          -- ms before it appears; 0 = show instantly
+
+    -- Colors
     bg      = 0x1e1e2e,     -- panel background
     fg      = 0xcdd6f4,     -- action-label text
     key_fg  = 0x7aa2f7,     -- key + header accent
     border  = 0x7aa2f7,     -- panel outline
+
+    -- Where it sits on the focused monitor. One of: bottom, top, center,
+    -- left, right, top_left, top_right, bottom_left, bottom_right.
+    position = "bottom",
+    margin   = -1,          -- gap to the monitor edge; negative = automatic
+                            -- (5% of the monitor's height), which is what the
+                            -- panel has always used
+
+    -- How big it may get. Both take EITHER a fraction of the monitor
+    -- (0 < v <= 1) or design pixels (v > 1); 0 means only the monitor limits
+    -- it. Labels that no longer fit are ellipsized, and if bindings have to be
+    -- dropped entirely mshell says which in the log.
+    max_width  = 0,         -- e.g. 0.5 for half the screen, or 900
+    max_height = 0,         -- e.g. 0.4, or 600
+    max_rows   = 12,        -- rows in a column before a new column starts
+
+    -- Spacing
+    padding        = 14,    -- panel inner padding
+    row_spacing    = 6,     -- extra vertical space per row
+    column_spacing = 30,    -- gap between columns
+    key_spacing    = 10,    -- gap between a key and its label
+    header_spacing = 8,     -- gap under the header
+
+    -- Text. Any installed family; an unknown name falls back to the system
+    -- default the way it does anywhere else in Windows.
+    font      = "Segoe UI",
+    font_size = 18,
+
+    -- Chrome
+    border_width = 1,       -- outline thickness; 0 = no outline
+    opacity      = 235,     -- 0 (invisible) to 255 (opaque)
+    rounded      = true,    -- Win11 rounded corners; ignored on older Windows
 })
 
 -- How much goes to %LOCALAPPDATA%\mshell\mshell.log (and DebugView). The file
@@ -189,9 +244,23 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- window. Uncomment to guarantee a fully-tiled desktop:
 -- mshell.set_float_policy("never")
 
--- When windows DO float (the default policy), keep them above the tiled grid
--- instead of letting them sink behind a tiled window:
--- mshell.set_float_on_top(true)
+-- Floating windows stay above the tiled grid, through focus changes too. Turn
+-- this off to make a float an ordinary window in the stack, which sinks behind
+-- whatever you focus next:
+-- mshell.set_float_on_top(false)
+
+-- Where a floating window goes. A float is the window you are looking at — the
+-- one deliberately kept out of the grid — so by default mshell centres it on
+-- its monitor instead of leaving it wherever the app happened to open it. This
+-- covers both a window that opens floating (a "float" rule, or a desktop with
+-- float = true) and one Win+f just took out of the grid. Position only: the
+-- size stays the app's own, clamped to the monitor. "none" restores the old
+-- behaviour of never moving a float:
+-- mshell.set_float_placement("none")
+--
+-- Per app, either way, in the rule's opts: `center = false` leaves that one
+-- app's windows alone, `center = true` centres them under a config that set
+-- "none". A rule with an explicit `geometry` already overrides both.
 
 -- Also tile owned/dialog windows (aggressive — modal dialogs tile poorly):
 -- mshell.set_manage_owned(true)
@@ -211,6 +280,13 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 --
 -- Only worth changing if cloaking misbehaves for some app you use:
 -- mshell.set_hide_policy("hide")
+
+-- Notice windows that flash for attention, and mark them urgent. OFF by
+-- default, and deliberately: it costs a hook on EVENT_OBJECT_STATECHANGE, which
+-- fires for every control on the system. Until this is on, nothing is ever
+-- urgent and the `jump_urgent` key in the desktop sub-map (leader d u) has
+-- nothing to jump to — uncomment if you want that key to do something:
+-- mshell.set_urgency(true)
 
 ----------------------------------------------------------------------
 -- Fullscreen
@@ -391,6 +467,11 @@ mshell.submap("window", {
     k     = "kill",
     f     = "toggle_float",
     Space = "promote_master",
+    -- Tab is the window-level twin of the desktop map's Tab: back to the window
+    -- you were on before this one, and again to come back. o pins a floating
+    -- window over the tiled grid (o for "on top"); toggling off demotes it.
+    Tab   = "last_window",
+    o     = "toggle_always_on_top",
     -- fullscreen (see the Fullscreen section above): w = the WINDOW fills the
     -- monitor, i = the app's own fullscreen stays INSIDE the window, a = both
     w     = "fullscreen",
@@ -409,10 +490,17 @@ mshell.submap("window", {
 -- Desktop sub-map (persisting — cycle focus within the current desktop and stay
 -- put between presses; Esc leaves). Tab jumps back to the desktop you came from
 -- and, since it swaps the pair every time, pressing it again returns you here.
+-- u goes to whatever asked for attention, WHEREVER it is — including a desktop
+-- you are not on, which is the case that flag exists for: a window that flashes
+-- its taskbar button has no taskbar to flash under mshell, so this is how you
+-- find it. It needs mshell.set_urgency(true) (commented out in the Tiling
+-- policy section above, because tracking urgency is not free); without it
+-- nothing is ever urgent and this key does nothing.
 mshell.submap("desktop", {
     h   = "focus_prev",
     l   = "focus_next",
     Tab = "last_desktop",
+    u   = "jump_urgent",
 }, { persist = true })
 
 -- Launch sub-map (one-shot). Shows the richer {"action", arg} binding form, so
@@ -430,11 +518,123 @@ local launch_keys = {
     b      = {"spawn", "firefox.exe"},
     e      = {"spawn", "explorer.exe"},   -- file manager on demand
     t      = {"spawn", {"wt.exe", "-p Ubuntu"}},
+    -- mshell's own launcher: a filter over your Start-menu shortcuts, and a Run
+    -- box for anything that matches nothing. It belongs in a ONE-SHOT map: the
+    -- launcher takes every keystroke while it is open, and this map has already
+    -- dropped you back to root by the time you are typing into it. On the
+    -- persisting leader instead, the leader would still be swallowing keys the
+    -- moment the launcher closed.
+    p      = "launcher",
 }
 if flow then
     launch_keys.a = {"spawn", flow}       -- Flow Launcher (pops its search box)
 end
 mshell.submap("launch", launch_keys)
+
+-- Media sub-map (persisting — volume is something you nudge, not something you
+-- set once, so stay put between presses; Esc leaves).
+--
+-- These actions synthesise the real media virtual-keys, so Windows' own volume
+-- indicator appears and per-app volume keeps working. A keyboard that HAS
+-- dedicated media keys never needs this map — those keys work already, below
+-- our hook. It is for the keyboards that don't, which under mshell have no
+-- other route to volume at all, because every Win+key combo belongs to us.
+--
+-- No digit is bound here, which leaves the vim-style repeat count free:
+-- `10k` is ten volume steps, because volume_up/volume_down are two of the
+-- actions a count is allowed to repeat.
+mshell.submap("media", {
+    k     = "volume_up",
+    j     = "volume_down",
+    m     = "volume_mute",
+    Space = "media_play",
+    l     = "media_next",
+    h     = "media_prev",
+    s     = "media_stop",
+}, { persist = true })
+
+-- Power sub-map (one-shot). Nested one layer under `system` below, and that is
+-- the whole safety story: there is no confirmation dialog anywhere in mshell,
+-- so `shut down` is four deliberate taps (Win, x, p, d) with Esc bailing out at
+-- every one of them. One-shot matters here too — in a persisting map a stray
+-- keypress sits in a map full of destructive keys, whereas here anything
+-- unbound simply drops you back to root having done nothing.
+--
+-- Every one of these exists because replacing Explorer removes the route to it:
+-- there is no Start menu to pick "Shut down" from, and `quit` is not a
+-- substitute, since exiting AS THE SHELL ends the session whatever you meant.
+mshell.submap("power", {
+    l = "lock",
+    s = "sleep",
+    h = "hibernate",
+    o = "logoff",
+    r = "reboot",
+    d = {"shutdown", {desc = "shut down (!)"}},
+})
+
+-- System sub-map (one-shot). mshell's own lifecycle lives here; the OS's power
+-- state lives one layer down under p, so nothing that ends your session shares
+-- a keypress with something that doesn't.
+--
+-- reload and quit keep their Win+Shift+r / Win+Shift+q chords as well — this is
+-- an added route, not a replacement.
+mshell.submap("system", {
+    p = {"enter_submap", "power"},
+    r = "reload",
+    q = "quit",
+    -- The escape hatch: starts Explorer alongside mshell and stops the hook
+    -- binding anything, so a misbehaving shell doesn't need Task Manager. It
+    -- deliberately does NOT quit. Nothing you press can undo it (not binding
+    -- keys is the point) — the way back is `mshell.exe --msg reload`, or just
+    -- saving this file, since auto-reload is on.
+    x = "panic",
+    -- Anything a config can do, a binding can do — including raising a
+    -- notification. mshell.notify is one of the few API calls that is legal at
+    -- RUNTIME as well as config time, which is what makes this possible.
+    -- (Win+Ctrl+i further down logs the same thing instead of showing it.)
+    -- Note: a function binding cannot carry a which-key label, so this key is
+    -- absent from the hint panel while the rest of the map is listed.
+    i = function()
+        local d = mshell.get_current_desktop()
+        local w = mshell.get_focused_window()
+        mshell.notify(("%s — %s, %d windows\nfocus: %s")
+            :format(d and d.name or "?", d and d.layout or "?",
+                    d and d.windows or 0, w and w.process or "nothing"))
+    end,
+})
+
+-- Capture sub-map (one-shot — take one, then back to root).
+-- Both write a PNG to Pictures\Screenshots AND put the image on the clipboard,
+-- so it can be pasted straight into whatever asked for it.
+mshell.submap("capture", {
+    s = "screenshot",           -- the whole virtual screen, every monitor
+    w = "screenshot_window",    -- just the focused window
+})
+
+-- Manual tiling sub-map (persisting — building a layout is several decisions in
+-- a row, so stay; Esc leaves).
+--
+-- `bsp` is the manual layout: windows split wherever you were, rather than
+-- flowing into a master/stack. h/v choose the direction the NEXT window takes,
+-- and any split can become a tabbed or stacked container showing one window at
+-- a time. The tree is an index over the window list, not a replacement for it,
+-- so a desktop moves between bsp and the dynamic layouts freely.
+--
+-- = and - carry a desc because "split_grow" in a hint panel says less than the
+-- key does. They are not count-repeatable, but the map persists, so the answer
+-- to wanting more is to press again.
+mshell.submap("bsp", {
+    b = "layout_bsp",           -- put this desktop in the manual layout
+    h = "split_h",              -- next window splits horizontally
+    v = "split_v",              -- …vertically
+    r = "rotate_split",         -- flip the split holding the focused window
+    t = "toggle_tabbed",
+    s = "toggle_stacked",
+    n = "container_next",       -- show the container's other child
+    p = "container_prev",
+    ["="] = {"split_grow",   {desc = "grow split"}},
+    ["-"] = {"split_shrink", {desc = "shrink split"}},
+}, { persist = true })
 
 -- The two desktop maps, both built from the `desktops` table in the Desktops
 -- section above — same keys in each, so `g` and `m` differ only in what moves:
@@ -456,7 +656,12 @@ mshell.submap("move", move_keys)
 -- it the leader is the mshell.set_leader call below. It's persisting, so you
 -- stay in it and can fire several keys in a row. Every sub-map above is reachable
 -- from here without touching Win: w → window, r → resize, d → desktop, o → launch,
--- g → go (jump to a desktop), m → move (send the focused window to one).
+-- g → go (jump to a desktop), m → move (send the focused window to one),
+-- u → media, x → system (and x p → power), c → capture, b → bsp.
+--
+-- Those last four are deliberately leader-ONLY, with no Win+key equivalent: a
+-- tap and two bare keys reaches anything here, and nothing in this file asks
+-- you to hold three keys at once to reach a feature.
 mshell.submap("normal", {
     -- focus navigation (stay in normal — press h/j/k/l as many times as you like)
     h = "focus_left",
@@ -470,6 +675,10 @@ mshell.submap("normal", {
     o = {"enter_submap", "launch"},
     g = {"enter_submap", "go"},       -- go to a desktop      (g b, g t, g v, …)
     m = {"enter_submap", "move"},     -- send a window to one  (m b, m t, m v, …)
+    u = {"enter_submap", "media"},    -- volume and track      (u k, u j, u m, …)
+    x = {"enter_submap", "system"},   -- reload/quit/panic, and x p for power
+    c = {"enter_submap", "capture"},  -- screenshots           (c s, c w)
+    b = {"enter_submap", "bsp"},      -- manual tiling         (b h, b v, b t, …)
     -- quick one-key actions
     Return = "promote_master",
     Space  = "cycle_layout",
@@ -650,7 +859,11 @@ mshell.rule({ process = "Taskmgr.exe" }, "float")
 
 -- Flow Launcher: its search box is a transient popup, not a window to tile.
 -- Float it and drop the focus ring so mshell leaves the overlay alone.
-mshell.rule({ process = "Flow.Launcher.exe" }, "float", { ring = false })
+-- `center = false` because it already places itself where a launcher belongs —
+-- centred horizontally, high on the screen — and the default centring would
+-- drop it to the middle of the display, which is not where you look for it.
+mshell.rule({ process = "Flow.Launcher.exe" },
+            "float", { ring = false, center = false })
 
 -- --- System dialogs: file pickers, message boxes, permission prompts ---
 --
@@ -710,6 +923,8 @@ mshell.rule({ class = "OperationStatusWindow" }, "float")
 --   decorate = false  strip the title bar and add no border — floating windows
 --                     normally keep their own chrome, this makes them bare
 --   fullscreen = true park it over the monitor's full bounds, ignoring gaps
+--                     (this one also settles where the window goes, so the
+--                     default centring never applies to it)
 -- Long-bracket strings ([[...]]) keep Windows paths readable — no \\ escaping.
 -- Matching on `path` rather than on each .exe means one rule covers everything
 -- installed in a folder, including games you haven't bought yet. Naming a

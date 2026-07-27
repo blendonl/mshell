@@ -14,6 +14,12 @@
  * Stacking, not queueing: several messages are all visible at once, newest at
  * the top, each expiring on its own schedule. A queue would make the second
  * error wait for the first to time out, and errors arrive in bursts.
+ *
+ * The toast stack here is the STATE; it is not always the surface. When the
+ * status bar is in floating mode with its notifications module on, the panel
+ * lists these same messages inline and our own toasts stand down — see
+ * bar_owns_notifications(). Two windows showing the same message is worse than
+ * either one of them alone.
  * =========================================================================== */
 #include "mshell.h"
 #include "overlay.h"
@@ -42,7 +48,7 @@ typedef struct {
 static Toast       s_toasts[NOTIFY_MAX];
 static OverlayFont s_font;
 
-static COLORREF kind_accent(NotifyKind k) {
+COLORREF notify_kind_color(NotifyKind k) {
     switch (k) {
     case NOTIFY_ERROR: return RGB(0xf3, 0x8b, 0xa8);
     case NOTIFY_WARN:  return RGB(0xf9, 0xe2, 0xaf);
@@ -68,6 +74,16 @@ static void notify_relayout(void) {
     if (!g.notify_window) return;
 
     int n = notify_compact();
+
+    /* Someone else is showing them. The stack above is still the state — it
+     * expires on the same schedule and the panel reads it — so all that
+     * changes here is that we do not raise a second copy. */
+    if (bar_owns_notifications()) {
+        ShowWindow(g.notify_window, SW_HIDE);
+        bar_refresh();
+        return;
+    }
+
     if (n == 0) {
         ShowWindow(g.notify_window, SW_HIDE);
         return;
@@ -166,7 +182,7 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             int h = m.bottom + pad * 2;
 
             RECT stripe = { 0, y, accent, y + h };
-            overlay_fill(mdc, &stripe, kind_accent(s_toasts[i].kind));
+            overlay_fill(mdc, &stripe, notify_kind_color(s_toasts[i].kind));
 
             RECT tr = { accent + pad, y + pad, op.w - pad, y + h - pad };
             SetTextColor(mdc, g.whichkey_fg);
@@ -211,6 +227,37 @@ void notify_show(const wchar_t *text, NotifyKind kind, int ms) {
 
     SetTimer(g.notify_window, NOTIFY_TIMER_ID, NOTIFY_TICK_MS, NULL);
     notify_relayout();
+}
+
+/* ---------------------------------------------------------------------------
+ * Which surface shows the live messages can change under us — the config can
+ * be reloaded into (or out of) floating-bar mode, and the bar can be toggled
+ * off entirely. Whoever changes that calls this, and the one that just lost
+ * the messages stops showing them.
+ * --------------------------------------------------------------------------- */
+void notify_resurface(void) {
+    notify_relayout();
+}
+
+/* ---------------------------------------------------------------------------
+ * A copy of the live messages for a surface that is not this one. Newest
+ * first, so a caller with room for two shows the two that matter. Text longer
+ * than NotifyItem's buffer is truncated: this feeds a panel that wraps and
+ * clips anyway.
+ * --------------------------------------------------------------------------- */
+int notify_recent(NotifyItem *out, int max) {
+    if (!out || max <= 0) return 0;
+
+    int n = notify_compact();
+    if (n > max) n = max;
+
+    for (int i = 0; i < n; i++) {
+        memset(&out[i], 0, sizeof out[i]);
+        wcsncpy(out[i].text, s_toasts[i].text,
+                sizeof out[i].text / sizeof out[i].text[0] - 1);
+        out[i].kind = s_toasts[i].kind;
+    }
+    return n;
 }
 
 bool notify_init(void) {
