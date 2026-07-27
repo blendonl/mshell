@@ -232,6 +232,7 @@ static const ActionNameEntry action_names[] = {
     {"screenshot",       ACTION_SCREENSHOT},
     {"screenshot_window", ACTION_SCREENSHOT_WINDOW},
     {"notify",           ACTION_NOTIFY},
+    {"jump_urgent",      ACTION_JUMP_URGENT},
     {NULL, ACTION_NONE}
 };
 
@@ -1389,6 +1390,24 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_NOTIFY:
         if (command && command[0]) notify_show(command, NOTIFY_INFO, 4000);
         break;
+
+    /* Go to whatever asked for attention, wherever it is — including a desktop
+     * you are not on, which is the case the flag exists for. */
+    case ACTION_JUMP_URGENT: {
+        for (int i = 0; i < g.managed_count; i++) {
+            ManagedWindow *mw = &g.managed[i];
+            if (!mw->urgent || !IsWindow(mw->hwnd)) continue;
+
+            Desktop *d = desktop_by_id(mw->desktop_id);
+            if (d && mw->desktop_id != g.current_desktop_id)
+                desktop_switch(d->name);
+
+            desktop_focus_update(mw->hwnd);
+            window_focus(mw->hwnd);
+            break;
+        }
+        break;
+    }
 
     case ACTION_QUIT:
         g.running = false;

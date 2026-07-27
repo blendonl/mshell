@@ -853,6 +853,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     /* --- manage windows that already exist --- */
+    events_sync_urgency();   /* honours whatever the config just set */
+
     window_manage_existing();
 
     /* --- initial tile --- */

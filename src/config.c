@@ -23,6 +23,9 @@ static void config_apply_defaults(void) {
     g.smart_gaps       = false;
     g.border_width     = DEFAULT_BORDER_WIDTH;
     g.border_color     = DEFAULT_BORDER_COLOR;
+    g.border_color_float  = DEFAULT_BORDER_COLOR;
+    g.border_color_urgent = DEFAULT_BORDER_COLOR;
+    g.corner_pref      = 1;   /* DWMWCP_DONOTROUND */
     g.background_color = DEFAULT_BACKGROUND_COLOR;
     g.mouse_enabled    = true;
     g.bar_enabled      = true;
@@ -33,6 +36,7 @@ static void config_apply_defaults(void) {
     g.bar_fg           = DEFAULT_BAR_FG;
     g.bar_accent       = DEFAULT_BAR_ACCENT;
     g.bar_dim          = DEFAULT_BAR_DIM;
+    g.urgency_enabled  = false;   /* costs a system-wide STATECHANGE hook */
     g.notify_enabled   = true;
     g.notify_desktop   = false;   /* the bar already lists the desktops */
     g.whichkey_enabled = true;
@@ -102,7 +106,9 @@ typedef struct {
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
     int       inner_gap, outer_gap, border_width;
     bool      smart_gaps;
-    COLORREF  border_color, background_color;
+    COLORREF  border_color, border_color_float, border_color_urgent;
+    int       corner_pref;
+    COLORREF  background_color;
     bool      block_system_keys;
     bool      auto_reload;
     bool      mouse_enabled;
@@ -110,6 +116,7 @@ typedef struct {
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
+    bool      urgency_enabled;
     bool      notify_enabled, notify_desktop;
     bool      whichkey_enabled;
     int       whichkey_delay;
@@ -142,6 +149,9 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->smart_gaps        = g.smart_gaps;
     s->border_width      = g.border_width;
     s->border_color      = g.border_color;
+    s->border_color_float  = g.border_color_float;
+    s->border_color_urgent = g.border_color_urgent;
+    s->corner_pref       = g.corner_pref;
     s->background_color  = g.background_color;
     s->block_system_keys = g.block_system_keys;
     s->auto_reload       = g.auto_reload;
@@ -154,6 +164,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->bar_fg            = g.bar_fg;
     s->bar_accent        = g.bar_accent;
     s->bar_dim           = g.bar_dim;
+    s->urgency_enabled   = g.urgency_enabled;
     s->notify_enabled    = g.notify_enabled;
     s->notify_desktop    = g.notify_desktop;
     s->whichkey_enabled  = g.whichkey_enabled;
@@ -220,6 +231,9 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.smart_gaps        = s->smart_gaps;
     g.border_width      = s->border_width;
     g.border_color      = s->border_color;
+    g.border_color_float  = s->border_color_float;
+    g.border_color_urgent = s->border_color_urgent;
+    g.corner_pref       = s->corner_pref;
     g.background_color  = s->background_color;
     g.block_system_keys = s->block_system_keys;
     g.auto_reload       = s->auto_reload;
@@ -232,6 +246,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.bar_fg            = s->bar_fg;
     g.bar_accent        = s->bar_accent;
     g.bar_dim           = s->bar_dim;
+    g.urgency_enabled   = s->urgency_enabled;
     g.notify_enabled    = s->notify_enabled;
     g.notify_desktop    = s->notify_desktop;
     g.whichkey_enabled  = s->whichkey_enabled;
@@ -661,6 +676,7 @@ void config_reload(void) {
      * re-measure the work areas first, then rebuild it, then re-tile. */
     update_work_area();
     bar_reconfigure();
+    events_sync_urgency();   /* the setting may have flipped either way */
     desktop_reapply();
 }
 

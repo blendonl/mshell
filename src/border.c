@@ -14,6 +14,11 @@
 
 static const wchar_t *BORDER_CLASS = L"mshell_FocusBorder";
 
+/* Which colour the ring is painting right now. Resolved in border_refresh (main
+ * thread) and consumed by WM_PAINT, the same prepared-state discipline the
+ * other overlays use. */
+static COLORREF s_color;
+
 static LRESULT CALLBACK border_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT: {
@@ -21,7 +26,7 @@ static LRESULT CALLBACK border_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        overlay_fill(dc, &rc, g.border_color);
+        overlay_fill(dc, &rc, s_color);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -78,6 +83,12 @@ void border_refresh(void) {
         border_hide();
         return;
     }
+
+    /* Per-state colour: urgent beats floating beats focused, because "this
+     * window wants you" is the more urgent fact than how it is laid out. */
+    s_color = g.border_color;
+    if (fmw && fmw->is_floating) s_color = g.border_color_float;
+    if (fmw && fmw->urgent)      s_color = g.border_color_urgent;
 
     int x = r.left - bw;
     int y = r.top  - bw;
