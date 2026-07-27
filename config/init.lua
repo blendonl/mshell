@@ -35,17 +35,26 @@ mshell.set_master_ratio(0.60)
 
 -- Status bar. There is no taskbar, and because desktops are created and
 -- destroyed as you use them, this is the only thing telling you which ones
--- exist and which you are on. One per monitor; it reserves its strip so tiled
--- windows sit below it, while a fullscreen window still covers it.
+-- exist and which you are on.
+--
+-- mode = "top_bar" is a strip on every monitor that reserves its space, so
+-- tiled windows sit below it while a fullscreen window still covers it.
+-- mode = "floating" is instead one panel in the middle of the focused monitor
+-- — big clock, date, desktops, and mshell's notifications listed inline — that
+-- floats over the windows and reserves nothing. Bind `toggle_bar` to get it
+-- out of the way.
 mshell.set_bar({
     enabled  = true,
-    position = "top",        -- or "bottom"
-    height   = 28,           -- scaled per monitor for DPI
+    mode     = "top_bar",    -- or "floating"
+    position = "top",        -- or "bottom" (top_bar mode)
+    height   = 28,           -- scaled per monitor for DPI; sets the type scale
     bg       = 0x1e1e2e,
     fg       = 0xcdd6f4,
     accent   = 0x7aa2f7,     -- the desktop you're on
     dim      = 0x6c7086,     -- the others
-    modules  = { "desktops", "layout", "title", "clock" },
+    -- "notifications" is floating-only: with it on, the panel is where
+    -- mshell's messages appear instead of as separate toasts.
+    modules  = { "desktops", "layout", "title", "clock", "notifications" },
 })
 
 ----------------------------------------------------------------------

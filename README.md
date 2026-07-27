@@ -49,11 +49,15 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **Lua configuration** that reloads **when you save it** (or on `Win+Shift+R`)
   and is *atomic* — a broken config keeps the previous one instead of
   stranding you.
-- **Status bar**, one per monitor: the live desktop set with the current one
-  marked, the active layout, the focused window's title, and a clock. It
-  reserves its strip from each monitor's work area, so tiled windows sit below
-  it and a fullscreen window still covers it. Configurable via `set_bar`, and
-  the module list can be trimmed or turned off entirely.
+- **Status bar** in two modes. `top_bar` is a strip on every monitor — the live
+  desktop set with the current one marked, the active layout, the focused
+  window's title, and a clock — reserving its strip from each monitor's work
+  area, so tiled windows sit below it and a fullscreen window still covers it.
+  `floating` is instead one panel in the middle of the focused monitor: a large
+  clock, the date, the desktops, and mshell's live notifications listed inline.
+  It reserves nothing, passes clicks through, and follows the focus between
+  displays. Configurable via `set_bar`, the module list can be trimmed or
+  turned off entirely, and `toggle_bar` hides it without a reload.
 - **Focus ring** around the active window and a **solid desktop backdrop**
   (there is no Explorer to paint one).
 - **Window rules** matching class, process or full install path as wildcard
