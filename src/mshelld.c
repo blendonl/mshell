@@ -35,26 +35,19 @@
 #include <stdbool.h>
 
 #include "proto.h"
+#include "log.h"
 
 /* ---------------------------------------------------------------------------
- * Logging — %TEMP%\mshelld.log, deliberately its own file. The helper may run
- * as a different token than the shell, so sharing mshell.log would mean two
- * processes truncating one file.
+ * Logging — mshelld.log, deliberately its own file. The helper may run as a
+ * different token than the shell, so sharing mshell.log would mean two
+ * processes appending to one file under different ACLs.
+ *
+ * log.c is shared with mshell.exe (it deliberately depends on nothing but the
+ * Win32 API, so it links into a binary that has no MShell global). Everything
+ * the helper logs is lifecycle or failure, so INFO is the right level for it
+ * and there is nothing here that wants gating.
  * --------------------------------------------------------------------------- */
-static FILE *g_log;
-
-static void logf_w(const wchar_t *fmt, ...) {
-    wchar_t buf[512];
-    va_list ap;
-    va_start(ap, fmt);
-    _vsnwprintf(buf, 511, fmt, ap);
-    va_end(ap);
-    buf[511] = L'\0';
-
-    OutputDebugStringW(buf);
-    OutputDebugStringW(L"\n");
-    if (g_log) { fputws(buf, g_log); fputwc(L'\n', g_log); fflush(g_log); }
-}
+#define logf_w(...) log_msg(LOG_INFO, __VA_ARGS__)
 
 /* ---------------------------------------------------------------------------
  * Pipe name and security — identical reasoning to ipc.c: per session, and a
@@ -152,13 +145,7 @@ static void serve(HANDLE pipe) {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
     (void)hInstance; (void)hPrev; (void)cmd; (void)show;
 
-    {
-        wchar_t path[MAX_PATH];
-        if (GetTempPathW(MAX_PATH, path)) {
-            wcsncat(path, L"mshelld.log", MAX_PATH - wcslen(path) - 1);
-            g_log = _wfopen(path, L"w, ccs=UTF-8");
-        }
-    }
+    log_init(L"mshelld", LOG_INFO);
     logf_w(L"=== mshelld starting (protocol %u) ===", MSHELLD_PROTO_VERSION);
 
     /* One helper per session, same reasoning as the shell's own guard. */
@@ -202,6 +189,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
     }
 
     LocalFree(sd);
-    if (g_log) fclose(g_log);
+    log_shutdown();
     return 0;
 }
