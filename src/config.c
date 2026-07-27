@@ -75,6 +75,7 @@ static void config_free_owned(KeyMap *keymaps, int keymap_count,
             free(keymaps[i].bindings[j].command);
             free(keymaps[i].bindings[j].args);
             free(keymaps[i].bindings[j].cwd);
+            free(keymaps[i].bindings[j].desc);
         }
         free(keymaps[i].name);
         free(keymaps[i].bindings);
@@ -477,17 +478,17 @@ void config_load_builtin(void) {
 
     /* Bare essentials: open a terminal, reload, quit, cycle focus, close. */
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, VK_RETURN,
-                       ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, NULL, true);
+                       ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'R',
-                       ACTION_RELOAD, 0, NULL, NULL, NULL, NULL, true);
+                       ACTION_RELOAD, 0, NULL, NULL, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'Q',
-                       ACTION_QUIT, 0, NULL, NULL, NULL, NULL, true);
+                       ACTION_QUIT, 0, NULL, NULL, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN, 'J',
-                       ACTION_FOCUS_NEXT, 0, NULL, NULL, NULL, NULL, true);
+                       ACTION_FOCUS_NEXT, 0, NULL, NULL, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN, 'K',
-                       ACTION_FOCUS_PREV, 0, NULL, NULL, NULL, NULL, true);
+                       ACTION_FOCUS_PREV, 0, NULL, NULL, NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'C',
-                       ACTION_CLOSE, 0, NULL, NULL, NULL, NULL, true);
+                       ACTION_CLOSE, 0, NULL, NULL, NULL, NULL, NULL, true);
 
 }
 

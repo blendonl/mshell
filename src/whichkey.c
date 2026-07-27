@@ -81,6 +81,14 @@ static void wk_apply_dpi(UINT dpi) {
  * which-key idiom for a nested prefix), and everything else falls back to the
  * action's canonical name. */
 static void wk_label(const KeyBinding *b, wchar_t *out, int cap) {
+    /* A label the config wrote wins over anything derived: "browser" reads
+     * better in a hint panel than "spawn firefox.exe", and the config is the
+     * only thing that knows which it meant. */
+    if (b->desc && b->desc[0]) {
+        _snwprintf(out, cap, L"%ls", b->desc);
+        out[cap - 1] = L'\0';
+        return;
+    }
     if (b->action == ACTION_ENTER_SUBMAP && b->submap && b->submap->name) {
         _snwprintf(out, cap, L"+%ls", b->submap->name);
     } else if (b->action == ACTION_SPAWN && b->command) {
@@ -133,6 +141,36 @@ static void whichkey_show(KeyMap *map) {
         wk_label(b, r->label, 96);
     }
     if (s_count == 0) { whichkey_hide(); return; }
+
+    /* Sort by label, with submap prefixes ("+window") first.
+     *
+     * Binding order is declaration order, which is an artefact of how the
+     * config was written rather than anything the reader knows — so a panel of
+     * twenty keys was previously a list to scan rather than read. Prefixes
+     * first because they are the ones that lead somewhere else, and an
+     * insertion sort because the list is at most WK_MAX_ROWS long. */
+    for (int i = 1; i < s_count; i++) {
+        WkRow key = s_rows[i];
+        bool  key_pfx = (key.label[0] == L'+');
+        int j = i - 1;
+        while (j >= 0) {
+            bool j_pfx = (s_rows[j].label[0] == L'+');
+            bool after = (j_pfx != key_pfx) ? (key_pfx && !j_pfx)
+                                            : (_wcsicmp(s_rows[j].label,
+                                                        key.label) > 0);
+            if (!after) break;
+            s_rows[j + 1] = s_rows[j];
+            j--;
+        }
+        s_rows[j + 1] = key;
+    }
+
+    /* Say so rather than silently showing a subset: a map with more keys than
+     * fit is exactly when the panel matters most. */
+    if (map->count > WK_MAX_ROWS)
+        log_msg(LOG_WARN, L"which-key: '%ls' has %d bindings; showing the "
+                          L"first %d", map->name ? map->name : L"?",
+                map->count, WK_MAX_ROWS);
 
     /* Header suffix tells you how to leave: a persisting map names its exit key
      * (Escape unless a custom one replaced it); a one-shot map just says so. */
