@@ -285,7 +285,8 @@ KeyMap *keymap_new(const wchar_t *name, bool persist) {
 void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                         Action action, int arg, KeyMap *submap,
                         const wchar_t *command, const wchar_t *args,
-                        const wchar_t *cwd, bool terminal) {
+                        const wchar_t *cwd, const wchar_t *desc,
+                        bool terminal) {
     if (!map) return;
 
     /* grow the array if it's full */
@@ -321,6 +322,7 @@ void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
     kb->command   = command ? _wcsdup(command) : NULL;
     kb->args      = (args && args[0]) ? _wcsdup(args) : NULL;
     kb->cwd       = (cwd  && cwd[0])  ? _wcsdup(cwd)  : NULL;
+    kb->desc      = (desc && desc[0]) ? _wcsdup(desc) : NULL;
     kb->terminal  = terminal;
 }
 

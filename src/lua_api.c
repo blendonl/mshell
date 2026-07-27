@@ -156,12 +156,16 @@ static bool layout_from_name(const char *s, Layout *out) {
 static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
                                  const char *action_str, bool has_num, int num_arg,
                                  const char *str_arg, const char *args_str,
-                                 const char *cwd_str, bool default_terminal) {
+                                 const char *cwd_str, const char *desc_str,
+                                 bool default_terminal) {
     int      arg      = 0;
     KeyMap  *submap   = NULL;
     wchar_t *command  = NULL;
     wchar_t *cmd_args = NULL;
     wchar_t *cmd_cwd  = NULL;
+    /* A which-key label the config chose, overriding the one derived from the
+     * action. "browser" reads better in a hint panel than "spawn firefox.exe". */
+    wchar_t *desc_str_w = (desc_str && desc_str[0]) ? u8_to_w_dup(desc_str) : NULL;
     bool     terminal = default_terminal;
     Action   action;
 
@@ -210,10 +214,11 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
     }
 
     keymap_add_binding(map, mods, vk, action, arg, submap, command, cmd_args,
-                       cmd_cwd, terminal);
+                       cmd_cwd, desc_str_w, terminal);
     free(command);    /* keymap_add_binding takes its own copies */
     free(cmd_args);
     free(cmd_cwd);
+    free(desc_str_w);
 }
 
 /* ===========================================================================
@@ -230,8 +235,9 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
  * =========================================================================== */
 static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
                         const char **str, const char **args,
-                        const char **cwd) {
+                        const char **cwd, const char **desc) {
     *has_num = false; *num_arg = 0; *str = NULL; *args = NULL; *cwd = NULL;
+    *desc = NULL;
 
     if (lua_isnumber(L, idx)) {
         *has_num = true;
@@ -250,10 +256,13 @@ static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
          * because {"cmd", nil, "C:\\x"} to give only a cwd reads badly. */
         lua_rawgeti(L, t, 3);
         if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_getfield(L, t, "cwd"); }
-        *str  = lua_isstring(L, -3) ? lua_tostring(L, -3) : NULL;
-        *args = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
-        *cwd  = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
-        return 3;
+        /* Named only: a fourth positional slot after cwd would be unreadable. */
+        lua_getfield(L, t, "desc");
+        *str  = lua_isstring(L, -4) ? lua_tostring(L, -4) : NULL;
+        *args = lua_isstring(L, -3) ? lua_tostring(L, -3) : NULL;
+        *cwd  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
+        *desc = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+        return 4;
     }
     return 0;
 }
@@ -302,7 +311,7 @@ static int lua_mshell_bind(lua_State *L) {
         int ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
         keymap_add_binding(g.root_map, mods, vk, ACTION_LUA_CALL, ref,
-                           NULL, NULL, NULL, NULL, terminal);
+                           NULL, NULL, NULL, NULL, NULL, terminal);
         return 0;
     }
 
@@ -312,10 +321,11 @@ static int lua_mshell_bind(lua_State *L) {
     bool        has_num = false;
     int         num_arg = 0;
     const char *str_arg = NULL, *args_str = NULL, *cwd_str = NULL;
+    const char *desc_str = NULL;
     int         pushed  = 0;
     if (nargs >= 4)
         pushed = read_payload(L, 4, &has_num, &num_arg, &str_arg, &args_str,
-                              &cwd_str);
+                              &cwd_str, &desc_str);
 
     bool terminal = true;   /* most actions return to root after firing */
     if (nargs >= 5 && lua_isboolean(L, 5)) terminal = (bool)lua_toboolean(L, 5);
@@ -324,7 +334,7 @@ static int lua_mshell_bind(lua_State *L) {
 
     add_resolved_binding(L, g.root_map, mods, vk, action_str,
                          has_num, num_arg, str_arg, args_str, cwd_str,
-                         terminal);
+                         desc_str, terminal);
     lua_pop(L, pushed);
     return 0;
 }
@@ -422,11 +432,11 @@ static int lua_mshell_submap(lua_State *L) {
             lua_pushvalue(L, -1);
             int ref = luaL_ref(L, LUA_REGISTRYINDEX);
             keymap_add_binding(km, 0, vk, ACTION_LUA_CALL, ref,
-                               NULL, NULL, NULL, NULL, term);
+                               NULL, NULL, NULL, NULL, NULL, term);
         } else if (lua_isstring(L, -1)) {
             /*  key = "action"  */
             add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
-                                 false, 0, NULL, NULL, NULL, term);
+                                 false, 0, NULL, NULL, NULL, NULL, term);
         } else if (lua_istable(L, -1)) {
             /*  key = {"action", payload}  — payload may itself be
              *  {command, arguments} for spawn. */
@@ -440,13 +450,13 @@ static int lua_mshell_submap(lua_State *L) {
 
             lua_rawgeti(L, t, 2);
             bool        has_num; int num_arg;
-            const char *str_arg, *args_str, *cwd_str;
+            const char *str_arg, *args_str, *cwd_str, *desc_str;
             int pushed = read_payload(L, -1, &has_num, &num_arg,
-                                      &str_arg, &args_str, &cwd_str);
+                                      &str_arg, &args_str, &cwd_str, &desc_str);
 
             add_resolved_binding(L, km, 0, vk, action_str,
                                  has_num, num_arg, str_arg, args_str, cwd_str,
-                                 term);
+                                 desc_str, term);
 
             lua_pop(L, pushed + 2);  /* payload parts + payload + action */
         } else {

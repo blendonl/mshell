@@ -403,6 +403,7 @@ typedef struct {
     wchar_t *command;     /* program to launch for ACTION_SPAWN (owned)      */
     wchar_t *args;        /* its command-line arguments, or NULL (owned)     */
     wchar_t *cwd;         /* working directory to start it in, or NULL (owned)*/
+    wchar_t *desc;        /* which-key label, or NULL to derive one (owned)   */
     bool     terminal;    /* return to root map after this action fires      */
 } KeyBinding;
 
@@ -976,7 +977,8 @@ KeyMap  *keymap_new(const wchar_t *name, bool persist);
 void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                             Action action, int arg, KeyMap *submap,
                             const wchar_t *command, const wchar_t *args,
-                            const wchar_t *cwd, bool terminal);
+                            const wchar_t *cwd, const wchar_t *desc,
+                            bool terminal);
 
 /* ===========================================================================
  * Prototypes — window.c
