@@ -584,6 +584,13 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         tile_current();
         return 0;
 
+    case WM_MSHELL_UPDATE: {
+        /* The update thread owns the string until we take it. */
+        wchar_t *msg = (wchar_t *)lp;
+        if (msg) { notify_show(msg, NOTIFY_INFO, 15000); free(msg); }
+        return 0;
+    }
+
     case WM_MSHELL_CAPTURE_KEY:
         launcher_key((DWORD)wp, (wchar_t)lp);
         return 0;
@@ -666,6 +673,24 @@ static HWND create_message_window(HINSTANCE hinst) {
  * "--shell" can't accidentally satisfy a "-s" probe and a stray path fragment
  * can't look like "-t".
  * --------------------------------------------------------------------------- */
+/* Everything AFTER `flag` on the command line, or NULL. Used by --tweaks, whose
+ * argument is a verb and an optional group rather than a single token. Returns
+ * a pointer into `cmd`, so it lives as long as the command line does. */
+static const char *flag_value(const char *cmd, const char *flag) {
+    if (!cmd) return NULL;
+    size_t flen = strlen(flag);
+    for (const char *p = cmd; *p; ) {
+        while (*p == ' ' || *p == '\t') p++;
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        if ((size_t)(p - start) == flen && strncmp(start, flag, flen) == 0) {
+            while (*p == ' ' || *p == '\t') p++;
+            return *p ? p : NULL;
+        }
+    }
+    return NULL;
+}
+
 static bool has_flag(const char *cmd, const char *flag) {
     if (!cmd) return false;
     size_t flen = strlen(flag);
@@ -702,6 +727,51 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Init the keymap lock before ANY config load. The hook thread that shares
      * it is created later (kb_init), but config_init() runs first. */
     kb_locks_init();
+
+    /* --- --tweaks: apply, revert or list the registry tweaks ---
+     * Before the log and the mutex, like --check: it is a command-line tool
+     * that happens to live in the same binary, and it has to work whether or
+     * not mshell is running.
+     *
+     * This is the replacement for importing a .reg file and hoping. Applying
+     * reads each existing value first and files it in a backup key, so
+     * reverting restores exactly what was there — including "this value did
+     * not exist", which a .reg undo cannot express. See tweaks.c. */
+    if (has_flag(lpCmdLine, "--tweaks")) {
+        const char *arg = flag_value(lpCmdLine, "--tweaks");
+        wchar_t     group[64] = {0};
+        char        verb[32]  = {0};
+
+        /* --tweaks <verb> [group] */
+        if (arg) sscanf(arg, "%31s %63ls", verb, group);
+
+        if (!verb[0] || !strcmp(verb, "list")) {
+            tweaks_list();
+            return 0;
+        }
+        if (!strcmp(verb, "apply")) {
+            char msg[128];
+            snprintf(msg, sizeof msg, "applied %d tweaks",
+                     tweaks_apply(group[0] ? group : NULL));
+            console_print(msg);
+            return 0;
+        }
+        if (!strcmp(verb, "revert")) {
+            char msg[128];
+            snprintf(msg, sizeof msg, "reverted %d tweaks",
+                     tweaks_revert(group[0] ? group : NULL));
+            console_print(msg);
+            return 0;
+        }
+        if (!strcmp(verb, "reg") || !strcmp(verb, "reg-undo")) {
+            tweaks_emit_reg(group[0] ? group : NULL,
+                            strcmp(verb, "reg-undo") == 0);
+            return 0;
+        }
+        console_print("usage: mshell --tweaks <list|apply|revert|reg|reg-undo> "
+                      "[input|visual|quiet|all]");
+        return 1;
+    }
 
     /* --- --check: validate a config and exit ---
      * Deliberately BEFORE the log file is opened. The log is opened with "w",
@@ -967,6 +1037,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* --- manage windows that already exist --- */
     events_sync_urgency();   /* honours whatever the config just set */
     mouse_sync_hook();       /* ditto for Mod+drag's WH_MOUSE_LL hook */
+    update_check_async();    /* opt-in, at most once a day, notify-only */
 
     window_manage_existing();
 

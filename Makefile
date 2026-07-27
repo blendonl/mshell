@@ -43,7 +43,7 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
 # windowscodecs: WIC, which encodes screenshots to PNG. Not GDI+, whose headers
 # are C++-only under mingw-w64.
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lpowrprof -lwindowscodecs -lm
+           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lm
 
 # --- Paths ---
 SRC_DIR  = src
@@ -75,7 +75,9 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/mouse.c \
               $(SRC_DIR)/launcher.c \
               $(SRC_DIR)/layout_tree.c \
-              $(SRC_DIR)/anim.c
+              $(SRC_DIR)/anim.c \
+              $(SRC_DIR)/tweaks.c \
+              $(SRC_DIR)/update.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:
@@ -155,7 +157,7 @@ TEST_DIR  = test
 TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math
 
 # --- Rules ---
-.PHONY: all clean check-lua dist test
+.PHONY: all clean check-lua dist test regs msi
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -207,6 +209,35 @@ check-lua:
 		echo "  ============================================================"; \
 		echo ""; \
 		exit 1; \
+	fi
+
+# Regenerate the shipped .reg files from the table in src/tweaks.c, so the
+# files and the in-process implementation cannot drift. Needs wine to run the
+# cross-compiled binary; skipped with a clear message when it is absent, since
+# the checked-in files are perfectly usable without regenerating them.
+regs: $(TARGET)
+	@if command -v wine >/dev/null 2>&1; then \
+	    echo "  REGS  harden/debloat"; \
+	    wine ./$(TARGET) --tweaks reg      input  > harden.reg; \
+	    wine ./$(TARGET) --tweaks reg-undo input  > harden-undo.reg; \
+	    wine ./$(TARGET) --tweaks reg      visual > debloat.reg; \
+	    wine ./$(TARGET) --tweaks reg-undo visual > debloat-undo.reg; \
+	else \
+	    echo "  SKIP  regs — wine not installed (the .reg files are checked in)"; \
+	fi
+
+# An MSI, built on Linux with wixl (msitools) so CI stays single-platform.
+# UNSIGNED: there is no code-signing certificate, so SmartScreen will warn. The
+# zip remains the primary artifact; this is for people who want an installer
+# that Add/Remove Programs knows about.
+msi: $(TARGET) $(HELPER)
+	@if command -v wixl >/dev/null 2>&1; then \
+	    echo "  MSI   dist/mshell-$(VERSION).msi"; \
+	    mkdir -p dist; \
+	    wixl -D Version=$(VERSION) -o "dist/mshell-$(VERSION).msi" \
+	         packaging/mshell.wxs; \
+	else \
+	    echo "  SKIP  msi — wixl not installed (apt install msitools)"; \
 	fi
 
 # Assemble dist/mshell-$(VERSION)-win64/ and zip it. Uses Python's zipfile so

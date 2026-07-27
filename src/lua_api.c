@@ -1111,6 +1111,19 @@ static int lua_mshell_spawn(lua_State *L) {
 }
 
 /* ===========================================================================
+ * mshell.set_update_check(enabled)
+ *
+ * Off by default: it is a network request, and a window manager should not make
+ * one nobody asked for. Notify-only in any case — nothing is ever downloaded or
+ * applied, because a bad automatic update to the SHELL is a black screen at
+ * sign-in with no desktop to fix it from. See update.c.
+ * =========================================================================== */
+static int lua_mshell_set_update_check(lua_State *L) {
+    g.update_check = lua_toboolean(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
  * mshell.set_animation(ms)   |   mshell.set_dim{ enabled=, color= }
  *
  * Both off by default. They are the two features that cost frames rather than
@@ -1841,6 +1854,7 @@ void lua_register_api(lua_State *L) {
         {"set_attach",      lua_mshell_set_attach},
         {"set_mouse",       lua_mshell_set_mouse_tbl},
         {"set_animation",   lua_mshell_set_animation},
+        {"set_update_check",lua_mshell_set_update_check},
         {"set_dim",         lua_mshell_set_dim},
         {"set_manage_owned",lua_mshell_set_manage_owned},
         {"set_float_on_top",lua_mshell_set_float_on_top},
