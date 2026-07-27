@@ -234,6 +234,16 @@ static const ActionNameEntry action_names[] = {
     {"notify",           ACTION_NOTIFY},
     {"jump_urgent",      ACTION_JUMP_URGENT},
     {"launcher",         ACTION_LAUNCHER},
+    {"split_h",          ACTION_SPLIT_H},
+    {"split_v",          ACTION_SPLIT_V},
+    {"rotate_split",     ACTION_ROTATE_SPLIT},
+    {"toggle_tabbed",    ACTION_TOGGLE_TABBED},
+    {"toggle_stacked",   ACTION_TOGGLE_STACKED},
+    {"container_next",   ACTION_CONTAINER_NEXT},
+    {"container_prev",   ACTION_CONTAINER_PREV},
+    {"split_grow",       ACTION_SPLIT_GROW},
+    {"split_shrink",     ACTION_SPLIT_SHRINK},
+    {"layout_bsp",       ACTION_LAYOUT_BSP},
     {NULL, ACTION_NONE}
 };
 
@@ -1439,6 +1449,18 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_LAUNCHER:
         launcher_open();
         break;
+
+    /* -- manual (BSP) tiling ------------------------------------------- */
+    case ACTION_SPLIT_H: layout_tree_set_split(SPLIT_H); break;
+    case ACTION_SPLIT_V: layout_tree_set_split(SPLIT_V); break;
+    case ACTION_ROTATE_SPLIT:   layout_tree_rotate();    break;
+    case ACTION_TOGGLE_TABBED:  layout_tree_set_container(SPLIT_TABBED);  break;
+    case ACTION_TOGGLE_STACKED: layout_tree_set_container(SPLIT_STACKED); break;
+    case ACTION_CONTAINER_NEXT: layout_tree_cycle_container(+1); break;
+    case ACTION_CONTAINER_PREV: layout_tree_cycle_container(-1); break;
+    case ACTION_SPLIT_GROW:     layout_tree_resize(+0.05f); break;
+    case ACTION_SPLIT_SHRINK:   layout_tree_resize(-0.05f); break;
+    case ACTION_LAYOUT_BSP:     dt->layout = LAYOUT_BSP; tile_current(); break;
 
     case ACTION_JUMP_URGENT: {
         for (int i = 0; i < g.managed_count; i++) {

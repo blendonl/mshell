@@ -282,6 +282,20 @@ typedef enum {
     /* Open the launcher (see launcher.c for why it captures the keyboard). */
     ACTION_LAUNCHER,
 
+    /* Manual (BSP) tiling. split_h / split_v state where the NEXT window goes
+     * rather than acting immediately — there is nothing to split until one
+     * arrives. */
+    ACTION_SPLIT_H,
+    ACTION_SPLIT_V,
+    ACTION_ROTATE_SPLIT,      /* flip the split holding the focused window   */
+    ACTION_TOGGLE_TABBED,     /* make that split a tabbed container, or back */
+    ACTION_TOGGLE_STACKED,
+    ACTION_CONTAINER_NEXT,    /* show the container's other child            */
+    ACTION_CONTAINER_PREV,
+    ACTION_SPLIT_GROW,        /* resize the split holding the focus          */
+    ACTION_SPLIT_SHRINK,
+    ACTION_LAYOUT_BSP,
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -305,8 +319,22 @@ typedef enum {
     LAYOUT_CENTERED,     /* centered master, stack split left+right          */
     LAYOUT_BSTACK,       /* bottom-stack (master top, stack row below)       */
     LAYOUT_COLUMNS,      /* equal vertical columns                           */
+    LAYOUT_BSP,          /* manual splits + containers — see layout_tree.c   */
     LAYOUT_COUNT
 } Layout;
+
+/* How a split node divides its area, or refuses to. TABBED and STACKED show one
+ * child at a time instead of dividing, which is what makes them containers. */
+typedef enum {
+    SPLIT_V = 0,      /* side by side  */
+    SPLIT_H,          /* one above the other */
+    SPLIT_TABBED,
+    SPLIT_STACKED,
+} SplitMode;
+
+/* How layout_tree_run hands a placement back — the tiler's emit(), without
+ * layout_tree.c having to know what a Placement is. */
+typedef void (*TreeEmitFn)(HWND hwnd, RECT area, void *ctx);
 
 /* ---------------------------------------------------------------------------
  * On-screen notification severity — picks the accent stripe's colour.
@@ -475,6 +503,10 @@ typedef struct {
                                       * one refused window would fail the whole
                                       * DeferWindowPos group.                 */
     bool      always_on_top;         /* user asked for the topmost band      */
+    bool      layout_hidden;         /* the LAYOUT hid it (monocle, or the
+                                      * unshown side of a tabbed container) —
+                                      * distinct from app_hidden, which is the
+                                      * app hiding itself to the tray        */
     bool      urgent;                /* flashed for attention while elsewhere */
     bool      sticky;                /* follows you to every desktop         */
     bool      scratchpad;            /* the scratchpad window (see ACTION_
@@ -772,6 +804,7 @@ typedef struct {
      * out of the way when there is no taskbar, and 0.11.0 made minimise-to-tray
      * work — this un-does both for people who would rather no window ever
      * vanish. App-initiated tray hides are exempt either way. */
+    SplitMode next_split;     /* direction the next BSP insertion uses     */
     bool     minimize_never;
     bool     urgency_enabled;
     bool     notify_enabled;     /* show mshell's own on-screen notifications  */
@@ -1056,6 +1089,21 @@ bool     window_covers_monitor(HWND hwnd);    /* does its frame reach every edge
  * Prototypes — tiling.c
  * =========================================================================== */
 void     tile_desktop(int slot);   /* slot, not id — see desktop.c prototypes */
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — layout_tree.c (manual/BSP tiling and tabbed containers)
+ *
+ * The tree does NOT own the windows: Desktop.windows[] remains the membership
+ * store and the tree is an index synchronised to it on every pass. See the
+ * file header for why.
+ * --------------------------------------------------------------------------- */
+void     layout_tree_run(Desktop *dt, RECT area, TreeEmitFn emit, void *ctx);
+void     layout_tree_set_split(SplitMode mode);
+void     layout_tree_rotate(void);
+void     layout_tree_set_container(SplitMode mode);
+void     layout_tree_cycle_container(int delta);
+void     layout_tree_resize(float delta);
+void     layout_tree_forget(int desktop_id);
 void     tile_current(void);
 
 /* ===========================================================================
