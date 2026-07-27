@@ -92,6 +92,13 @@ static int collect_clients(Desktop *dt, int mon, Client *out) {
         int wmon = mw->monitor;
         if (wmon < 0 || wmon >= g.monitor_count) wmon = 0;   /* defensive */
         if (wmon != mon) continue;
+        /* layout_hidden is an OUTPUT of the pass about to run, not state that
+         * survives it: monocle and the BSP tree set it for the windows they
+         * hold back, and every other layout holds nothing back. Clearing it
+         * here is what makes that true — otherwise leaving monocle would strand
+         * yesterday's unfocused windows hidden, and the desktop-switch show
+         * loop (which skips layout_hidden windows) would never reveal them. */
+        mw->layout_hidden = false;
         out[n].hwnd = dt->windows[i];
         out[n].mw   = mw;
         n++;
