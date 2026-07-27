@@ -97,6 +97,12 @@
  * SetWindowPos from the hook thread runs inside the input timeout. */
 #define WM_MSHELL_MOUSE           (WM_APP + 5)
 
+/* Posted by the hook while the launcher is capturing: wParam is the virtual
+ * key, lParam the character it produced (0 for a non-text key). The hook
+ * translates rather than the launcher, because ToUnicodeEx needs the keyboard
+ * state as it was at the moment of the keystroke. */
+#define WM_MSHELL_CAPTURE_KEY     (WM_APP + 6)
+
 /* ---------------------------------------------------------------------------
  * Constants
  * --------------------------------------------------------------------------- */
@@ -272,6 +278,9 @@ typedef enum {
 
     /* Go to the window that asked for attention. */
     ACTION_JUMP_URGENT,
+
+    /* Open the launcher (see launcher.c for why it captures the keyboard). */
+    ACTION_LAUNCHER,
 
     /* meta */
     ACTION_RELOAD,
@@ -804,6 +813,13 @@ typedef struct {
     HWND     border_window;   /* layered overlay marking the focused window   */
     HWND     whichkey_window; /* layered overlay: submap hint ("which-key")   */
     HWND     notify_window;   /* layered overlay: mshell's own toasts         */
+    HWND     launcher_window; /* layered overlay: the app launcher            */
+    /* While true the keyboard hook is in CAPTURE MODE: every key is translated
+     * and forwarded to the launcher, and nothing reaches the keymaps or the
+     * foreground app. Read on the hook thread, written on the main one — a
+     * single bool, and the failure mode of a stale read is one keystroke going
+     * the other way. Escape and the panic action both clear it. */
+    bool     launcher_open;
     HWINEVENTHOOK statechange_hook;  /* only while urgency_enabled */
 
     /* --- hooks --- */
@@ -1101,6 +1117,15 @@ void     screenshot_window(void);
 bool     notify_init(void);
 void     notify_shutdown(void);
 void     notify_show(const wchar_t *text, NotifyKind kind, int ms);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — launcher.c
+ * --------------------------------------------------------------------------- */
+bool     launcher_init(void);
+void     launcher_shutdown(void);
+void     launcher_open(void);
+void     launcher_close(void);
+void     launcher_key(DWORD vk, wchar_t ch);
 #define NOTIFY_TEXT_CAP 512   /* matches notify.c's per-toast buffer */
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything

@@ -584,6 +584,10 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         tile_current();
         return 0;
 
+    case WM_MSHELL_CAPTURE_KEY:
+        launcher_key((DWORD)wp, (wchar_t)lp);
+        return 0;
+
     case WM_MSHELL_MOUSE:
         /* Mod+drag delta, applied here rather than in the hook: SetWindowPos
          * from the hook thread would run inside the input timeout. */
@@ -930,6 +934,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     border_init();
     whichkey_init();
     notify_init();
+    launcher_init();
     bar_init();
     /* Monitors were measured before the config was read, so the work areas do
      * not yet account for a bar the config just enabled. Re-measure, then
@@ -1017,6 +1022,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* tear down our own helper windows */
     bar_shutdown();
+    launcher_shutdown();
     notify_shutdown();
     whichkey_shutdown();
     border_shutdown();

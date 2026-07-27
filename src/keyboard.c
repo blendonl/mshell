@@ -233,6 +233,7 @@ static const ActionNameEntry action_names[] = {
     {"screenshot_window", ACTION_SCREENSHOT_WINDOW},
     {"notify",           ACTION_NOTIFY},
     {"jump_urgent",      ACTION_JUMP_URGENT},
+    {"launcher",         ACTION_LAUNCHER},
     {NULL, ACTION_NONE}
 };
 
@@ -549,6 +550,47 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+
+    /* ---- launcher capture mode ----
+     * Checked before the modifier tracking and before every keymap: while the
+     * launcher is open it owns the keyboard completely, which is the only way
+     * to type into a window that never takes focus.
+     *
+     * Translation happens HERE rather than in the launcher because ToUnicodeEx
+     * needs the keyboard state as it was at this keystroke — by the time the
+     * main thread runs, Shift may already be up.
+     *
+     * Escape is handled by the launcher itself (it closes), so nothing special
+     * is needed here; the modifier keys are passed to the tracker below so a
+     * Shift held for a capital letter does not desynchronise our idea of what
+     * is down. */
+    if (g.launcher_open) {
+        if (!down) return 1;            /* swallow key-ups too */
+
+        switch (vk) {
+        case VK_LSHIFT: case VK_RSHIFT: case VK_SHIFT:
+        case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
+        case VK_LMENU: case VK_RMENU: case VK_MENU:
+            break;                      /* fall through to modifier tracking */
+        default: {
+            BYTE   ks[256];
+            wchar_t buf[8] = {0};
+            wchar_t ch = 0;
+            if (GetKeyboardState(ks)) {
+                /* Our hook has swallowed these, so GetKeyboardState does not
+                 * know about them — tell it what we are tracking. */
+                ks[VK_SHIFT] = mod_shift ? 0x80 : 0;
+                int n = ToUnicodeEx(vk, (UINT)((lParam >> 16) & 0xFF), ks,
+                                    buf, 8, 0, GetKeyboardLayout(0));
+                if (n == 1) ch = buf[0];
+            }
+            PostMessageW(g.message_window, WM_MSHELL_CAPTURE_KEY,
+                         (WPARAM)vk, (LPARAM)ch);
+            return 1;
+        }
+        }
+    }
+
 
     /* Any non-Win key seen while Win is held means the Win press was USED (a
      * chord, or a keystroke handled by a modal submap), so the eventual Win-up
@@ -1394,6 +1436,10 @@ void execute_action(Action action, int arg, const wchar_t *command,
 
     /* Go to whatever asked for attention, wherever it is — including a desktop
      * you are not on, which is the case the flag exists for. */
+    case ACTION_LAUNCHER:
+        launcher_open();
+        break;
+
     case ACTION_JUMP_URGENT: {
         for (int i = 0; i < g.managed_count; i++) {
             ManagedWindow *mw = &g.managed[i];
@@ -1434,6 +1480,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
                 L"To undo: run `mshell.exe --msg reload`, or save your "
                 L"init.lua if auto-reload is enabled.");
         window_restore_all_visibility();
+        launcher_close();               /* never leave the keyboard captured */
         g.panicked = true;              /* checked by the hook, first thing */
         kb_reset_state();               /* drop any half-held modifier */
         whichkey_hide();
