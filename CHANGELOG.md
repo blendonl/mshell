@@ -3,6 +3,15 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Fixed
+
+- **The focus ring now follows a floating window while it moves.** A native
+  move/resize of the focused float and a mod+drag both left the ring behind at
+  the old rect until something else refreshed it; both paths now refresh the
+  ring as the window travels.
+
 ## 0.13.2 — 2026-07-27
 
 ### Fixed
