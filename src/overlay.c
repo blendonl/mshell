@@ -44,10 +44,17 @@ int overlay_scale(int px, UINT dpi) {
 }
 
 HFONT overlay_font(OverlayFont *of, UINT dpi, int px) {
+    return overlay_font_face(of, dpi, px, NULL);
+}
+
+HFONT overlay_font_face(OverlayFont *of, UINT dpi, int px, const wchar_t *face) {
     if (!of) return NULL;
     if (px < 1) px = 1;
+    if (!face || !face[0]) face = L"Segoe UI";
 
-    if (of->font && of->dpi == dpi && of->px == px) return of->font;
+    if (of->font && of->dpi == dpi && of->px == px &&
+        wcscmp(of->face, face) == 0)
+        return of->font;
     if (of->font) DeleteObject(of->font);
 
     /* Negative height means "this many pixels", as opposed to points — which
@@ -55,18 +62,21 @@ HFONT overlay_font(OverlayFont *of, UINT dpi, int px) {
     of->font = CreateFontW(-px, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+                           DEFAULT_PITCH | FF_DONTCARE, face);
     of->dpi = dpi;
     of->px  = px;
+    wcsncpy(of->face, face, LF_FACESIZE - 1);
+    of->face[LF_FACESIZE - 1] = L'\0';
     return of->font;
 }
 
 void overlay_font_free(OverlayFont *of) {
     if (!of || !of->font) return;
     DeleteObject(of->font);
-    of->font = NULL;
-    of->dpi  = 0;
-    of->px   = 0;
+    of->font    = NULL;
+    of->dpi     = 0;
+    of->px      = 0;
+    of->face[0] = L'\0';
 }
 
 HDC overlay_paint_begin(OverlayPaint *p, HWND hwnd) {
