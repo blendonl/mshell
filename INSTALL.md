@@ -150,8 +150,26 @@ With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
 and your `init.lua` is never administrator-level code.
 
-Set it up as a logon task, which is what gives it a full token without weakening
-UAC:
+`install.bat` always installs `mshelld.exe` next to `mshell.exe` in `C:\mshell`,
+and always replaces it in step with the shell — the two shake hands on a
+protocol version and refuse a mismatch, so upgrading one without the other is a
+supported way to break the helper. Installing the file is not the same as
+running it, though: that part is opt-in, because it needs a logon task with
+administrator rights.
+
+To register that task, re-run the installer **from an administrator prompt**:
+
+```
+install.bat /helper
+```
+
+It creates the task below, and starts the helper straight away rather than
+making you sign out. On later upgrades you do not need the flag again — once the
+task exists, `install.bat` restarts the helper so the build you just installed
+is the one running.
+
+If you would rather do it by hand, this is the same command. A logon task is
+what gives the helper a full token without weakening UAC:
 
 ```
 schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
@@ -160,7 +178,8 @@ schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
 
 mshell finds it automatically; nothing needs configuring. If it is not running,
 mshell behaves exactly as it always has — those windows float — so this is
-entirely opt-in.
+entirely opt-in. `%TEMP%\mshelld.log` is the helper's own log if you need to see
+whether it started.
 
 **What it does not do:** keybinds still stop responding while an elevated window
 has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
@@ -252,8 +271,18 @@ account (which still has Explorer) and fix things.
 ## Uninstall
 
 Run **`uninstall.bat`**, or delete the `Shell` value under
-`HKCU\...\Winlogon`. Sign out and back in — Explorer returns. To also disable
-elevated running, restore UAC:
+`HKCU\...\Winlogon`. Sign out and back in — Explorer returns.
+
+`uninstall.bat` also removes the `mshelld` logon task, so nothing keeps starting
+an elevated binary out of `C:\mshell` after you delete that folder. That step
+needs an administrator prompt — the task was created with `/rl highest` — and
+the script tells you if it could not do it:
+
+```
+schtasks /delete /tn "mshelld" /f
+```
+
+To also disable elevated running, restore UAC:
 
 ```
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" ^

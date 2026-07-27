@@ -82,6 +82,31 @@ From a normal terminal, with mshell running:
 - Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
   each other with a logged protocol-version message.
 
+### Installing it
+
+The mismatch case above is the one the installer exists to prevent, so check
+that the pair really does move together.
+
+- **Plain `install.bat`**: `C:\mshell\mshelld.exe` exists afterwards, no
+  `mshelld` task is registered (`schtasks /query /tn mshelld` finds nothing),
+  and the closing summary points at `install.bat /helper`.
+- **`install.bat /helper` unelevated**: refuses with the "needs an administrator
+  prompt" message, and `mshelld.exe` is still installed.
+- **`install.bat /helper` as administrator**: the task is registered, the helper
+  is running immediately (no sign-out), and Task Manager tiles.
+- **Upgrade with the helper already running**: re-run plain `install.bat` (no
+  flag) from a build with a different `MSHELLD_PROTO_VERSION`. Both binaries are
+  replaced, the helper is restarted, and mshell connects — no handshake failure
+  in `%TEMP%\mshell.log`. This is the case that silently broke before: the
+  singleton mutex means a helper that fails to stop leaves the *old* build
+  serving, so confirm the running `mshelld.exe` is the new one.
+- **Upgrade unelevated with the helper running**: the copy is staged
+  (`mshelld.exe.old` appears), the script says the new helper takes over at the
+  next sign-in, and it does.
+- **`uninstall.bat` as administrator**: the `mshelld` task is gone and the
+  helper is not running. Unelevated, it says so and prints the `schtasks
+  /delete` command instead of failing.
+
 ## DPI
 
 Needs a scaled display; this is the fix most likely to regress silently.

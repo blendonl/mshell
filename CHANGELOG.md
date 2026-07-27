@@ -16,6 +16,15 @@ trade-off.
   Lua, no rules, no layout and no keyboard hook: it accepts "put this window at
   this rectangle" and performs it. 19 KB. Entirely opt-in — without it, mshell
   behaves exactly as before and elevated windows float. See INSTALL.md.
+
+  `install.bat` installs it alongside `mshell.exe` and replaces the two in
+  lockstep, which is what keeps them from drifting apart across an upgrade: they
+  shake hands on a protocol version and refuse a mismatch. Running it stays
+  opt-in — `install.bat /helper`, from an administrator prompt, registers the
+  logon task and starts the helper without a sign-out; once the task exists,
+  later upgrades restart the helper on their own. `uninstall.bat` removes the
+  task, so an uninstall does not leave an elevated autostart pointing into a
+  folder you have just been told to delete by hand.
 - **Sticky windows** (`toggle_sticky`) — a window that follows you to every
   desktop.
 - **A scratchpad** — mark a window (`mark_scratchpad`), then summon and dismiss
