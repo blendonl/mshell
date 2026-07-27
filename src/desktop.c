@@ -140,6 +140,8 @@ void desktop_apply_rules(int slot) {
     dt->master_ratio = g.default_master_ratio > 0.f ? g.default_master_ratio
                                                     : DEFAULT_MASTER_RATIO;
     dt->n_master     = g.default_nmaster > 0 ? g.default_nmaster : DEFAULT_NMASTER;
+    dt->inner_gap    = -1;   /* -1 = inherit the global setting */
+    dt->outer_gap    = -1;
     dt->float_all    = false;
     dt->app[0]       = L'\0';
     dt->app_args[0]  = L'\0';
@@ -163,6 +165,8 @@ void desktop_apply_rules(int slot) {
         if (r->set_layout)  dt->layout       = r->layout;
         if (r->set_ratio)   dt->master_ratio = r->master_ratio;
         if (r->set_nmaster) dt->n_master     = r->n_master;
+        if (r->set_gaps) { dt->inner_gap = r->inner_gap;
+                           dt->outer_gap = r->outer_gap; }
     }
 
     /* Anything remembered from last time overrides the rule defaults — a

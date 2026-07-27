@@ -510,6 +510,12 @@ typedef struct {
     Layout  layout;
     float   master_ratio;
     int     n_master;       /* number of windows in the master area       */
+    /* Gap overrides, -1 meaning "use the global". Per desktop rather than
+     * global-only because the desktops that want different gaps are usually
+     * the ones with a different job — a full-bleed video desktop against a
+     * roomy editing one. */
+    int     inner_gap;
+    int     outer_gap;
     bool    float_all;      /* windows opened here start floating         */
     int     monitor;        /* pinned display, or -1 for "wherever it opens" */
     wchar_t app[MAX_PATH];  /* auto-launch while empty; "" = none         */
@@ -544,6 +550,7 @@ typedef struct {
     bool    set_layout;   Layout layout;
     bool    set_ratio;    float  master_ratio;
     bool    set_nmaster;  int    n_master;
+    bool    set_gaps;     int    inner_gap, outer_gap;
     bool    set_monitor;  int    monitor;
 } DesktopRule;
 
@@ -613,6 +620,12 @@ typedef struct {
     wchar_t    class_match[256];      /* empty = match any class            */
     wchar_t    process_match[256];    /* empty = match any process (exe)    */
     wchar_t    path_match[MAX_PATH];  /* empty = match any full image path  */
+    /* Empty = match any title. Often the ONLY thing that separates two windows
+     * of one app — a picture-in-picture player, a splash screen, a specific
+     * dialog — where class and process are identical. Note a title is the one
+     * criterion that CHANGES while the window lives, so this matches whatever
+     * it says at the moment the window is adopted. */
+    wchar_t    title_match[256];
     bool       set_dialog;            /* false = don't care what it is      */
     bool       dialog;                /* required window_is_dialog() answer */
     RuleAction action;
