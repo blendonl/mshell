@@ -164,7 +164,10 @@ mshell.set_whichkey({
     border  = 0x7aa2f7,     -- panel outline
 })
 
--- mshell.set_verbose(true)         -- uncomment for DebugView logging
+-- How much goes to %LOCALAPPDATA%\mshell\mshell.log (and DebugView). The file
+-- is appended to and rotates at 5 MB, so raising this is not a commitment.
+-- mshell.set_log_level("debug")    -- error | warn | info (default) | debug | trace
+-- mshell.set_verbose(true)         -- the older spelling of set_log_level("debug")
 
 ----------------------------------------------------------------------
 -- Auto-reload

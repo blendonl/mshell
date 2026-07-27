@@ -110,12 +110,19 @@ Explorer — quitting just exits, it does **not** log you out:
 mshell.exe --test
 ```
 
-`%TEMP%\mshell.log` (and DebugView) is always written, and is the first place to
-look when something doesn't work: it records whether your config loaded, how many
-bindings it produced, and any startup program that failed to launch. **If none of
-your keybinds work, read it** — a config error is atomic, so a single bad line
-rejects the whole file and leaves you on a six-binding fallback keymap. Add
-`--verbose` for the full per-keystroke trace on top.
+`%LOCALAPPDATA%\mshell\mshell.log` (and DebugView) is always written, and is the
+first place to look when something doesn't work: it records whether your config
+loaded, how many bindings it produced, and any startup program that failed to
+launch. **If none of your keybinds work, read it** — a config error is atomic, so
+a single bad line rejects the whole file and leaves you on a six-binding fallback
+keymap. Add `--verbose` for the full per-keystroke trace on top.
+
+Every line is timestamped and carries a level, the file is **appended to** rather
+than truncated (so a crash leaves its evidence behind), and it rotates at 5 MB
+keeping two older generations alongside it. `mshell.set_log_level("error" |
+"warn" | "info" | "debug" | "trace")` sets the level from your config — `"debug"`
+is what `--verbose` gives you, and `"info"` is the default. The privileged
+helper writes `mshelld.log` beside it.
 
 ## Install as the shell
 
@@ -261,8 +268,8 @@ API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `set_gaps`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
 `set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_manage_owned`,
 `set_float_on_top`,
-`set_min_window_size`, `set_auto_reload`, `set_verbose`, `block_system_keys`,
-`log`.
+`set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
+`block_system_keys`, `log`.
 
 **Auto-reload.** mshell watches the folder holding your `init.lua` and reloads
 250 ms after the last write, so saving in your editor applies the config —
