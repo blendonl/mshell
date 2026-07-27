@@ -127,6 +127,7 @@ const char *layout_to_name(Layout l) {
     case LAYOUT_CENTERED: return "centered";
     case LAYOUT_BSTACK:   return "bstack";
     case LAYOUT_COLUMNS:  return "columns";
+    case LAYOUT_BSP:      return "bsp";
     case LAYOUT_COUNT:    break;
     }
     return "tiling";
@@ -142,6 +143,7 @@ static bool layout_from_name(const char *s, Layout *out) {
     else if (strcmp(s, "centered") == 0) *out = LAYOUT_CENTERED;
     else if (strcmp(s, "bstack")   == 0) *out = LAYOUT_BSTACK;
     else if (strcmp(s, "columns")  == 0) *out = LAYOUT_COLUMNS;
+    else if (strcmp(s, "bsp")      == 0) *out = LAYOUT_BSP;
     else return false;
     return true;
 }

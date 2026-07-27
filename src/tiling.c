@@ -53,6 +53,13 @@ static void emit(HWND hwnd, RECT cell) {
 
 /* Record a target verbatim — no gap inset, no minimum. Fullscreen windows are
  * placed with this: they are outside the layout and must reach every edge. */
+/* The tree calls back through this rather than knowing what a Placement is.
+ * Defined after emit() so it can simply forward. */
+static void tree_emit_cb(HWND hwnd, RECT area, void *ctx) {
+    (void)ctx;
+    emit(hwnd, area);
+}
+
 static void emit_raw(HWND hwnd, RECT rect) {
     if (!hwnd || s_place_n >= MAX_WINDOWS_PER_DESKTOP) return;
     s_place[s_place_n].hwnd = hwnd;
@@ -282,9 +289,16 @@ static void layout_monocle(const LayoutParams *lp, Client *cs, int n) {
     for (int i = 0; i < n; i++)
         if (cs[i].hwnd == focus) { target = focus; break; }
 
+    /* Marking rather than hiding inline: flush_placements does the actual
+     * ShowWindow, which keeps every "in the layout but not on screen" decision
+     * in one place — the same flag tabbed containers set. */
     for (int i = 0; i < n; i++) {
-        if (cs[i].hwnd == target)          emit(cs[i].hwnd, lp->area);
-        else if (IsWindowVisible(cs[i].hwnd)) ShowWindow(cs[i].hwnd, SW_HIDE);
+        if (cs[i].hwnd == target) {
+            cs[i].mw->layout_hidden = false;
+            emit(cs[i].hwnd, lp->area);
+        } else {
+            cs[i].mw->layout_hidden = true;
+        }
     }
 }
 
@@ -360,6 +374,11 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
     case LAYOUT_CENTERED: layout_centered(&lp, cs, n);     break;
     case LAYOUT_BSTACK:   layout_bstack(&lp, cs, n);       break;
     case LAYOUT_COLUMNS:  layout_columns(&lp, cs, n);      break;
+
+    /* Manual splits. The tree keeps its own structure but not its own window
+     * list — it reconciles against the desktop's on every pass — so switching
+     * to and from this layout needs nothing but the case. */
+    case LAYOUT_BSP:      layout_tree_run(dt, lp.area, tree_emit_cb, NULL); break;
     case LAYOUT_COUNT:    break;
     }
 }
@@ -373,8 +392,21 @@ static bool rect_eq(RECT a, RECT b) {
 static void flush_placements(void) {
     if (s_place_n <= 0) return;
 
-    /* ShowWindow can't be deferred — reveal any window a prior monocle pass
-     * hid before we start moving things. */
+    /* ShowWindow can't be deferred, so hiding and revealing both happen here,
+     * before anything moves.
+     *
+     * layout_hidden is the layout's own decision (monocle's unfocused windows,
+     * the unshown side of a tabbed container) and is deliberately distinct from
+     * app_hidden, which is the APP hiding itself to the tray — mshell must not
+     * un-hide the latter. */
+    Desktop *cur = desktop_current();
+    for (int i = 0; i < cur->count; i++) {
+        ManagedWindow *mw = window_find(cur->windows[i]);
+        if (!mw || mw->is_floating || mw->app_hidden) continue;
+        if (mw->layout_hidden && IsWindowVisible(mw->hwnd))
+            ShowWindow(mw->hwnd, SW_HIDE);
+    }
+
     for (int i = 0; i < s_place_n; i++)
         if (!IsWindowVisible(s_place[i].hwnd))
             ShowWindow(s_place[i].hwnd, SW_SHOWNOACTIVATE);

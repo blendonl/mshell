@@ -275,6 +275,11 @@ void desktop_gc(int slot) {
 
     log_w(L"desktop: destroyed '%ls' (id %d, empty)", dt->name, dt->id);
 
+    /* Release its BSP tree now rather than leaving the slot to be reclaimed
+     * lazily — desktop ids are monotonic, so a long session would otherwise
+     * keep every dead desktop's tree until the table wrapped. */
+    layout_tree_forget(dt->id);
+
     memmove(&g.desktops[slot], &g.desktops[slot + 1],
             (size_t)(g.desktop_count - slot - 1) * sizeof(Desktop));
     g.desktop_count--;

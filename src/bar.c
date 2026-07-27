@@ -104,6 +104,7 @@ static const wchar_t *layout_label(Layout l) {
     case LAYOUT_SPIRAL:   return L"[@]";
     case LAYOUT_CENTERED: return L"[|]";
     case LAYOUT_BSTACK:   return L"[T]";
+    case LAYOUT_BSP:      return L"[+]";
     case LAYOUT_COLUMNS:  return L"|||";
     case LAYOUT_COUNT:    break;
     }
