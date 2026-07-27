@@ -25,6 +25,7 @@
  */
 
 #include "mshell.h"
+#include "overlay.h"
 
 static const wchar_t *BAR_CLASS = L"mshell_Bar";
 
@@ -35,8 +36,7 @@ static const wchar_t *BAR_CLASS = L"mshell_Bar";
 
 /* One font per monitor: displays can have different DPI, so a single shared
  * font would be wrong on at least one of them. */
-static HFONT s_font[MAX_MONITORS];
-static UINT  s_font_dpi[MAX_MONITORS];
+static OverlayFont s_font[MAX_MONITORS];
 
 /* What is currently on screen, so a refresh can skip repainting when nothing
  * changed. The bar is refreshed from tiling and focus paths that run often. */
@@ -45,7 +45,7 @@ static wchar_t s_layout[32];
 static wchar_t s_title[256];
 static wchar_t s_clock[32];
 
-static int bar_scale(int px, UINT dpi) { return MulDiv(px, (int)dpi, 96); }
+#define bar_scale(px, dpi) overlay_scale((px), (dpi))
 
 /* Which monitor a given bar window belongs to, or -1. */
 static int bar_monitor_of(HWND hwnd) {
@@ -57,21 +57,15 @@ static int bar_monitor_of(HWND hwnd) {
 static HFONT bar_font(int mon) {
     if (mon < 0 || mon >= MAX_MONITORS) return NULL;
 
-    UINT dpi = monitor_dpi(mon);
-    if (s_font[mon] && s_font_dpi[mon] == dpi) return s_font[mon];
-    if (s_font[mon]) DeleteObject(s_font[mon]);
-
     /* Sized off the bar height rather than fixed, so a taller bar gets larger
      * text instead of a lot of empty space. */
-    int px = bar_scale(g.bar_height, dpi) / 2;
+    UINT dpi = monitor_dpi(mon);
+    int  px  = bar_scale(g.bar_height, dpi) / 2;
     if (px < 10) px = 10;
 
-    s_font[mon] = CreateFontW(-px, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                              DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    s_font_dpi[mon] = dpi;
-    return s_font[mon];
+    /* Rebuilds only when the DPI or the computed size actually changed, so a
+     * bar_height change at reload is picked up without a special case. */
+    return overlay_font(&s_font[mon], dpi, px);
 }
 
 /* ===========================================================================
@@ -166,24 +160,20 @@ void bar_refresh(void) {
 /* ===========================================================================
  * Paint
  * =========================================================================== */
-static void bar_paint(HWND hwnd, HDC hdc) {
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int W = rc.right, H = rc.bottom;
-    if (W <= 0 || H <= 0) return;
+static void bar_paint(HWND hwnd) {
+    /* Double-buffered, like whichkey: the bar repaints on focus and tiling
+     * changes, which are exactly the moments a flicker would be noticed. */
+    OverlayPaint op;
+    HDC mdc = overlay_paint_begin(&op, hwnd);
+    if (!mdc) return;
+
+    int  W = op.w, H = op.h;
+    RECT rc = { 0, 0, W, H };
 
     int  mon = bar_monitor_of(hwnd);
     UINT dpi = monitor_dpi(mon < 0 ? g.primary_monitor : mon);
 
-    /* Double-buffered, like whichkey: the bar repaints on focus and tiling
-     * changes, which are exactly the moments a flicker would be noticed. */
-    HDC     mdc = CreateCompatibleDC(hdc);
-    HBITMAP bmp = CreateCompatibleBitmap(hdc, W, H);
-    HBITMAP obm = (HBITMAP)SelectObject(mdc, bmp);
-
-    HBRUSH bg = CreateSolidBrush(g.bar_bg);
-    FillRect(mdc, &rc, bg);
-    DeleteObject(bg);
+    overlay_fill(mdc, &rc, g.bar_bg);
 
     HFONT of = (HFONT)SelectObject(mdc, bar_font(mon < 0 ? 0 : mon));
     SetBkMode(mdc, TRANSPARENT);
@@ -246,11 +236,7 @@ static void bar_paint(HWND hwnd, HDC hdc) {
     }
 
     SelectObject(mdc, of);
-    BitBlt(hdc, 0, 0, W, H, mdc, 0, 0, SRCCOPY);
-
-    SelectObject(mdc, obm);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
+    overlay_paint_end(&op);
 }
 
 static LRESULT CALLBACK bar_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -265,13 +251,9 @@ static LRESULT CALLBACK bar_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND:
         return 1;   /* fully painted below */
 
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-        bar_paint(hwnd, hdc);
-        EndPaint(hwnd, &ps);
+    case WM_PAINT:
+        bar_paint(hwnd);   /* owns Begin/EndPaint via OverlayPaint */
         return 0;
-    }
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -280,13 +262,9 @@ static LRESULT CALLBACK bar_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
  * Lifecycle
  * =========================================================================== */
 bool bar_init(void) {
-    WNDCLASSEXW wc = {0};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = bar_wndproc;
-    wc.hInstance     = g.hinst;
-    wc.lpszClassName = BAR_CLASS;
-    RegisterClassExW(&wc);
-    return true;
+    /* Registered once here; bar_reconfigure creates one window per monitor
+     * from it, which is why overlay_register has to tolerate re-registration. */
+    return overlay_register(BAR_CLASS, bar_wndproc, false);
 }
 
 static void bar_destroy_windows(void) {
@@ -313,22 +291,16 @@ void bar_reconfigure(void) {
          * ignores the class by name). TOPMOST so a floating window cannot
          * cover it — a fullscreen window still can, because those are placed
          * against the monitor's full bounds. */
-        g.bar_windows[i] = CreateWindowExW(
-            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-            BAR_CLASS, L"", WS_POPUP,
-            f.left, y, f.right - f.left, h,
-            NULL, NULL, g.hinst, NULL);
-
-        if (!g.bar_windows[i]) {
-            log_err(L"bar: CreateWindowEx failed on monitor %d: %lu",
-                    i, GetLastError());
-            continue;
-        }
+        g.bar_windows[i] = overlay_create(
+            BAR_CLASS, WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+        if (!g.bar_windows[i]) continue;
 
         if (g.bar_modules & BAR_MOD_CLOCK)
             SetTimer(g.bar_windows[i], BAR_TIMER_ID, 1000, NULL);
 
-        ShowWindow(g.bar_windows[i], SW_SHOWNOACTIVATE);
+        SetWindowPos(g.bar_windows[i], HWND_TOPMOST,
+                     f.left, y, f.right - f.left, h,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
     /* Force the next refresh to paint: the cached strings describe whatever
@@ -354,9 +326,7 @@ void bar_reserve_work_area(void) {
 
 void bar_shutdown(void) {
     bar_destroy_windows();
-    for (int i = 0; i < MAX_MONITORS; i++) {
-        if (s_font[i]) { DeleteObject(s_font[i]); s_font[i] = NULL; }
-        s_font_dpi[i] = 0;
-    }
+    for (int i = 0; i < MAX_MONITORS; i++)
+        overlay_font_free(&s_font[i]);
     UnregisterClassW(BAR_CLASS, g.hinst);
 }

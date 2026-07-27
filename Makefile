@@ -64,7 +64,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/helper.c     \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c \
-              $(SRC_DIR)/log.c
+              $(SRC_DIR)/log.c \
+              $(SRC_DIR)/overlay.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:

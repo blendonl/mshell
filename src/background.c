@@ -8,6 +8,7 @@
  */
 
 #include "mshell.h"
+#include "overlay.h"
 
 static const wchar_t *BG_CLASS = L"mshell_Background";
 
@@ -25,9 +26,7 @@ static LRESULT CALLBACK bg_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        HBRUSH br = CreateSolidBrush(g.background_color);
-        FillRect(dc, &rc, br);
-        DeleteObject(br);
+        overlay_fill(dc, &rc, g.background_color);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -38,29 +37,15 @@ static LRESULT CALLBACK bg_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 bool background_init(void) {
-    WNDCLASSEXW wc = {0};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = bg_wndproc;
-    wc.hInstance     = g.hinst;
-    wc.lpszClassName = BG_CLASS;
-    wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
-    RegisterClassExW(&wc);
+    /* The arrow cursor matters here and nowhere else: the backdrop is the one
+     * overlay the pointer can come to rest over. */
+    if (!overlay_register(BG_CLASS, bg_wndproc, true)) return false;
 
-    int x, y, w, h;
-    virtual_screen_rect(&x, &y, &w, &h);
+    g.background_window = overlay_create(BG_CLASS,
+                                         WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+    if (!g.background_window) return false;
 
-    g.background_window = CreateWindowExW(
-        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        BG_CLASS, L"", WS_POPUP,
-        x, y, w, h, NULL, NULL, g.hinst, NULL);
-
-    if (!g.background_window) {
-        log_w(L"background: CreateWindowEx failed: %lu", GetLastError());
-        return false;
-    }
-
-    SetWindowPos(g.background_window, HWND_BOTTOM, x, y, w, h,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    background_update();
     return true;
 }
 
@@ -75,9 +60,5 @@ void background_update(void) {
 }
 
 void background_shutdown(void) {
-    if (g.background_window) {
-        DestroyWindow(g.background_window);
-        g.background_window = NULL;
-    }
-    UnregisterClassW(BG_CLASS, g.hinst);
+    overlay_destroy(&g.background_window, BG_CLASS);
 }
