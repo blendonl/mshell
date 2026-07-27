@@ -25,6 +25,9 @@
 #ifndef DWMWCP_DONOTROUND
 #define DWMWCP_DONOTROUND 1
 #endif
+#ifndef DWMWA_CLOAK
+#define DWMWA_CLOAK 13
+#endif
 
 /* ===========================================================================
  * Helper: full image path of the process owning a window
@@ -455,6 +458,86 @@ void window_restore_all_decorations(void) {
 }
 
 /* ===========================================================================
+ * Taking a window off the screen, and putting it back.
+ *
+ * Desktop switching, monocle and the scratchpad all need a window gone from
+ * the screen while it stays alive and managed, and this is the one place that
+ * decides HOW. See the HidePolicy comment in mshell.h for why the default is
+ * cloaking and not ShowWindow(SW_HIDE) — the short version is that SW_HIDE
+ * makes DWM destroy the window's redirection surface and makes Chromium-class
+ * apps shut their compositor down, so the window comes back black.
+ * =========================================================================== */
+
+/* Ask DWM to stop compositing this window (or to resume). Cross-process, like
+ * every other DwmSetWindowAttribute call here. Fails on a window whose process
+ * has gone, which is why the result is checked rather than assumed. */
+static bool dwm_set_cloaked(HWND hwnd, bool on) {
+    BOOL v = on ? TRUE : FALSE;
+    return SUCCEEDED(DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &v, sizeof(v)));
+}
+
+bool window_on_screen(const ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd)) return false;
+    if (mw->wm_hidden || mw->app_hidden) return false;
+    return IsWindowVisible(mw->hwnd) != 0;
+}
+
+void window_hide(ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd)) return;
+    if (mw->wm_hidden) return;      /* already ours and already gone */
+    /* The app hid it itself (minimise-to-tray). It is already off the screen,
+     * and claiming it would mean un-hiding it later on the app's behalf — so
+     * leave it alone and let the EVENT_OBJECT_SHOW handler deal with it when
+     * the app brings it back. */
+    if (mw->app_hidden) return;
+
+    if (g.hide_policy == HIDE_CLOAK && dwm_set_cloaked(mw->hwnd, true)) {
+        mw->cloaked = true;
+    } else {
+        /* Either the policy asked for it, or DWM refused (composition off,
+         * which is possible in a VM or over some remote sessions). Falling
+         * back keeps desktops working; they just flicker the old way. */
+        ShowWindow(mw->hwnd, SW_HIDE);
+        mw->cloaked = false;
+    }
+    mw->wm_hidden = true;
+}
+
+void window_show(ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd)) return;
+    if (mw->app_hidden) return;     /* not ours to reveal */
+
+    /* Uncloak unconditionally when we cloaked it, even if wm_hidden is already
+     * clear: the two can drift apart if the policy changed under a hidden
+     * window, and a window left cloaked is invisible with no way back. */
+    if (mw->cloaked) {
+        dwm_set_cloaked(mw->hwnd, false);
+        mw->cloaked = false;
+    }
+
+    if (!IsWindowVisible(mw->hwnd)) {
+        /* SW_SHOWNOACTIVATE restores a minimized window, which would quietly
+         * un-minimize everything every time you came back to a desktop. Hiding
+         * does not clear WS_MINIMIZE, so IsIconic still answers correctly. */
+        ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE
+                                                : SW_SHOWNOACTIVATE);
+
+        /* Coming back from SW_HIDE is the case that renders black: DWM has a
+         * brand-new empty surface and the app has not been asked for a frame.
+         * Invalidating the whole window and its children queues the WM_PAINT
+         * that asks, and dropping has_applied makes the next tiling pass
+         * re-issue a real SetWindowPos instead of skipping the window for
+         * already being in the right place. Cheap, and only on this path —
+         * a cloaked window never lost its surface and needs neither. */
+        RedrawWindow(mw->hwnd, NULL, NULL,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+        mw->has_applied = false;
+    }
+
+    mw->wm_hidden = false;
+}
+
+/* ===========================================================================
  * Re-show every window mshell hid.
  *
  * Both virtual desktops (desktop.c) and monocle (tiling.c) are implemented by
@@ -463,10 +546,18 @@ void window_restore_all_decorations(void) {
  * is not the focused one.
  *
  * Nothing else ever brings those back. A hidden top-level window has no
- * taskbar button and no Alt+Tab entry, so the instant mshell stops running it
- * becomes unreachable: as the shell there is nothing left to reveal it, and in
- * --test mode explorer comes back to a taskbar of buttons that do nothing.
- * Quitting is a bound key, and a crash lands in the same place.
+ * taskbar button and no Alt+Tab entry, and a CLOAKED one is worse still — it
+ * keeps its taskbar button and gives you nothing when you click it. So the
+ * instant mshell stops running they are unreachable: as the shell there is
+ * nothing left to reveal them, and in --test mode explorer comes back to a
+ * taskbar of buttons that do nothing. Quitting is a bound key, and a crash
+ * lands in the same place (see the crash handler in main.c).
+ *
+ * Uncloaking is therefore unconditional — not gated on wm_hidden and not on
+ * the current policy. This runs once, on the way out, in a process that may
+ * already be broken, and the only failure that matters is leaving a window
+ * cloaked; asking DWM to uncloak a window that was not cloaked costs an RPC
+ * and does nothing.
  *
  * Call this on the way out, BEFORE window_restore_all_decorations(), so the
  * frames are handed back to windows the user can actually see.
@@ -476,10 +567,21 @@ void window_restore_all_visibility(void) {
 
     for (int i = 0; i < g.managed_count; i++) {
         ManagedWindow *mw = &g.managed[i];
-        if (!IsWindow(mw->hwnd) || IsWindowVisible(mw->hwnd)) continue;
+        if (!IsWindow(mw->hwnd)) continue;
         /* Undo mshell's hiding, not the app's: a window sitting in the tray
          * because the user closed it there should stay there. */
         if (mw->app_hidden) continue;
+
+        if (mw->cloaked || !IsWindowVisible(mw->hwnd)) shown++;
+
+        /* Unconditional, not `if (mw->cloaked)`: this is the last chance any
+         * of these windows get, and a bad flag here costs the user a window
+         * they cannot see and cannot reach. */
+        dwm_set_cloaked(mw->hwnd, false);
+        mw->cloaked   = false;
+        mw->wm_hidden = false;
+
+        if (IsWindowVisible(mw->hwnd)) continue;
 
         /* SW_SHOWNA reveals without activating: we are tearing down and have no
          * business deciding which window ends up focused.
@@ -593,7 +695,7 @@ void window_manage(HWND hwnd) {
      * is show/hide here, and only the current desktop is ever tiled. */
     if (dt->id != g.current_desktop_id) {
         events_suppress_begin();
-        ShowWindow(hwnd, SW_HIDE);
+        window_hide(mw);
         events_suppress_end();
     }
 
@@ -961,8 +1063,7 @@ void window_enforce_zorder(void) {
     if (g.float_on_top) {
         for (int i = 0; i < dt->count; i++) {
             ManagedWindow *mw = window_find(dt->windows[i]);
-            if (mw && mw->is_floating && IsWindow(mw->hwnd) &&
-                IsWindowVisible(mw->hwnd))
+            if (mw && mw->is_floating && window_on_screen(mw))
                 SetWindowPos(mw->hwnd, HWND_TOP, 0, 0, 0, 0,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
@@ -992,7 +1093,7 @@ void window_enforce_zorder(void) {
          * it, so the demotion below has to wait for BOTH reasons to lapse. */
         bool want_topmost = window_is_screen_fullscreen(mw) || mw->always_on_top;
 
-        if (want_topmost && IsWindowVisible(mw->hwnd)) {
+        if (want_topmost && window_on_screen(mw)) {
             if (!mw->made_topmost &&
                 !(GetWindowLongPtrW(mw->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
                 mw->made_topmost = true;
@@ -1156,6 +1257,52 @@ void window_focus(HWND hwnd) {
         log_w(L"focus -> %p FAILED — foreground is still %p [%ls]",
               (void *)hwnd, (void *)fg, cls);
     }
+}
+
+/* ===========================================================================
+ * Focus nothing — park the foreground on the backdrop.
+ *
+ * Needed because cloaking, unlike ShowWindow(SW_HIDE), does not disturb the
+ * foreground at all: hiding a window makes Windows hand the foreground to
+ * somebody else, cloaking one leaves it exactly where it was. So switching to
+ * an EMPTY desktop used to defocus by accident and now would not — the window
+ * you just left would keep the keyboard while being invisible, and you would
+ * type into it without seeing a thing.
+ *
+ * The backdrop is the natural sink: it already covers the whole virtual screen
+ * and is already pinned to the bottom of the z-order, so activating it is
+ * visually a no-op. WS_EX_NOACTIVATE is the only obstacle, and it is there to
+ * stop a click in a gap between tiles from stealing focus — a different
+ * question from whether WE may hand it the foreground deliberately. Lifting it
+ * for the length of this one call answers both correctly.
+ *
+ * Windows' own virtual desktops do the same thing, parking the foreground on
+ * the shell's desktop window when you switch to a desktop with nothing on it.
+ * =========================================================================== */
+void window_focus_none(void) {
+    /* First, unconditionally: there is no focused window, so there is no ring.
+     * This is what every caller here used to do on its own, and it must happen
+     * whatever the foreground turns out to be. */
+    border_hide();
+
+    HWND sink = g.background_window;
+    if (!sink) return;
+
+    HWND fg = GetForegroundWindow();
+    if (fg == sink) return;                     /* already nowhere */
+    /* The foreground is a window we do not manage — one of our own overlays, or
+     * something outside mshell's control. Leave it: we are here to stop a
+     * window WE hid from keeping the keyboard, not to seize the foreground from
+     * whatever else happens to hold it. */
+    if (fg && !window_find(fg)) return;
+
+    LONG_PTR ex = GetWindowLongPtrW(sink, GWL_EXSTYLE);
+    SetWindowLongPtrW(sink, GWL_EXSTYLE, ex & ~(LONG_PTR)WS_EX_NOACTIVATE);
+
+    claim_foreground_rights();
+    SetForegroundWindow(sink);
+
+    SetWindowLongPtrW(sink, GWL_EXSTYLE, ex);
 }
 
 /* ===========================================================================

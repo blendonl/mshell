@@ -844,6 +844,28 @@ static int lua_mshell_set_float_policy(lua_State *L) {
     return 0;
 }
 
+/* mshell.set_hide_policy("cloak" | "hide")
+ *
+ * How a window is taken off the screen — for a desktop you are not on, for
+ * monocle's unfocused windows, for a stowed scratchpad.
+ *
+ *   "cloak" (default) asks DWM to stop compositing it. The window keeps
+ *           rendering, so it is instantly and correctly there when it comes
+ *           back. This is the same mechanism Windows' own virtual desktops
+ *           use.
+ *   "hide"  ShowWindow(SW_HIDE), which is what mshell did before 0.12.1. DWM
+ *           throws the window's surface away and Chromium/Electron/WPF apps
+ *           shut their renderer down, so windows commonly come back BLACK
+ *           until something forces a repaint. Only worth choosing if cloaking
+ *           misbehaves for some app you use. */
+static int lua_mshell_set_hide_policy(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "cloak") == 0) g.hide_policy = HIDE_CLOAK;
+    else if (strcmp(s, "hide")  == 0) g.hide_policy = HIDE_SHOWWINDOW;
+    else return luaL_error(L, "hide_policy must be 'cloak' or 'hide'");
+    return 0;
+}
+
 /* mshell.set_fullscreen_policy("contain" | "monitor")
  *
  * What an app that fullscreens ITSELF gets — YouTube's fullscreen button, F11
@@ -1850,6 +1872,7 @@ void lua_register_api(lua_State *L) {
         {"set_nmaster",     lua_mshell_set_nmaster},
         {"set_layout",      lua_mshell_set_layout},
         {"set_float_policy",lua_mshell_set_float_policy},
+        {"set_hide_policy", lua_mshell_set_hide_policy},
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
         {"set_attach",      lua_mshell_set_attach},
         {"set_mouse",       lua_mshell_set_mouse_tbl},
