@@ -861,6 +861,26 @@ static int lua_mshell_set_fullscreen_policy(lua_State *L) {
     return 0;
 }
 
+/* mshell.set_float_placement("center" | "none")
+ *
+ * Where a window that is NOT tiled ends up:
+ *   "center" (default) in the middle of its monitor's work area — both the
+ *            window that opens floating (a rule, or a floating desktop) and the
+ *            one toggle_float just took out of the grid;
+ *   "none"   wherever the app opened it, which is what every release before
+ *            this setting existed did.
+ * Only the position: the size stays whatever the app asked for, clamped to the
+ * work area. A rule's `geometry` names an exact rect and beats this, a rule's
+ * `fullscreen` parks over the whole monitor and beats it, and `center` in a
+ * rule's opts overrides it per app in either direction. */
+static int lua_mshell_set_float_placement(lua_State *L) {
+    const char *s = luaL_checkstring(L, 1);
+    if      (strcmp(s, "center") == 0) g.float_placement = FLOAT_PLACE_CENTER;
+    else if (strcmp(s, "none")   == 0) g.float_placement = FLOAT_PLACE_NONE;
+    else return luaL_error(L, "float_placement must be 'center' or 'none'");
+    return 0;
+}
+
 /* mshell.set_attach("end" | "master" | "after") */
 static int lua_mshell_set_attach(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
@@ -927,6 +947,10 @@ static int lua_mshell_set_min_window_size(lua_State *L) {
  *                                  chrome, this makes them borderless
  *              fullscreen = true   park it over the whole monitor it opened on
  *                                  (full bounds, no gaps); floating only
+ *              center     = false  don't centre this app's floating windows —
+ *                                  leave them where the app opens them (see
+ *                                  set_float_placement). true forces centring
+ *                                  under a config that turned it off
  *            The three together are the game preset: never tiled, borderless,
  *            covering the display, with no ring painted over its edges.
  * =========================================================================== */
@@ -1031,6 +1055,19 @@ static int lua_mshell_rule(lua_State *L) {
 
         lua_getfield(L, 3, "start_fullscreen");
         if (lua_isboolean(L, -1)) r->start_fullscreen = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        /* center = false — this app places its own floating windows well
+         * enough (a picture-in-picture player parked in a corner), so leave
+         * them alone. center = true opts one app in under a config that
+         * centres nothing. Only a real boolean counts: a missing key means
+         * "whatever set_float_placement says", which is not the same as false.
+         * Redundant beside `geometry`, which is already an exact rect. */
+        lua_getfield(L, 3, "center");
+        if (lua_isboolean(L, -1)) {
+            r->set_center = true;
+            r->center     = lua_toboolean(L, -1);
+        }
         lua_pop(L, 1);
     }
 
@@ -1852,6 +1889,7 @@ void lua_register_api(lua_State *L) {
         {"set_layout",      lua_mshell_set_layout},
         {"set_float_policy",lua_mshell_set_float_policy},
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
+        {"set_float_placement",lua_mshell_set_float_placement},
         {"set_attach",      lua_mshell_set_attach},
         {"set_mouse",       lua_mshell_set_mouse_tbl},
         {"set_animation",   lua_mshell_set_animation},
