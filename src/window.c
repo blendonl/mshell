@@ -4,6 +4,7 @@
  */
 
 #include "mshell.h"
+#include "layout_math.h"   /* center_axis() — where a floating window sits */
 
 /* ---------------------------------------------------------------------------
  * DWM attribute ids that postdate the mingw-w64 headers we build against.
@@ -548,6 +549,13 @@ void window_manage(HWND hwnd) {
     mw->no_ring    = rule ? rule->no_ring    : false;
     mw->no_decor   = rule ? rule->no_decor   : false;
     mw->fullscreen = rule ? rule->fullscreen : false;
+    /* Resolved once, here, rather than read from the globals at each placement:
+     * the rule is already in hand, and pinning the answer to the window means a
+     * later reload cannot change where a window that is already open jumps to
+     * the next time it floats. */
+    mw->center_float = (rule && rule->set_center)
+                       ? rule->center
+                       : (g.float_placement == FLOAT_PLACE_CENTER);
 
     /* Square corners + no open/close animation, for tiled and floating alike. */
     window_apply_flat(hwnd);
@@ -572,6 +580,12 @@ void window_manage(HWND hwnd) {
         window_strip_decorations(hwnd);
     }
 
+    /* Recorded before anything below places the window, because it is one of
+     * the answers to "who owns this rect": a window that starts fullscreen is
+     * claiming the whole monitor, and neither the centring nor the tile pass
+     * should put it somewhere else first. */
+    if (rule && rule->start_fullscreen) mw->fs_mode = FS_WINDOW;
+
     /* A fixed rect only means anything for a window the layout is not going to
      * place. Applied before the tile pass so the first frame is already right,
      * and recorded as applied so the drift detector reads it as ours. */
@@ -583,9 +597,13 @@ void window_manage(HWND hwnd) {
                        SWP_NOZORDER | SWP_NOACTIVATE);
         mw->applied_rect = want;
         mw->has_applied  = true;
+    } else if (mw->is_floating) {
+        /* Nothing more specific asked for a rect, so the placement policy gets
+         * it. Also before the tile pass, for the same reason: the first frame
+         * the user sees should already be in the right place, not a frame in
+         * the corner followed by a jump to the middle. */
+        window_center_float(hwnd);
     }
-
-    if (rule && rule->start_fullscreen) mw->fs_mode = FS_WINDOW;
 
     desktop_add_window(hwnd, slot);
 
@@ -752,6 +770,72 @@ bool window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
     if (mw) mw->needs_helper = true;
 
     return helper_set_window_pos(hwnd, x, y, w, h, flags);
+}
+
+/* ===========================================================================
+ * Centre a floating window on its monitor.
+ *
+ * Where a floating window SITS is the one thing about it nobody owns. Its size
+ * is the app's business and the layout never touches its rect, so left alone it
+ * opens wherever that app last happened to be, or at the next step of Windows'
+ * cascade — which on a shell with no taskbar and no desktop behind it reads as
+ * "somewhere near the top left, for no reason". The window deliberately kept
+ * out of the grid is also the one being looked at, so it goes in the middle.
+ *
+ * The monitor's WORK AREA, not its full bounds: the bar is reserved space, and
+ * a centred window that slid under it would be centred against something the
+ * user cannot see. The size is only ever clamped down to fit — this decides
+ * where a float is, never how big it is.
+ *
+ * Safe to call on anything: it is a no-op for a tiled window, for one that
+ * opted out, and for every state where an explicit rect is the wrong answer.
+ * =========================================================================== */
+void window_center_float(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || !mw->is_floating || !mw->center_float) return;
+
+    /* Both states ignore the rect handed to SetWindowPos, and both are a
+     * deliberate act by the user or the app. Restoring one just to centre it
+     * is not what "put floating windows in the middle" asks for. */
+    if (IsIconic(hwnd) || IsZoomed(hwnd)) return;
+
+    /* Never fight the fullscreen paths. A window parked over its monitor — by
+     * rule, by keybinding, or by the app fullscreening itself — is already
+     * exactly where it belongs, and centring it there is at best a no-op and at
+     * worst undoes the park. */
+    if (mw->fullscreen || window_is_screen_fullscreen(mw)) return;
+
+    RECT cur;
+    if (!window_frame_rect(hwnd, &cur)) return;
+
+    int mon = mw->monitor;
+    if (mon < 0 || mon >= g.monitor_count) mon = 0;
+    RECT area = (g.monitor_count > 0) ? g.monitors[mon].work_area : g.work_area;
+
+    int aw = (int)(area.right - area.left);
+    int ah = (int)(area.bottom - area.top);
+    int w  = (int)(cur.right - cur.left);
+    int h  = (int)(cur.bottom - cur.top);
+    if (w <= 0 || h <= 0 || aw <= 0 || ah <= 0) return;
+    if (w > aw) w = aw;
+    if (h > ah) h = ah;
+
+    RECT want = { center_axis(area.left, aw, w), center_axis(area.top, ah, h),
+                  0, 0 };
+    want.right  = want.left + w;
+    want.bottom = want.top  + h;
+
+    events_suppress_begin();
+    RECT adj = window_adjust_for_frame(hwnd, want);
+    window_set_pos(hwnd, adj.left, adj.top, adj.right - adj.left,
+                   adj.bottom - adj.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    events_suppress_end();
+
+    /* Recorded as ours, like every other placement, so the drift detector reads
+     * the LOCATIONCHANGE this causes as an echo rather than as the app moving
+     * itself. */
+    mw->applied_rect = want;
+    mw->has_applied  = true;
 }
 
 /* ===========================================================================
@@ -1073,6 +1157,12 @@ void window_set_floating(HWND hwnd, bool floating) {
         if (mw->no_decor) window_strip_decorations(hwnd);
         else              window_restore_decorations(hwnd);
         window_apply_fullscreen(hwnd);   /* no-op without a fullscreen rule */
+        /* A window leaving the grid keeps the size of the tile it just left,
+         * which is a fine size and a meaningless position — the tile is about
+         * to be given away to the windows that stayed. Centring it is the same
+         * answer as for a window that opened floating, so it is the same call;
+         * a no-op if the fullscreen line above already parked it. */
+        window_center_float(hwnd);
     } else {
         window_strip_decorations(hwnd);
     }
