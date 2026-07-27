@@ -274,7 +274,7 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 --   "cloak" (default) asks DWM to stop compositing it. The window goes on
 --           rendering, so it is instantly and correctly there when it comes
 --           back. Same mechanism Windows' own virtual desktops use.
---   "hide"  ShowWindow(SW_HIDE), what mshell did before 0.12.1. DWM throws the
+--   "hide"  ShowWindow(SW_HIDE), what mshell did before 0.13.0. DWM throws the
 --           window's surface away and Chromium/Electron/WPF apps shut their
 --           renderer down, so windows commonly came back BLACK.
 --
