@@ -31,6 +31,7 @@ static void config_apply_defaults(void) {
     g.mouse_follow     = false;
     g.mouse_mod_drag   = false;
     g.bar_enabled      = true;
+    g.bar_mode         = DEFAULT_BAR_MODE;
     g.bar_bottom       = false;
     g.bar_height       = DEFAULT_BAR_HEIGHT;
     g.bar_modules      = BAR_MOD_DEFAULT;
@@ -124,6 +125,7 @@ typedef struct {
     bool      auto_reload;
     bool      mouse_enabled, mouse_follow, mouse_mod_drag;
     bool      bar_enabled, bar_bottom;
+    BarMode   bar_mode;
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
@@ -178,6 +180,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->mouse_follow      = g.mouse_follow;
     s->mouse_mod_drag    = g.mouse_mod_drag;
     s->bar_enabled       = g.bar_enabled;
+    s->bar_mode          = g.bar_mode;
     s->bar_bottom        = g.bar_bottom;
     s->bar_height        = g.bar_height;
     s->bar_modules       = g.bar_modules;
@@ -271,6 +274,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.mouse_follow      = s->mouse_follow;
     g.mouse_mod_drag    = s->mouse_mod_drag;
     g.bar_enabled       = s->bar_enabled;
+    g.bar_mode          = s->bar_mode;
     g.bar_bottom        = s->bar_bottom;
     g.bar_height        = s->bar_height;
     g.bar_modules       = s->bar_modules;

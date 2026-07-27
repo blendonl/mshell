@@ -149,13 +149,36 @@
 #define DEFAULT_BAR_ACCENT        RGB(0x7a, 0xa2, 0xf7)  /* the current desktop */
 #define DEFAULT_BAR_DIM           RGB(0x6c, 0x70, 0x86)  /* the other desktops  */
 
-/* Which sections the bar draws, left to right. */
-#define BAR_MOD_DESKTOPS  0x1
-#define BAR_MOD_LAYOUT    0x2
-#define BAR_MOD_TITLE     0x4
-#define BAR_MOD_CLOCK     0x8
+/* How the bar presents itself. Same content, two shapes:
+ *
+ *   TOP_BAR   an edge-to-edge strip on every monitor, top or bottom per
+ *             `position`, which RESERVES its strip out of the work area.
+ *   FLOATING  one panel in the middle of the focused monitor, stacked rather
+ *             than laid out in a row, reserving nothing — it floats over the
+ *             windows rather than pushing them down, so it can also carry the
+ *             taller things a strip has no room for (a large clock, the date,
+ *             live notifications).
+ *
+ * More shapes are expected here (a docked side panel, per-monitor floats); the
+ * mode is a named enum rather than a bool for that reason. */
+typedef enum {
+    BAR_MODE_TOP_BAR = 0,
+    BAR_MODE_FLOATING,
+} BarMode;
+#define DEFAULT_BAR_MODE          BAR_MODE_TOP_BAR
+
+/* Which sections the bar draws — left to right in top_bar mode, top to bottom
+ * in floating mode. NOTIFICATIONS is floating-only: a one-line strip has
+ * nowhere to put a wrapped message, so in top_bar mode notify.c keeps painting
+ * its own toasts and the bit is ignored. */
+#define BAR_MOD_DESKTOPS      0x1
+#define BAR_MOD_LAYOUT        0x2
+#define BAR_MOD_TITLE         0x4
+#define BAR_MOD_CLOCK         0x8
+#define BAR_MOD_NOTIFICATIONS 0x10
 #define BAR_MOD_DEFAULT   (BAR_MOD_DESKTOPS | BAR_MOD_LAYOUT | \
-                           BAR_MOD_TITLE    | BAR_MOD_CLOCK)
+                           BAR_MOD_TITLE    | BAR_MOD_CLOCK  | \
+                           BAR_MOD_NOTIFICATIONS)
 
 /* which-key submap hint (all overridable via mshell.set_whichkey{}) */
 #define DEFAULT_WHICHKEY_DELAY    150                    /* ms; 0 = show instantly */
@@ -292,6 +315,11 @@ typedef enum {
 
     /* Open the launcher (see launcher.c for why it captures the keyboard). */
     ACTION_LAUNCHER,
+
+    /* Show/hide the status bar. Worth a binding mostly for floating mode,
+     * where the panel sits over the middle of the screen and wanting it out of
+     * the way for a moment is the normal case. */
+    ACTION_TOGGLE_BAR,
 
     /* Manual (BSP) tiling. split_h / split_v state where the NEXT window goes
      * rather than acting immediately — there is nothing to split until one
@@ -799,11 +827,15 @@ typedef struct {
      * desktop you are on — and since desktops are created and destroyed as you
      * use them, the set itself is invisible without this. */
     bool     bar_enabled;
+    BarMode  bar_mode;        /* strip on the edge, or a panel in the middle   */
     bool     bar_bottom;      /* false = top edge (default), true = bottom     */
     int      bar_height;      /* design pixels at 96 DPI; scaled per monitor   */
-    unsigned bar_modules;     /* BAR_MOD_* bitmask, drawn left to right        */
+    unsigned bar_modules;     /* BAR_MOD_* bitmask                             */
     COLORREF bar_bg, bar_fg, bar_accent, bar_dim;
-    HWND     bar_windows[MAX_MONITORS];   /* one per display, or NULL          */
+    /* One per display in top_bar mode. Floating mode uses [0] only: the panel
+     * follows the focused monitor, and a copy of it on every display would be
+     * three copies of the same clock in the middle of three screens. */
+    HWND     bar_windows[MAX_MONITORS];
 
     /* --- which-key submap hint --- */
     /* Urgency tracking is OPT-IN because it costs a hook on
@@ -1198,6 +1230,27 @@ bool     notify_init(void);
 void     notify_shutdown(void);
 void     notify_show(const wchar_t *text, NotifyKind kind, int ms);
 
+/* One live notification, copied out for a surface that is not notify.c's own
+ * toast stack (the floating bar). A copy rather than a pointer: the toast it
+ * came from can expire between the snapshot and the paint. */
+typedef struct {
+    wchar_t    text[256];
+    NotifyKind kind;
+} NotifyItem;
+
+/* Fill `out` with up to `max` live notifications, newest first, and return how
+ * many there were. */
+int      notify_recent(NotifyItem *out, int max);
+
+/* Re-decide which surface shows the live messages (our toasts or the floating
+ * bar) and repaint. Call after anything that can change the answer: a config
+ * reload, bar_reconfigure(), the toggle_bar action. */
+void     notify_resurface(void);
+
+/* The stripe/bullet colour for a notification kind, so every surface that
+ * shows one agrees on what "error" looks like. */
+COLORREF notify_kind_color(NotifyKind kind);
+
 /* ---------------------------------------------------------------------------
  * Prototypes — launcher.c
  * --------------------------------------------------------------------------- */
@@ -1281,12 +1334,21 @@ void     bar_reconfigure(void);
 
 /* Subtract the bar from each monitor's work_area so the tiler lays out beneath
  * it. Called from update_work_area(), right after monitors_update(). Fullscreen
- * windows use monitor .full and so still cover the bar, which is correct. */
+ * windows use monitor .full and so still cover the bar, which is correct.
+ * A no-op in floating mode, which reserves nothing. */
 void     bar_reserve_work_area(void);
 
 /* Rebuild the bar text and repaint if it changed. Cheap to call often — it
  * compares against what is already displayed and does nothing when equal. */
 void     bar_refresh(void);
+
+/* Show/hide the bar at runtime (the toggle_bar action), re-measuring the work
+ * area and re-tiling so a hidden top_bar gives its strip back. */
+void     bar_toggle(void);
+
+/* True when the floating panel is the surface notifications appear on, in
+ * which case notify.c does not raise its own toasts. */
+bool     bar_owns_notifications(void);
 
 /* ===========================================================================
  * Prototypes — whichkey.c (submap hint popup)
