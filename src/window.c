@@ -1119,6 +1119,21 @@ void window_set_floating(HWND hwnd, bool floating) {
      * tiled rect so re-tiling actually repositions it instead of assuming it's
      * still parked where we left it. */
     mw->has_applied = false;
+
+    /* A floating window is not in the layout, so it cannot be layout-hidden.
+     * Saying so here is not tidiness: the tiler skips floating windows on BOTH
+     * the hide and the show side, so a window that monocle was holding back
+     * when it started floating would keep the flag with nothing left that ever
+     * clears it — off the screen for good. Being off-screen because it lives on
+     * another desktop is a different question, and is left alone. */
+    if (mw->layout_hidden) {
+        mw->layout_hidden = false;
+        if (floating && mw->desktop_id == g.current_desktop_id) {
+            events_suppress_begin();
+            window_show(mw);
+            events_suppress_end();
+        }
+    }
     if (floating) {
         /* Give the frame back — unless the rule says this window is meant to
          * stay borderless, in which case floating it must not re-decorate it. */
