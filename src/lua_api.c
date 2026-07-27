@@ -977,6 +977,60 @@ static int lua_mshell_rule(lua_State *L) {
     }
     lua_pop(L, 1);
 
+    /* --- where the window goes, as opposed to how it looks ---
+     * These live in the OPTS table (third argument), beside ring/decorate,
+     * because they describe what to do with a match rather than what to match. */
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "desktop");
+        if (lua_isstring(L, -1)) {
+            u8_to_w(lua_tostring(L, -1), r->desktop, DESKTOP_NAME_MAX);
+            if (!desktop_name_ok(r->desktop)) {
+                const char *n = lua_tostring(L, -1);
+                lua_pop(L, 1);
+                return luaL_error(L, "rule: '%s' is not a usable desktop name "
+                                     "(no whitespace, 1..%d characters)",
+                                  n, DESKTOP_NAME_MAX - 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "monitor");
+        if (lua_isnumber(L, -1)) {
+            r->set_monitor = true;
+            r->monitor     = (int)lua_tointeger(L, -1);
+            if (r->monitor < 0) {
+                lua_pop(L, 1);
+                return luaL_error(L, "rule: monitor must be >= 0");
+            }
+        }
+        lua_pop(L, 1);
+
+        /* geometry = {x, y, w, h} — only meaningful for a floating window,
+         * since a tiled one's rect belongs to the layout. */
+        lua_getfield(L, 3, "geometry");
+        if (lua_istable(L, -1)) {
+            int t = lua_absindex(L, -1);
+            int v[4] = {0, 0, 0, 0};
+            for (int i = 0; i < 4; i++) {
+                lua_rawgeti(L, t, i + 1);
+                v[i] = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : 0;
+                lua_pop(L, 1);
+            }
+            if (v[2] <= 0 || v[3] <= 0) {
+                lua_pop(L, 1);
+                return luaL_error(L, "rule: geometry needs {x, y, w, h} with a "
+                                     "positive width and height");
+            }
+            r->set_geometry = true;
+            r->x = v[0]; r->y = v[1]; r->w = v[2]; r->h = v[3];
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "start_fullscreen");
+        if (lua_isboolean(L, -1)) r->start_fullscreen = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
+
     /* Only an actual boolean opts in — a missing key means "don't care", which
      * is not the same as `dialog = false` ("match everything that isn't one"). */
     lua_getfield(L, 1, "dialog");
