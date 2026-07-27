@@ -134,23 +134,41 @@ mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
 mshell.set_background(0x000000)     -- solid desktop backdrop color
 mshell.set_master_ratio(0.60)
 
--- Status bar — one per monitor, along the top by default. It reserves its
--- strip out of each monitor's work area, so tiled windows sit below it and a
--- fullscreen window still covers it.
+-- Status bar. Two modes, same content in two shapes:
+--
+--   "top_bar"   one strip per monitor, along the top by default. It reserves
+--               its strip out of each monitor's work area, so tiled windows
+--               sit below it and a fullscreen window still covers it.
+--   "floating"  one panel in the middle of the FOCUSED monitor: a large clock,
+--               the date, the desktop list, the focused title, and mshell's
+--               live notifications stacked under each other. It reserves
+--               nothing and floats over the windows (click-through), and it
+--               follows the focus between monitors rather than appearing on
+--               all of them. Bind `toggle_bar` to dismiss it when it is in the
+--               way.
+--
+-- `height` sizes the strip in top_bar mode and the type scale in both.
 --
 -- `modules` REPLACES the default set rather than adding to it, so listing only
 -- some of them turns the rest off: modules = {"desktops"} gives a bar with
--- nothing but the desktop list.
+-- nothing but the desktop list. "notifications" applies to floating mode only
+-- — a one-line strip has nowhere to wrap a message — and with it on the panel
+-- becomes the surface mshell's messages appear on instead of its own toasts.
 mshell.set_bar({
     enabled  = true,
-    position = "top",        -- or "bottom"
+    mode     = "top_bar",    -- or "floating"
+    position = "top",        -- or "bottom"; top_bar mode only
     height   = 28,           -- design pixels at 96 DPI; scaled per monitor
     bg       = 0x1e1e2e,
     fg       = 0xcdd6f4,
-    accent   = 0x7aa2f7,     -- the current desktop
-    dim      = 0x6c7086,     -- the other desktops
-    modules  = { "desktops", "layout", "title", "clock" },
+    accent   = 0x7aa2f7,     -- the current desktop (and the panel's outline)
+    dim      = 0x6c7086,     -- the other desktops (and the date)
+    modules  = { "desktops", "layout", "title", "clock", "notifications" },
 })
+
+-- Show/hide the bar without a reload — mostly for floating mode, where the
+-- panel sits over the middle of the screen:
+-- mshell.bind({"win"}, "b", "toggle_bar")
 
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call
@@ -226,9 +244,23 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- window. Uncomment to guarantee a fully-tiled desktop:
 -- mshell.set_float_policy("never")
 
--- When windows DO float (the default policy), keep them above the tiled grid
--- instead of letting them sink behind a tiled window:
--- mshell.set_float_on_top(true)
+-- Floating windows stay above the tiled grid, through focus changes too. Turn
+-- this off to make a float an ordinary window in the stack, which sinks behind
+-- whatever you focus next:
+-- mshell.set_float_on_top(false)
+
+-- Where a floating window goes. A float is the window you are looking at — the
+-- one deliberately kept out of the grid — so by default mshell centres it on
+-- its monitor instead of leaving it wherever the app happened to open it. This
+-- covers both a window that opens floating (a "float" rule, or a desktop with
+-- float = true) and one Win+f just took out of the grid. Position only: the
+-- size stays the app's own, clamped to the monitor. "none" restores the old
+-- behaviour of never moving a float:
+-- mshell.set_float_placement("none")
+--
+-- Per app, either way, in the rule's opts: `center = false` leaves that one
+-- app's windows alone, `center = true` centres them under a config that set
+-- "none". A rule with an explicit `geometry` already overrides both.
 
 -- Also tile owned/dialog windows (aggressive — modal dialogs tile poorly):
 -- mshell.set_manage_owned(true)
@@ -674,7 +706,11 @@ mshell.rule({ process = "Taskmgr.exe" }, "float")
 
 -- Flow Launcher: its search box is a transient popup, not a window to tile.
 -- Float it and drop the focus ring so mshell leaves the overlay alone.
-mshell.rule({ process = "Flow.Launcher.exe" }, "float", { ring = false })
+-- `center = false` because it already places itself where a launcher belongs —
+-- centred horizontally, high on the screen — and the default centring would
+-- drop it to the middle of the display, which is not where you look for it.
+mshell.rule({ process = "Flow.Launcher.exe" },
+            "float", { ring = false, center = false })
 
 -- --- System dialogs: file pickers, message boxes, permission prompts ---
 --
@@ -734,6 +770,8 @@ mshell.rule({ class = "OperationStatusWindow" }, "float")
 --   decorate = false  strip the title bar and add no border — floating windows
 --                     normally keep their own chrome, this makes them bare
 --   fullscreen = true park it over the monitor's full bounds, ignoring gaps
+--                     (this one also settles where the window goes, so the
+--                     default centring never applies to it)
 -- Long-bracket strings ([[...]]) keep Windows paths readable — no \\ escaping.
 -- Matching on `path` rather than on each .exe means one rule covers everything
 -- installed in a folder, including games you haven't bought yet. Naming a

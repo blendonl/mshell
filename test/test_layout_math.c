@@ -100,5 +100,47 @@ int main(void) {
         }
     }
 
+    /* --- center_axis(): where a floating window sits on its monitor ------- */
+
+    /* The ordinary case, on a monitor that does not start at zero — a second
+     * display's origin is its position in the virtual desktop, and forgetting
+     * to add it is how a "centred" window lands on the primary instead. */
+    CHECK(center_axis(0, 1920, 800) == 560, "1920/800 gave %d, expected 560",
+          center_axis(0, 1920, 800));
+    CHECK(center_axis(1920, 1920, 800) == 2480,
+          "second monitor gave %d, expected 2480", center_axis(1920, 1920, 800));
+    CHECK(center_axis(-1080, 1080, 500) == -790,
+          "monitor left of the primary gave %d, expected -790",
+          center_axis(-1080, 1080, 500));
+
+    /* An odd leftover goes left/up, and the whole box stays inside the span. */
+    CHECK(center_axis(0, 1001, 500) == 250, "odd leftover gave %d, expected 250",
+          center_axis(0, 1001, 500));
+    CHECK(center_axis(0, 1000, 999) == 0, "one spare pixel gave %d, expected 0",
+          center_axis(0, 1000, 999));
+
+    /* Symmetry: the gap left of the box equals the gap right of it, or is one
+     * pixel smaller. This is the property centring actually promises. */
+    for (int span = 1; span <= 400; span++) {
+        for (int size = 0; size <= span; size++) {
+            int x = center_axis(100, span, size);
+            int before = x - 100, after = (100 + span) - (x + size);
+            CHECK(before >= 0 && after >= 0 && after - before >= 0 &&
+                  after - before <= 1,
+                  "span %d size %d: %d before, %d after", span, size,
+                  before, after);
+        }
+    }
+
+    /* A box bigger than the span is pinned to the origin, not centred off the
+     * left edge — a window wider than the monitor, or a monitor we have no
+     * metrics for at all. */
+    CHECK(center_axis(0, 1920, 2400) == 0, "oversized gave %d, expected 0",
+          center_axis(0, 1920, 2400));
+    CHECK(center_axis(50, 0, 0) == 50, "empty span gave %d, expected 50",
+          center_axis(50, 0, 0));
+    CHECK(center_axis(50, -10, 100) == 50, "negative span gave %d, expected 50",
+          center_axis(50, -10, 100));
+
     return tests_report("layout_math");
 }

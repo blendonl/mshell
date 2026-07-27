@@ -7,6 +7,29 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Added
 
+- **The status bar has modes: `top_bar` and `floating`.** `set_bar{ mode =
+  ... }` picks between them and nothing else about the call changes; `top_bar`
+  is the default and is exactly the bar that already existed. `floating` is one
+  panel in the middle of the FOCUSED monitor instead of a strip on every one:
+  the time large, the date under it, the desktops and layout, the focused
+  title. It reserves nothing out of the work area — it floats over the windows
+  rather than pushing them down — is click-through, and follows the focus
+  between displays rather than putting three copies of the same clock on three
+  screens. The mode is a named enum rather than a bool because more shapes are
+  expected here.
+- **The floating panel lists notifications inline**, via a `"notifications"`
+  module. That module is what the extra height buys: a one-line strip has
+  nowhere to wrap a message, which is why notifications had to be their own
+  window in the first place. When the panel is showing them, notify.c stands
+  its own toasts down rather than showing everything twice; turn the module
+  off, switch modes, or hide the bar and the toasts come straight back. The
+  toast stack remains the state either way, so expiry and stacking behave
+  identically on both surfaces.
+- **`toggle_bar`** — show or hide the bar without a config reload, re-measuring
+  the work area and re-tiling so a hidden `top_bar` gives its strip back. It
+  exists mostly for floating mode, where the panel sits over the middle of the
+  screen and wanting it gone for a moment is the normal case. Bindable, and
+  reachable over the control channel as `mshell.exe --msg toggle_bar`.
 - **The which-key panel is fully configurable.** It had four colours and a
   delay; everything that decided its shape was a `#define`, so the one overlay
   whose whole job is to be read was also the one you could not fit to your
@@ -32,14 +55,66 @@ All notable changes to mshell are documented here. This project adheres to
   All of it applies on reload, without restarting. Defaults are unchanged, so
   an existing `init.lua` gets the same panel it had.
 
+### Fixed
+
+- **Floating windows no longer sink behind tiled ones when the focus moves.**
+  The z-order pass that raises floats ran only at the end of a tiling pass, and
+  focusing a window is not a tiling pass: activation raises the window you moved
+  to, so focusing a tiled window — with a keybind, with a click, or by
+  focus-follows-mouse — put it straight over the float you had been looking at,
+  with nothing left to put the float back. Every focus change now re-asserts it,
+  from `window_focus()` and from the foreground WinEvent, which is the only
+  place that hears about a click.
+
+- **Floats keep their order among themselves.** The pass raised them in desktop
+  order, so two overlapping floats swapped places whenever it ran. It now walks
+  the system z-order and re-stacks them as they were, with the focused float on
+  top. Floats already in the topmost band (`toggle_always_on_top`, fullscreen)
+  are left to the topmost pass rather than threaded into that chain — placing a
+  window after a topmost one promotes it, which would have dragged the others up
+  with it.
+
+- **The focus ring sits on its window, not at the top of the stack.** It was
+  pinned to `HWND_TOP`, which with floats above the grid meant the ring of a
+  covered tiled window painted a coloured line across the float on top of it.
+
+### Changed
+
+- **`set_float_on_top` now defaults to true.** A window you floated is an
+  overlay — a picture-in-picture, a calculator, a dialog — and having it
+  disappear behind the grid on the next keystroke is not what floating it
+  meant. `mshell.set_float_on_top(false)` restores the old behaviour.
+
+- **Floating windows are centred on their monitor.** Where a float SITS was the
+  one thing about it nobody owned: its size is the app's business and the layout
+  never touches its rect, so it opened wherever that app last happened to be or
+  at the next step of Windows' cascade — which, on a shell with no taskbar and
+  no desktop behind it, reads as "somewhere near the top left, for no reason".
+  The window deliberately kept out of the grid is also the one being looked at,
+  so it now goes in the middle: both the window that opens floating (a `"float"`
+  rule, a `dialog` rule, a desktop with `float = true`) and the one `Win+f` just
+  took out of the grid.
+
+  Position only — the size stays whatever the app asked for, clamped to fit. The
+  monitor's *work area*, not its full bounds, so a centred window never slides
+  under the bar. A rule's `geometry` and `fullscreen = true` both place the
+  window themselves and are unaffected, as are minimised, maximised and
+  fullscreen windows.
+
+  `mshell.set_float_placement("none")` restores the old behaviour, and
+  `center = false` in a rule's opts answers for one app — worth setting on an
+  overlay that already positions itself, which is why the example config now
+  passes it to the Flow Launcher rule. `center = true` opts a single app in
+  under a config that set `"none"`.
+
 ### Internal
 
-- **`whichkey_math.c`** — the panel's grid arithmetic (how many columns, what
-  gives way to a maximum size, where an anchor lands) split out with no Windows
-  in it, and covered by `make test` alongside `match.c` and `layout_math.c`.
-  The panel is drawn on a screen nobody is watching while the config that
-  shapes it is being written, which makes "it looked right" the one check that
-  was never available.
+- **`whichkey_math.c`** — the which-key panel's grid arithmetic (how many
+  columns, what gives way to a maximum size, where an anchor lands) split out
+  with no Windows in it, and covered by `make test` alongside `match.c` and
+  `layout_math.c`. The panel is drawn on a screen nobody is watching while the
+  config that shapes it is being written, which makes "it looked right" the one
+  check that was never available.
 - `overlay_font_face()` extends the shared overlay font cache with a family
   name; the cache key gains the face, so the other overlays keep their font and
   their single rebuild-on-DPI-change.

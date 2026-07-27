@@ -23,3 +23,17 @@
  * or nonsensical cfact should do. `n <= 0` writes nothing.
  */
 void split_span(int span, const float *facts, int n, int *out);
+
+/*
+ * Where a box of `size` starts when it is centred in the span that begins at
+ * `origin` and runs for `span` pixels. This is how a floating window finds the
+ * middle of its monitor (see window_center_float).
+ *
+ * An odd leftover biases the box towards the origin — left and up — because
+ * that is the edge a window's own controls hang off, and because doing it the
+ * other way makes a stack of same-sized windows drift right a pixel at a time.
+ * A box that does not fit is pinned to `origin` rather than being centred to a
+ * negative coordinate: half off the left of the screen is worse than flush
+ * against it. `span <= 0` therefore also answers `origin`.
+ */
+int center_axis(int origin, int span, int size);

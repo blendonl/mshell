@@ -107,9 +107,15 @@ void border_refresh(void) {
     DeleteObject(inner);
     SetWindowRgn(g.border_window, outer, FALSE);  /* window now owns `outer` */
 
-    /* HWND_TOP places the ring just above the focused window, which itself
-     * was just raised by window_focus(). */
-    SetWindowPos(g.border_window, HWND_TOP, x, y, w, h,
+    /* Directly above the window it belongs to, rather than HWND_TOP: with
+     * floats kept over the tiled grid, a ring pinned to the very top would draw
+     * itself across the float covering the focused window — a coloured line
+     * over unrelated content. Sitting on the window instead means whatever is
+     * legitimately above that window covers the ring too.
+     *
+     * A topmost `focus` (fullscreen, always-on-top) pulls the ring into the
+     * topmost band with it, which is exactly where it is wanted. */
+    SetWindowPos(g.border_window, focus, x, y, w, h,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(g.border_window, NULL, TRUE);
 }
