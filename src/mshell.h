@@ -231,6 +231,27 @@ typedef enum {
      * why dispatch stamps the config generation alongside it) */
     ACTION_LUA_CALL,
 
+    /* Session / power. Replacing Explorer removes every other route to these:
+     * there is no Start menu, and `quit` is not a substitute because exiting as
+     * the shell ends the session however you meant it. */
+    ACTION_LOCK,
+    ACTION_LOGOFF,
+    ACTION_REBOOT,
+    ACTION_SHUTDOWN,
+    ACTION_SLEEP,
+    ACTION_HIBERNATE,
+
+    /* Media. A keyboard with dedicated volume keys already works (Windows
+     * handles those below our hook); one without had no route to volume at all,
+     * since every Win+key belongs to mshell. */
+    ACTION_VOLUME_UP,
+    ACTION_VOLUME_DOWN,
+    ACTION_VOLUME_MUTE,
+    ACTION_MEDIA_PLAY,
+    ACTION_MEDIA_NEXT,
+    ACTION_MEDIA_PREV,
+    ACTION_MEDIA_STOP,
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -917,6 +938,17 @@ void     desktop_remove_window(HWND hwnd);
 int      desktop_of_window(HWND hwnd);   /* desktop id, or 0 when unmanaged */
 void     desktop_focus_update(HWND hwnd);
 HWND     desktop_last_window(void);      /* previous focus on THIS desktop */
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — system.c (session/power actions, media keys)
+ * --------------------------------------------------------------------------- */
+void     system_lock(void);
+void     system_logoff(void);
+void     system_reboot(void);
+void     system_shutdown(void);
+void     system_sleep(void);
+void     system_hibernate(void);
+void     system_media_key(Action action);
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything
  * that can empty a desktop; it decides for itself whether there's work to do. */
