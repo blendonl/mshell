@@ -1328,6 +1328,54 @@ void window_kill(HWND hwnd) {
 }
 
 /* ===========================================================================
+ * Undo cloaking left behind by a previous mshell that did not shut down.
+ *
+ * Hiding a desktop's windows by cloaking them means a crash — or a kill that
+ * never reaches the crash handler — can leave windows cloaked with nobody to
+ * uncloak them. That is a window the user cannot get back: it is not in
+ * Alt+Tab (Windows excludes cloaked windows, which is how its own virtual
+ * desktops work), and is_manageable rejects cloaked windows, so the fresh
+ * mshell coming up behind the dead one would not adopt it either. Winlogon's
+ * AutoRestartShell makes that restart the normal case, so this runs first,
+ * before the enumeration that would otherwise skip them.
+ *
+ * Only DWM_CLOAKED_SHELL is touched. That is what a cloak applied from outside
+ * the owning process reads back as — i.e. ours. DWM_CLOAKED_APP is the app
+ * hiding itself (a suspended store app) and DWM_CLOAKED_INHERITED is a window
+ * following its owner; both belong to somebody else.
+ *
+ * Skipped in --test mode, and this is the whole reason for the flag here:
+ * explorer is alive there, and Windows' own virtual desktops cloak the windows
+ * of every desktop you are not on with exactly the same DWM_CLOAKED_SHELL.
+ * Sweeping would haul them all onto the desktop you are looking at.
+ * =========================================================================== */
+static BOOL CALLBACK uncloak_stray_proc(HWND hwnd, LPARAM lp) {
+    int *n = (int *)lp;
+
+    /* Cheap rejections first: the sweep visits every top-level window on the
+     * system, and DwmGetWindowAttribute is an RPC into dwm.exe. */
+    if (!IsWindowVisible(hwnd)) return TRUE;
+
+    int cloaked = 0;
+    if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                                     &cloaked, sizeof(cloaked))))
+        return TRUE;
+    if (cloaked != DWM_CLOAKED_SHELL) return TRUE;
+
+    if (dwm_set_cloaked(hwnd, false)) (*n)++;
+    return TRUE;
+}
+
+void window_uncloak_strays(void) {
+    if (g.test_mode) return;
+
+    int n = 0;
+    EnumWindows(uncloak_stray_proc, (LPARAM)&n);
+    if (n) log_err(L"startup: uncloaked %d window(s) a previous mshell left "
+                   L"hidden", n);
+}
+
+/* ===========================================================================
  * Enumerate & manage all existing windows at startup
  * =========================================================================== */
 static BOOL CALLBACK enum_windows_proc(HWND hwnd, LPARAM lp) {
@@ -1340,5 +1388,6 @@ static BOOL CALLBACK enum_windows_proc(HWND hwnd, LPARAM lp) {
 }
 
 void window_manage_existing(void) {
+    window_uncloak_strays();
     EnumWindows(enum_windows_proc, 0);
 }
