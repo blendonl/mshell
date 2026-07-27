@@ -1087,6 +1087,10 @@ void     window_restore_all_decorations(void);
 void     window_restore_all_visibility(void);
 void     window_set_floating(HWND hwnd, bool floating);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
+/* The float half of the pass on its own — every focus change re-asserts it,
+ * because activating a tiled window raises it over the floats. No-op unless
+ * float_on_top is set. */
+void     window_raise_floats(void);
 bool     window_frame_rect(HWND hwnd, RECT *out);  /* DWM visible-frame bounds  */
 
 /* Expand a desired *visible* frame into the window rect SetWindowPos wants,
