@@ -435,15 +435,16 @@ void desktop_switch(const wchar_t *name) {
      *    are not ours to reveal, and switching to a desktop must not un-tray
      *    everything parked on it.
      *
-     *    A window the LAYOUT is holding back (monocle's unfocused windows, the
-     *    unshown side of a tabbed container) is skipped too, so it is not
-     *    revealed here only for the tile pass below to hide it again a frame
-     *    later. collect_clients recomputes the flag every pass, so a stale one
-     *    cannot strand a window: the tiler clears it and this then shows it. */
+     *    Everything else is shown unconditionally, including windows the LAYOUT
+     *    was holding back (monocle's unfocused windows, the unshown side of a
+     *    tabbed container). Skipping those to save an uncloak/recloak looks
+     *    tempting and is not worth it: this loop is the only thing that brings
+     *    a desktop back, so any window it declines to show is a window that
+     *    stays invisible if the flag is wrong for any reason. The tile pass at
+     *    step 5 hides them again in the same turn of the message loop, before
+     *    anything is composited. Correct beats clever here. */
     for (int i = 0; i < new_dt->count; i++) {
-        ManagedWindow *mw = window_find(new_dt->windows[i]);
-        if (!mw || mw->layout_hidden) continue;
-        window_show(mw);
+        window_show(window_find(new_dt->windows[i]));
     }
 
     g.current_desktop_id = target_id;

@@ -441,25 +441,32 @@ typedef enum {
  * Hide policy — HOW a window is taken off the screen.
  *
  * Virtual desktops, monocle and the scratchpad all work by removing a window
- * from view, and there are two ways to do that. They are not equivalent:
+ * from view, and there are two ways to do that:
  *
  *   HIDE_CLOAK (default)
- *       DwmSetWindowAttribute(DWMWA_CLOAK). The window keeps WS_VISIBLE and
- *       keeps its DWM redirection surface — it goes on rendering, DWM simply
- *       stops compositing it onto the screen. This is precisely the mechanism
- *       Windows' own virtual desktops use, so every application is already
- *       tested against it.
+ *       DwmSetWindowAttribute(DWMWA_CLOAK). The window keeps WS_VISIBLE and is
+ *       not torn down; DWM stops compositing it onto the screen. This is the
+ *       mechanism Windows' own virtual desktops use, so applications are at
+ *       least tested against it.
  *
  *   HIDE_SHOWWINDOW
- *       ShowWindow(SW_HIDE), which is what mshell used to do unconditionally.
- *       Clearing WS_VISIBLE makes DWM tear the window's redirection surface
- *       down, and apps that render off the UI thread — anything Chromium or
- *       Electron based, WPF, Qt on D3D — additionally see it as "occluded" and
- *       shut their compositor down. On the way back a fresh, EMPTY surface is
- *       created and nothing asks the app to present into it, so the window
- *       comes back BLACK until something forces a repaint. Kept as an escape
- *       hatch for a setup where cloaking misbehaves; the show path forces the
- *       repaint that this mode needs.
+ *       ShowWindow(SW_HIDE). Clearing WS_VISIBLE makes DWM tear the window's
+ *       redirection surface down outright.
+ *
+ * NEITHER is enough on its own, and assuming cloaking was is what shipped a
+ * broken fix once already. An app that renders off the UI thread — anything
+ * Chromium or Electron based, WPF, Qt on D3D — stops presenting when it
+ * believes nobody is looking, and it forms that belief either way: from the
+ * hide, or from its own occlusion tracking noticing the cloak. What decides
+ * whether the window comes back BLACK is not how it was hidden but whether
+ * anything asks it to draw on the way back, and nothing does by default: the
+ * window is exactly where the layout already wants it, so the tiler's
+ * no-op-move skip means it gets no SetWindowPos either.
+ *
+ * window_show() therefore always nudges — RedrawWindow plus a forced
+ * re-placement carrying SWP_FRAMECHANGED | SWP_NOCOPYBITS — whichever
+ * mechanism was used. The choice below is then only about flicker and about
+ * what a window looks like to the rest of the system while it is away.
  * --------------------------------------------------------------------------- */
 typedef enum {
     HIDE_CLOAK = 0,
@@ -648,6 +655,13 @@ typedef struct {
                                       * per window so a policy change mid-
                                       * session still un-hides the way the
                                       * window was hidden.                     */
+    bool      needs_repaint;         /* it just came back on screen, so the next
+                                      * placement must NOT be skipped for being
+                                      * a no-op move — that SetWindowPos is what
+                                      * shakes a stale surface out of an app
+                                      * that stopped drawing while hidden. Set
+                                      * by window_show, consumed and cleared by
+                                      * the tiling pass.                       */
     bool      made_topmost;          /* WE put it in the topmost band to keep
                                       * always-on-top windows off a fullscreen
                                       * one — so only WE take it back out. A
