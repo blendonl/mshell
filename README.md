@@ -469,7 +469,7 @@ removed decides whether they come back looking right. mshell **cloaks** them
 through DWM — the window keeps rendering and DWM simply stops compositing it,
 which is exactly the mechanism Windows' own virtual desktops use.
 
-The obvious alternative, `ShowWindow(SW_HIDE)`, is what mshell did before 0.12.1
+The obvious alternative, `ShowWindow(SW_HIDE)`, is what mshell did before 0.13.0
 and it has a visible failure mode: clearing a window's visible bit makes DWM
 throw away its redirection surface, and every app that renders off the UI thread
 — anything Chromium or Electron based (Chrome, VS Code, Discord, Spotify), WPF,
@@ -481,7 +481,7 @@ and a whole desktop's worth of apps could come back blank at once.
 
 ```lua
 mshell.set_hide_policy("cloak")   -- default
-mshell.set_hide_policy("hide")    -- pre-0.12.1 ShowWindow(SW_HIDE)
+mshell.set_hide_policy("hide")    -- pre-0.13.0 ShowWindow(SW_HIDE)
 ```
 
 `"hide"` is kept as an escape hatch, and on that path mshell now forces a repaint
