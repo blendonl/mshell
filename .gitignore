@@ -26,3 +26,6 @@ Thumbs.db
 /test/test_match
 /test/test_layout_math
 /mshelld.exe
+
+# Claude Code session state and worktrees — never part of the project.
+.claude/

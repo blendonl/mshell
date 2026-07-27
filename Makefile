@@ -212,16 +212,29 @@ check-lua:
 	fi
 
 # Regenerate the shipped .reg files from the table in src/tweaks.c, so the
-# files and the in-process implementation cannot drift. Needs wine to run the
+# files and the in-process implementation cannot drift.
+#
+# Generated into a temp directory and moved into place only once every file is
+# non-empty. Redirecting straight onto the real files truncates them BEFORE the
+# command runs, so a missing wine — or any failure mid-sequence — left a
+# zero-byte harden.reg behind, which install.bat imports automatically and which
+# would therefore have silently disabled every keyboard tweak. Needs wine to run the
 # cross-compiled binary; skipped with a clear message when it is absent, since
 # the checked-in files are perfectly usable without regenerating them.
 regs: $(TARGET)
 	@if command -v wine >/dev/null 2>&1; then \
 	    echo "  REGS  harden/debloat"; \
-	    wine ./$(TARGET) --tweaks reg      input  > harden.reg; \
-	    wine ./$(TARGET) --tweaks reg-undo input  > harden-undo.reg; \
-	    wine ./$(TARGET) --tweaks reg      visual > debloat.reg; \
-	    wine ./$(TARGET) --tweaks reg-undo visual > debloat-undo.reg; \
+	    set -e; \
+	    tmp=$$(mktemp -d); \
+	    wine ./$(TARGET) --tweaks reg      input  > "$$tmp/harden.reg"; \
+	    wine ./$(TARGET) --tweaks reg-undo input  > "$$tmp/harden-undo.reg"; \
+	    wine ./$(TARGET) --tweaks reg      visual > "$$tmp/debloat.reg"; \
+	    wine ./$(TARGET) --tweaks reg-undo visual > "$$tmp/debloat-undo.reg"; \
+	    for f in harden harden-undo debloat debloat-undo; do \
+	        test -s "$$tmp/$$f.reg" || { echo "  ERROR $$f.reg came out empty"; rm -rf "$$tmp"; exit 1; }; \
+	    done; \
+	    mv "$$tmp"/*.reg .; \
+	    rm -rf "$$tmp"; \
 	else \
 	    echo "  SKIP  regs — wine not installed (the .reg files are checked in)"; \
 	fi
