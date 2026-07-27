@@ -1465,7 +1465,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_CONTAINER_PREV: layout_tree_cycle_container(-1); break;
     case ACTION_SPLIT_GROW:     layout_tree_resize(+0.05f); break;
     case ACTION_SPLIT_SHRINK:   layout_tree_resize(-0.05f); break;
-    case ACTION_LAYOUT_BSP:     dt->layout = LAYOUT_BSP; tile_current(); break;
+    case ACTION_LAYOUT_BSP:     dt->layout = LAYOUT_BSP; tile_current(); session_save(); break;
 
     case ACTION_JUMP_URGENT: {
         for (int i = 0; i < g.managed_count; i++) {
