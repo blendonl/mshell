@@ -3,6 +3,9 @@
 *.obj
 *.lto
 
+# Version stamp — makes a VERSION bump invalidate the objects that bake it in
+.version-*
+
 # Build output / release artifacts
 /mshell.exe
 /dist/
