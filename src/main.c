@@ -63,7 +63,7 @@ static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
     window_restore_all_visibility();
     session_save();
 
-    if (g.logfile) { fflush(g.logfile); fclose(g.logfile); g.logfile = NULL; }
+    log_shutdown();
     return EXCEPTION_CONTINUE_SEARCH;   /* let it crash properly / be reported */
 }
 
@@ -497,12 +497,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      *             exits; respects the taskbar).
      * --shell   : we ARE the Windows shell (set in the Winlogon Shell key).
      *             Quitting logs the session out.
-     * --verbose : enable debug logging (off by default). */
+     * --verbose : raise the log level to DEBUG (INFO by default). */
     g.test_mode     = has_flag(lpCmdLine, "--test") || has_flag(lpCmdLine, "-t");
     bool shell_mode = has_flag(lpCmdLine, "--shell");
-    g.verbose       = has_flag(lpCmdLine, "--verbose") || has_flag(lpCmdLine, "-v");
+    bool verbose    = has_flag(lpCmdLine, "--verbose") || has_flag(lpCmdLine, "-v");
 
-    /* --- open %TEMP%\mshell.log ALWAYS, not just under --verbose.
+    /* --- open the log ALWAYS, not just under --verbose.
      *
      * As the shell there is no console, no taskbar and no tray, so this file is
      * the only place a failure can be reported. It used to be created only with
@@ -510,17 +510,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * keymap that replaces it) logged its reason into a file that did not
      * exist — presenting as "none of my keybinds work" with nothing to go on.
      *
-     * The file stays tiny without --verbose: log_err() writes only real
-     * failures, while the per-keystroke log_w() tracing is still gated. Config
-     * can turn the chatty side on at runtime via mshell.set_verbose(true). --- */
-    {
-        wchar_t logpath[MAX_PATH];
-        if (GetTempPathW(MAX_PATH, logpath)) {
-            wcsncat(logpath, L"mshell.log", MAX_PATH - wcslen(logpath) - 1);
-            g.logfile = _wfopen(logpath, L"w, ccs=UTF-8");
-        }
-    }
-    log_err(L"=== mshell v%hs starting ===", MSHELL_VERSION);
+     * The file stays small at the default level: only ERROR/WARN/INFO are
+     * written, while the per-keystroke log_w() tracing is DEBUG and stays off.
+     * Config can raise it at runtime via mshell.set_log_level("debug"). --- */
+    log_init(L"mshell", verbose ? LOG_DEBUG : LOG_INFO);
+    log_msg(LOG_INFO, L"=== mshell v%hs starting ===", MSHELL_VERSION);
 
     /* Armed as early as the log exists: a crash before this point has nothing
      * to restore anyway (no window is hidden until a desktop switch). */
@@ -777,10 +771,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         DestroyWindow(g.message_window);
     }
 
-    log_w(L"mshell exited");
-    if (g.logfile) {
-        fclose(g.logfile);
-        g.logfile = NULL;
-    }
+    log_msg(LOG_INFO, L"mshell exited");
+    log_shutdown();
     return 0;
 }

@@ -33,6 +33,8 @@
 #include <ctype.h>
 #include <wctype.h>
 
+#include "log.h"
+
 /* ---------------------------------------------------------------------------
  * Lua forward declarations — need the real headers at compile time
  * --------------------------------------------------------------------------- */
@@ -682,9 +684,8 @@ typedef struct {
                                * auto-reload (which would execute it silently on
                                * any write) is disabled — see config_watch_sync */
 
-    /* --- logging (DebugView + %TEMP%\mshell.log) --- */
-    bool     verbose;
-    FILE    *logfile;
+    /* Logging state lives in log.c, not here: mshelld.exe shares that
+     * translation unit and has no MShell to hang it off. */
 } MShell;
 
 /* ---------------------------------------------------------------------------
@@ -1059,42 +1060,14 @@ static inline void events_suppress_begin(void) { g.suppress_depth++; }
 static inline void events_suppress_end(void)   { if (g.suppress_depth > 0) g.suppress_depth--; }
 static inline bool events_suppressed(void)     { return g.suppress_depth > 0; }
 
-/* Debug logging. GUI-subsystem apps have no usable stderr, so we emit via
- * OutputDebugStringW — watch it live with Sysinternals DebugView (run as
- * admin, enable "Capture Global Win32") or any attached debugger. */
-static inline void log_vw(const wchar_t *fmt, va_list ap) {
-    wchar_t buf[1024];
-    _vsnwprintf(buf, 1023, fmt, ap);
-    buf[1023] = L'\0';
-    OutputDebugStringW(buf);
-    OutputDebugStringW(L"\n");
-    if (g.logfile) {
-        fputws(buf, g.logfile);
-        fputwc(L'\n', g.logfile);
-        fflush(g.logfile);
-    }
-}
-
-/* Chatty tracing — per-keystroke matches, tiling passes, focus changes. Costs
- * nothing unless --verbose, and would drown the log if it were always on. */
-static inline void log_w(const wchar_t *fmt, ...) {
-    if (!g.verbose) return;
-    va_list ap;
-    va_start(ap, fmt);
-    log_vw(fmt, ap);
-    va_end(ap);
-}
-
-/* Failures the user has to be able to diagnose — ALWAYS written, --verbose or
- * not. As the Windows shell there is no console, no taskbar and no tray to
- * report into, so the log file is the only channel there is; a rejected config
- * that logged nothing is indistinguishable from "mshell ignored my keybinds".
- * Reserve this for things that are actually wrong (config load failed, fallback
- * keymap in use, a spawn that didn't launch) so the file stays a few lines long
- * in normal operation. */
-static inline void log_err(const wchar_t *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    log_vw(fmt, ap);
-    va_end(ap);
-}
+/* Logging lives in log.c / log.h, which mshell.h includes at the top.
+ *
+ * log_err() and log_w() are still the two names to reach for and still mean
+ * what they did: log_err is ERROR and is always written — as the shell there is
+ * no console, taskbar or tray, so the file is the only channel, and a rejected
+ * config that logged nothing is indistinguishable from "mshell ignored my
+ * keybinds". log_w is DEBUG: per-keystroke matches, tiling passes, focus
+ * changes, off until the level is raised. Reserve log_err for things that are
+ * actually wrong so the file stays a few lines long in normal operation, and
+ * use log_msg(LOG_INFO, ...) / log_msg(LOG_WARN, ...) for the middle ground
+ * that previously had to borrow one of the two. */
