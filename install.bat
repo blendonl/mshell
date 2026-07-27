@@ -15,14 +15,45 @@ REM  the end so the build you just installed is the one running
 REM  — no sign-out. Your config is the one thing never
 REM  overwritten.
 REM
-REM  Per-user (HKCU) is deliberate: it only affects THIS
-REM  account and is trivially reversible with uninstall.bat.
-REM  Run it as the account that will use mshell — HKCU and
-REM  %APPDATA% both follow whoever runs this script.
+REM  Per-user (HKCU) is the DEFAULT and is deliberate: it only
+REM  affects THIS account and is trivially reversible with
+REM  uninstall.bat. Run it as the account that will use mshell
+REM  — HKCU and %APPDATA% both follow whoever runs this script.
+REM
+REM  install.bat /machine sets the shell for EVERY account on
+REM  the machine (HKLM). It needs an elevated prompt, and it is
+REM  a much bigger commitment: get it wrong and every user signs
+REM  in to a black screen, not just you. There is deliberately
+REM  no way to do it by accident.
 REM ============================================================
 setlocal
 set DEST=C:\mshell
 set CFGDIR=%APPDATA%\mshell
+
+REM  --- per-user or machine-wide? ---
+set "HIVE=HKCU"
+set "SCOPE=per-user"
+if /I "%~1"=="/machine" (
+    set "HIVE=HKLM"
+    set "SCOPE=MACHINE-WIDE"
+    REM  Writing HKLM\...\Winlogon needs administrator rights. Checked here so
+    REM  the failure is a sentence rather than an opaque "Access is denied"
+    REM  halfway through an install that has already copied files.
+    net session >nul 2>&1 || (
+        echo.
+        echo  ERROR: /machine needs an elevated prompt.
+        echo         Right-click cmd.exe and pick "Run as administrator".
+        echo.
+        exit /b 1
+    )
+    echo.
+    echo  *** MACHINE-WIDE INSTALL ***
+    echo  Every account on this computer will get mshell as its shell.
+    echo  Each user still needs their own %%APPDATA%%\mshell\init.lua;
+    echo  without one they land on the six-binding fallback keymap.
+    echo.
+    choice /C YN /M "  Continue" || exit /b 1
+)
 
 REM  --- is there a live mshell to replace? ---
 REM  Settled up front, before we touch anything: both the locked-exe handling
@@ -89,9 +120,9 @@ REM  refreshed: it is reference material, not your config, so there is nothing
 REM  in it to preserve and an out-of-date copy would document the wrong release.
 copy /Y "%~dp0config\init.full.lua" "%CFGDIR%\init.full.lua" >nul 2>&1
 
-echo  Pointing the per-user shell at %DEST%\mshell.exe ...
-reg add "HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" ^
-    /v Shell /t REG_SZ /d "C:\mshell\mshell.exe --shell" /f >nul || goto :fail
+echo  Pointing the %SCOPE% shell at %DEST%\mshell.exe ...
+reg add "%HIVE%\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" ^
+    /v Shell /t REG_SZ /d "%DEST%\mshell.exe --shell" /f >nul || goto :fail
 
 echo  Applying registry hardening (harden.reg) ...
 REM  All registry hardening lives in harden.reg (single source of truth):

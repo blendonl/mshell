@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mshell.wxs — MSI definition, built on Linux with wixl (msitools).
+
+  DELIBERATELY MINIMAL, and it does NOT set the Winlogon Shell key.
+
+  Installing the files and making mshell your shell are different decisions with
+  very different blast radii: the first is reversible by uninstalling, the second
+  can leave you staring at a black screen if anything is wrong. An installer that
+  did both would make "try mshell" and "replace my desktop" the same click.
+
+  So the MSI lays down C:\Program Files\mshell and stops. `mshell.exe --test`
+  runs it alongside Explorer; install.bat is what commits.
+
+  UNSIGNED — there is no code-signing certificate, so SmartScreen will warn on
+  first run. The release zip remains the primary artifact.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="mshell"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="mshell"
+           UpgradeCode="6f1c9a52-3d84-4a71-9d0e-2f0a6b5c8e13">
+
+    <Package InstallerVersion="200" Compressed="yes"
+             InstallScope="perMachine"
+             Description="Keyboard-driven tiling window manager shell for Windows" />
+
+    <!-- Upgrading in place rather than side-by-side: two copies of a shell
+         replacement is never what anyone wants. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of mshell is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="mshell">
+          <Directory Id="CONFIGDIR" Name="config" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="cmpMshell" Guid="*">
+        <File Id="filMshell" Source="mshell.exe" KeyPath="yes" />
+      </Component>
+      <!-- The privileged helper ships but is not started: it is opt-in, and
+           starting it is what makes elevated windows tileable. -->
+      <Component Id="cmpHelper" Guid="*">
+        <File Id="filHelper" Source="mshelld.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="cmpInstallBat" Guid="*">
+        <File Id="filInstallBat" Source="install.bat" KeyPath="yes" />
+      </Component>
+      <Component Id="cmpUninstallBat" Guid="*">
+        <File Id="filUninstallBat" Source="uninstall.bat" KeyPath="yes" />
+      </Component>
+      <Component Id="cmpReadme" Guid="*">
+        <File Id="filInstallMd" Source="INSTALL.md" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="CONFIGDIR">
+      <Component Id="cmpInitLua" Guid="*">
+        <File Id="filInitLua" Source="config/init.lua" KeyPath="yes" />
+      </Component>
+      <Component Id="cmpInitFullLua" Guid="*">
+        <File Id="filInitFullLua" Source="config/init.full.lua" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Complete" Level="1" Title="mshell">
+      <ComponentRef Id="cmpMshell" />
+      <ComponentRef Id="cmpHelper" />
+      <ComponentRef Id="cmpInstallBat" />
+      <ComponentRef Id="cmpUninstallBat" />
+      <ComponentRef Id="cmpReadme" />
+      <ComponentRef Id="cmpInitLua" />
+      <ComponentRef Id="cmpInitFullLua" />
+    </Feature>
+  </Product>
+</Wix>

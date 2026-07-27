@@ -42,6 +42,7 @@ static void config_apply_defaults(void) {
     g.dim_enabled      = false;
     g.dim_color        = RGB(0x00, 0x00, 0x00);
     g.dim_alpha        = 90;      /* a suggestion, not a blackout */
+    g.update_check     = false;   /* opt-in: it is a network request */
     g.minimize_never   = false;   /* 0.8.0 added minimize FOR a reason */
     g.urgency_enabled  = false;   /* costs a system-wide STATECHANGE hook */
     g.notify_enabled   = true;
@@ -130,6 +131,7 @@ typedef struct {
     bool      dim_enabled;
     COLORREF  dim_color;
     BYTE      dim_alpha;
+    bool      update_check;
     bool      minimize_never;
     bool      urgency_enabled;
     bool      notify_enabled, notify_desktop;
@@ -187,6 +189,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->dim_enabled       = g.dim_enabled;
     s->dim_color         = g.dim_color;
     s->dim_alpha         = g.dim_alpha;
+    s->update_check      = g.update_check;
     s->minimize_never    = g.minimize_never;
     s->urgency_enabled   = g.urgency_enabled;
     s->notify_enabled    = g.notify_enabled;
@@ -279,6 +282,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.dim_enabled       = s->dim_enabled;
     g.dim_color         = s->dim_color;
     g.dim_alpha         = s->dim_alpha;
+    g.update_check      = s->update_check;
     g.minimize_never    = s->minimize_never;
     g.urgency_enabled   = s->urgency_enabled;
     g.notify_enabled    = s->notify_enabled;

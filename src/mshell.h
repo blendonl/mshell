@@ -13,6 +13,12 @@
 #define MSHELL_VERSION "dev"
 #endif
 
+/* The same string as a wide literal, for the places that compare or format it
+ * as one. The two-step is how a macro argument gets stringified through L. */
+#define MSHELL_WIDEN2(x) L##x
+#define MSHELL_WIDEN(x)  MSHELL_WIDEN2(x)
+#define MSHELL_VERSION_W MSHELL_WIDEN(MSHELL_VERSION)
+
 #define WIN32_LEAN_AND_MEAN
 #ifndef UNICODE
 #define UNICODE
@@ -103,6 +109,10 @@
  * translates rather than the launcher, because ToUnicodeEx needs the keyboard
  * state as it was at the moment of the keystroke. */
 #define WM_MSHELL_CAPTURE_KEY     (WM_APP + 6)
+
+/* Posted by the update thread with an owned wide string to show. Raised on the
+ * main thread because every overlay is. */
+#define WM_MSHELL_UPDATE          (WM_APP + 7)
 
 /* ---------------------------------------------------------------------------
  * Constants
@@ -814,6 +824,8 @@ typedef struct {
     bool     dim_enabled;     /* scrim over everything but the focused window */
     COLORREF dim_color;
     BYTE     dim_alpha;       /* the scrim's alpha, not any window's       */
+    bool     update_check;    /* ask GitHub, at most daily, whether a newer
+                               * release exists. Notify-only — see update.c  */
     bool     minimize_never;
     bool     urgency_enabled;
     bool     notify_enabled;     /* show mshell's own on-screen notifications  */
@@ -1323,6 +1335,19 @@ bool     ipc_client_try(int *exit_code);
  * console of its own, so this is the only way a command-line invocation can say
  * anything; it is a no-op when there is no parent console. */
 void     console_print(const char *s);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — tweaks.c (registry tweaks with a real backup/restore)
+ * --------------------------------------------------------------------------- */
+int      tweaks_apply(const wchar_t *group);
+int      tweaks_revert(const wchar_t *group);
+void     tweaks_list(void);
+void     tweaks_emit_reg(const wchar_t *group, bool undo);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — update.c
+ * --------------------------------------------------------------------------- */
+void     update_check_async(void);
 
 void     ipc_start(void);   /* begin serving the per-session named pipe */
 void     ipc_stop(void);
