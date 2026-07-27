@@ -107,6 +107,7 @@ mshell.bind({mod}, "g",     "layout_grid")
 mshell.bind({mod}, "Space", "cycle_layout")
 mshell.bind({mod}, "f",     "toggle_float")
 mshell.bind({mod}, "Return","promote_master")
+mshell.bind({mod}, "b",     "toggle_bar")   -- hide/show the status bar
 
 -- master area: ratio (Ctrl+h/l), count (Ctrl+j/k)
 mshell.bind({mod, ctrl}, "h", "dec_master")

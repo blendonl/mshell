@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **`Win+b` toggles the status bar** in the shipped `init.lua` — the
+  `toggle_bar` action existed but nothing in the default config reached it.
+
 ### Fixed
 
 - **The focus ring now follows a floating window while it moves.** A native
