@@ -55,6 +55,32 @@ All notable changes to mshell are documented here. This project adheres to
   All of it applies on reload, without restarting. Defaults are unchanged, so
   an existing `init.lua` gets the same panel it had.
 
+- **Every action the shell implements is now reachable from a key.** Power
+  management, volume and media, screenshots, the launcher, notifications, the
+  BSP/container set, `jump_urgent`, `last_window`, `toggle_always_on_top` and
+  `panic` were all implemented, documented and bound to nothing — the only way
+  to press one was to know it existed and write the binding yourself. The worked
+  example (`init.full.lua`) now reaches all of them. `init.lua` is unchanged: it
+  stays the minimal starter.
+- **Five new sub-maps, leader-only**: `media` (persisting), `system` (one-shot),
+  `power` (one-shot, nested under `system`), `capture` (one-shot) and `bsp`
+  (persisting). Reached by tapping `Win` and then bare keys, so no new binding
+  asks for two keys held at once — which is free, since sub-map keys carry no
+  modifier at all. `Win+Shift+*` and `Win+Ctrl+*` chords that already existed
+  are untouched.
+- **The destructive session actions are nested a layer deeper** than the rest.
+  mshell has no confirmation dialog, so `Win` `x` `p` `d` being four deliberate
+  taps — with `Esc` bailing out at every one, and an unbound key in a one-shot
+  map doing nothing at all — is what stands between a slip and a shutdown.
+- Four actions folded into sub-maps that already existed: `last_window` and
+  `toggle_always_on_top` on `window`, `jump_urgent` on `desktop`, and the
+  built-in `launcher` on `launch`. The launcher belongs in a one-shot map: it
+  takes every keystroke while open, and a persisting map would still be
+  swallowing keys the moment it closed.
+- `mshell.set_urgency(true)` is documented (commented out) beside the
+  `jump_urgent` key that needs it — without it nothing is ever urgent and the
+  key has nothing to jump to.
+
 ### Fixed
 
 - **Floating windows no longer sink behind tiled ones when the focus moves.**
