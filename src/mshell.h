@@ -78,6 +78,10 @@
  * it straight through instead of running it past the keymaps.
  * --------------------------------------------------------------------------- */
 #define MSHELL_INPUT_TAG  ((ULONG_PTR)0x6D736831)   /* 'msh1' */
+
+/* Timer ids on the message window. The first one there has ever been — the
+ * message pump previously handled no WM_TIMER at all. */
+#define TIMER_CRASHLOOP_HEALTHY  1
 #define WM_MSHELL_SUBMAP  (WM_APP + 2)
 #define WM_MSHELL_CONFIG_CHANGED  (WM_APP + 3)
 
@@ -234,6 +238,24 @@ typedef enum {
     LAYOUT_COLUMNS,      /* equal vertical columns                           */
     LAYOUT_COUNT
 } Layout;
+
+/* ---------------------------------------------------------------------------
+ * Resolved layout parameters for ONE monitor's slice of a desktop.
+ *
+ * The layout functions used to read dt->n_master / dt->master_ratio directly
+ * and take the gap-inset area as a separate argument, which meant every knob
+ * was per-desktop by construction: there was nowhere for a per-monitor value to
+ * come from. Resolving them into this struct first — once, in tile_monitor —
+ * is what lets a later per-desktop or per-monitor override exist without
+ * touching a single layout function, and it makes the layouts themselves pure
+ * functions of their input.
+ * --------------------------------------------------------------------------- */
+typedef struct {
+    RECT  area;          /* the slice to fill, already inset for gaps       */
+    int   inner;         /* inner gap in effect (0 under smart gaps)        */
+    float master_ratio;
+    int   n_master;
+} LayoutParams;
 
 /* ---------------------------------------------------------------------------
  * Rule action
@@ -679,6 +701,11 @@ typedef struct {
 
     /* --- run mode --- */
     bool     test_mode;       /* running alongside explorer, not as shell */
+    bool     safe_mode;       /* repeated fast restarts detected: init.lua is
+                               * skipped this run in favour of the built-in
+                               * keymap, because a config that crashes us at
+                               * startup otherwise loops forever and there is no
+                               * shell left to fix it from */
     bool     elevated;        /* we hold an elevated token. The config is then
                                * effectively administrator-level code, so
                                * auto-reload (which would execute it silently on

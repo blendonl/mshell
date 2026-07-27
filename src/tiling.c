@@ -147,22 +147,22 @@ static void stack_horizontal(Client *cs, int from, int to, RECT rect) {
  *   │          │  2   │
  *   └──────────┴──────┘
  * =========================================================================== */
-static void layout_master_stack(Desktop *dt, Client *cs, int n, RECT area) {
-    int nm = dt->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
+static void layout_master_stack(const LayoutParams *lp, Client *cs, int n) {
+    int nm = lp->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
     int nstack = n - nm;
 
     if (nstack == 0) {                 /* everything in the master column */
-        stack_vertical(cs, 0, n, area);
+        stack_vertical(cs, 0, n, lp->area);
         return;
     }
 
-    int total_w  = area.right - area.left;
-    int master_w = (int)((float)total_w * dt->master_ratio);
+    int total_w  = lp->area.right - lp->area.left;
+    int master_w = (int)((float)total_w * lp->master_ratio);
     int min_col  = total_w / 10; if (min_col < 1) min_col = 1;
     master_w = clamp_i(master_w, min_col, total_w - min_col);
 
-    RECT ma = area; ma.right = area.left + master_w;   /* master column */
-    RECT sa = area; sa.left  = area.left + master_w;   /* stack column  */
+    RECT ma = lp->area; ma.right = lp->area.left + master_w;   /* master column */
+    RECT sa = lp->area; sa.left  = lp->area.left + master_w;   /* stack column  */
     stack_vertical(cs, 0,  nm, ma);
     stack_vertical(cs, nm, n,  sa);
 }
@@ -170,19 +170,19 @@ static void layout_master_stack(Desktop *dt, Client *cs, int n, RECT area) {
 /* ===========================================================================
  * bottom-stack — master row on top, stack row beneath (horizontal master).
  * =========================================================================== */
-static void layout_bstack(Desktop *dt, Client *cs, int n, RECT area) {
-    int nm = dt->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
+static void layout_bstack(const LayoutParams *lp, Client *cs, int n) {
+    int nm = lp->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
     int nstack = n - nm;
 
-    if (nstack == 0) { stack_horizontal(cs, 0, n, area); return; }
+    if (nstack == 0) { stack_horizontal(cs, 0, n, lp->area); return; }
 
-    int total_h  = area.bottom - area.top;
-    int master_h = (int)((float)total_h * dt->master_ratio);
+    int total_h  = lp->area.bottom - lp->area.top;
+    int master_h = (int)((float)total_h * lp->master_ratio);
     int min_row  = total_h / 10; if (min_row < 1) min_row = 1;
     master_h = clamp_i(master_h, min_row, total_h - min_row);
 
-    RECT ma = area; ma.bottom = area.top + master_h;
-    RECT sa = area; sa.top    = area.top + master_h;
+    RECT ma = lp->area; ma.bottom = lp->area.top + master_h;
+    RECT sa = lp->area; sa.top    = lp->area.top + master_h;
     stack_horizontal(cs, 0,  nm, ma);
     stack_horizontal(cs, nm, n,  sa);
 }
@@ -190,37 +190,36 @@ static void layout_bstack(Desktop *dt, Client *cs, int n, RECT area) {
 /* ===========================================================================
  * columns — every window an equal (cfact-weighted) vertical column.
  * =========================================================================== */
-static void layout_columns(Desktop *dt, Client *cs, int n, RECT area) {
-    (void)dt;
-    stack_horizontal(cs, 0, n, area);
+static void layout_columns(const LayoutParams *lp, Client *cs, int n) {
+    stack_horizontal(cs, 0, n, lp->area);
 }
 
 /* ===========================================================================
  * centered-master — master column in the middle, stack split left/right.
  * =========================================================================== */
-static void layout_centered(Desktop *dt, Client *cs, int n, RECT area) {
-    int nm = dt->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
+static void layout_centered(const LayoutParams *lp, Client *cs, int n) {
+    int nm = lp->n_master; if (nm < 1) nm = 1; if (nm > n) nm = n;
     int nstack = n - nm;
 
-    if (nstack == 0) { stack_vertical(cs, 0, n, area); return; }
+    if (nstack == 0) { stack_vertical(cs, 0, n, lp->area); return; }
 
-    int total_w  = area.right - area.left;
-    int master_w = (int)((float)total_w * dt->master_ratio);
+    int total_w  = lp->area.right - lp->area.left;
+    int master_w = (int)((float)total_w * lp->master_ratio);
     master_w = clamp_i(master_w, total_w / 5, (total_w * 4) / 5);
     int side = (total_w - master_w) / 2;
 
     int ln = nstack / 2;             /* left column count  */
     int rn = nstack - ln;            /* right column count */
 
-    RECT mid   = area;
-    mid.left   = area.left + side;
-    mid.right  = area.left + side + master_w;
-    RECT left  = area; left.right  = area.left + side;
-    RECT right = area; right.left  = area.left + side + master_w;
+    RECT mid   = lp->area;
+    mid.left   = lp->area.left + side;
+    mid.right  = lp->area.left + side + master_w;
+    RECT left  = lp->area; left.right  = lp->area.left + side;
+    RECT right = lp->area; right.left  = lp->area.left + side + master_w;
 
     /* With a single stack window the left column would be blank — give that
      * space back to the master column so nothing is wasted. */
-    if (ln == 0) mid.left = area.left;
+    if (ln == 0) mid.left = lp->area.left;
 
     stack_vertical(cs, 0,        nm,        mid);
     stack_vertical(cs, nm,       nm + rn,   right);
@@ -228,12 +227,11 @@ static void layout_centered(Desktop *dt, Client *cs, int n, RECT area) {
 }
 
 /* ===========================================================================
- * spiral — fibonacci / dwindle: each window halves the remaining area,
+ * spiral — fibonacci / dwindle: each window halves the remaining lp->area,
  * alternating the split axis; the last window takes what's left.
  * =========================================================================== */
-static void layout_spiral(Desktop *dt, Client *cs, int n, RECT area) {
-    (void)dt;
-    RECT r = area;
+static void layout_spiral(const LayoutParams *lp, Client *cs, int n) {
+    RECT r = lp->area;
     for (int i = 0; i < n; i++) {
         if (i == n - 1) { emit(cs[i].hwnd, r); break; }
         RECT cell = r;
@@ -253,24 +251,23 @@ static void layout_spiral(Desktop *dt, Client *cs, int n, RECT area) {
 /* ===========================================================================
  * grid — roughly square grid of equal cells.
  * =========================================================================== */
-static void layout_grid(Desktop *dt, Client *cs, int n, RECT area) {
-    (void)dt;
+static void layout_grid(const LayoutParams *lp, Client *cs, int n) {
     int cols = 1;
     while (cols * cols < n) cols++;
     int rows = (n + cols - 1) / cols;
 
-    int total_w = area.right  - area.left;
-    int total_h = area.bottom - area.top;
+    int total_w = lp->area.right  - lp->area.left;
+    int total_h = lp->area.bottom - lp->area.top;
     int cell_w  = total_w / cols;
     int cell_h  = total_h / rows;
 
     for (int i = 0; i < n; i++) {
         int col = i % cols, row = i / cols;
         RECT cell;
-        cell.left   = area.left + col * cell_w;
-        cell.top    = area.top  + row * cell_h;
-        cell.right  = (col == cols - 1) ? area.right  : cell.left + cell_w;
-        cell.bottom = (row == rows - 1) ? area.bottom : cell.top  + cell_h;
+        cell.left   = lp->area.left + col * cell_w;
+        cell.top    = lp->area.top  + row * cell_h;
+        cell.right  = (col == cols - 1) ? lp->area.right  : cell.left + cell_w;
+        cell.bottom = (row == rows - 1) ? lp->area.bottom : cell.top  + cell_h;
         emit(cs[i].hwnd, cell);
     }
 }
@@ -279,15 +276,14 @@ static void layout_grid(Desktop *dt, Client *cs, int n, RECT area) {
  * monocle — one window fills the monitor; the rest of that monitor's tiled
  * windows are hidden so focus-cycling swaps which one shows.
  * =========================================================================== */
-static void layout_monocle(Desktop *dt, Client *cs, int n, RECT area) {
-    (void)dt;
+static void layout_monocle(const LayoutParams *lp, Client *cs, int n) {
     HWND focus  = desktop_get_focused();
     HWND target = cs[0].hwnd;
     for (int i = 0; i < n; i++)
         if (cs[i].hwnd == focus) { target = focus; break; }
 
     for (int i = 0; i < n; i++) {
-        if (cs[i].hwnd == target)          emit(cs[i].hwnd, area);
+        if (cs[i].hwnd == target)          emit(cs[i].hwnd, lp->area);
         else if (IsWindowVisible(cs[i].hwnd)) ShowWindow(cs[i].hwnd, SW_HIDE);
     }
 }
@@ -321,24 +317,34 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
     n = keep;
     if (n == 0) return;
 
-    /* Gaps: shrink the work area by the outer gap (minus the half-inner that
-     * emit() adds back at the edges) and remember the inner gap for emit(). */
+    /* ---- resolve this monitor's layout parameters, once ----
+     * Everything the layouts are allowed to depend on is decided here. Gaps
+     * shrink the work area by the outer gap (minus the half-inner that emit()
+     * adds back at the edges); smart gaps are evaluated per monitor, against
+     * that monitor's own client count. A per-desktop or per-monitor override
+     * belongs in this block and nowhere else. */
+    LayoutParams lp;
     int inner = g.inner_gap, outer = g.outer_gap;
     if (g.smart_gaps && n == 1) { inner = 0; outer = 0; }
-    s_inner = inner;
 
     int pre = outer - inner / 2;
     if (pre < 0) pre = 0;
-    RECT area = inset_rect(work, pre);
+
+    lp.area         = inset_rect(work, pre);
+    lp.inner        = inner;
+    lp.master_ratio = dt->master_ratio;
+    lp.n_master     = dt->n_master;
+
+    s_inner = lp.inner;   /* emit() reads this for the per-cell half-gap */
 
     switch (dt->layout) {
-    case LAYOUT_TILING:   layout_master_stack(dt, cs, n, area); break;
-    case LAYOUT_MONOCLE:  layout_monocle(dt, cs, n, area);      break;
-    case LAYOUT_GRID:     layout_grid(dt, cs, n, area);         break;
-    case LAYOUT_SPIRAL:   layout_spiral(dt, cs, n, area);       break;
-    case LAYOUT_CENTERED: layout_centered(dt, cs, n, area);     break;
-    case LAYOUT_BSTACK:   layout_bstack(dt, cs, n, area);       break;
-    case LAYOUT_COLUMNS:  layout_columns(dt, cs, n, area);      break;
+    case LAYOUT_TILING:   layout_master_stack(&lp, cs, n); break;
+    case LAYOUT_MONOCLE:  layout_monocle(&lp, cs, n);      break;
+    case LAYOUT_GRID:     layout_grid(&lp, cs, n);         break;
+    case LAYOUT_SPIRAL:   layout_spiral(&lp, cs, n);       break;
+    case LAYOUT_CENTERED: layout_centered(&lp, cs, n);     break;
+    case LAYOUT_BSTACK:   layout_bstack(&lp, cs, n);       break;
+    case LAYOUT_COLUMNS:  layout_columns(&lp, cs, n);      break;
     case LAYOUT_COUNT:    break;
     }
 }

@@ -141,6 +141,127 @@ static bool portable_config_path(wchar_t *out, size_t out_len) {
     return w > 0 && (size_t)w < out_len;
 }
 
+/* ===========================================================================
+ * Crash-loop detection
+ *
+ * As the shell, a startup crash is not an inconvenience — it is a black screen.
+ * Winlogon's AutoRestartShell relaunches us, we crash again, and the loop has
+ * no exit that does not involve Task Manager. The config is the likeliest
+ * cause, being arbitrary Lua executed during startup.
+ *
+ * So: record each launch in HKCU. Three launches inside a minute means the
+ * previous two did not survive a minute, and this run comes up in safe mode
+ * with the config skipped. A run that DOES survive a minute clears the counter
+ * from a timer, so ordinary restarts (an upgrade, a sign-out) never accumulate.
+ *
+ * HKCU rather than a file: it is the one store guaranteed writable and
+ * available this early, before the config path has even been resolved.
+ * =========================================================================== */
+#define CRASHLOOP_KEY     L"Software\\mshell"
+#define CRASHLOOP_WINDOW  60ULL   /* seconds */
+#define CRASHLOOP_LIMIT   3       /* launches within the window => safe mode */
+
+static ULONGLONG wall_seconds(void) {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER u;
+    u.LowPart  = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    return u.QuadPart / 10000000ULL;   /* 100ns ticks -> seconds */
+}
+
+static bool crashloop_open(HKEY *out, REGSAM extra) {
+    return RegCreateKeyExW(HKEY_CURRENT_USER, CRASHLOOP_KEY, 0, NULL,
+                           REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE | extra,
+                           NULL, out, NULL) == ERROR_SUCCESS;
+}
+
+/* Returns true if this run should come up in safe mode. */
+static bool crashloop_record_launch(void) {
+    HKEY k;
+    if (!crashloop_open(&k, KEY_SET_VALUE)) return false;
+
+    DWORD     count = 0, sz = sizeof(count);
+    ULONGLONG first = 0;
+    DWORD     fsz   = sizeof(first);
+    RegQueryValueExW(k, L"LaunchCount", NULL, NULL, (LPBYTE)&count, &sz);
+    sz = fsz;
+    RegQueryValueExW(k, L"LaunchFirst", NULL, NULL, (LPBYTE)&first, &sz);
+
+    ULONGLONG now = wall_seconds();
+
+    /* A clock that moved backwards (or a first-ever run) restarts the window
+     * rather than being treated as "a very long time ago". */
+    if (count == 0 || first == 0 || now < first || now - first > CRASHLOOP_WINDOW) {
+        count = 1;
+        first = now;
+    } else {
+        count++;
+    }
+
+    RegSetValueExW(k, L"LaunchCount", 0, REG_DWORD,
+                   (const BYTE *)&count, sizeof(count));
+    RegSetValueExW(k, L"LaunchFirst", 0, REG_QWORD,
+                   (const BYTE *)&first, sizeof(first));
+    RegCloseKey(k);
+
+    if (count >= CRASHLOOP_LIMIT) {
+        log_err(L"crash loop: %lu launches within %llu seconds — starting in "
+                L"SAFE MODE (config skipped).", (unsigned long)count,
+                CRASHLOOP_WINDOW);
+        return true;
+    }
+    log_msg(LOG_INFO, L"launch %lu of the current %llus window",
+            (unsigned long)count, CRASHLOOP_WINDOW);
+    return false;
+}
+
+/* Called from a timer once we have been up long enough to count as healthy. */
+void crashloop_mark_healthy(void) {
+    HKEY k;
+    if (!crashloop_open(&k, KEY_SET_VALUE)) return;
+    DWORD zero = 0;
+    RegSetValueExW(k, L"LaunchCount", 0, REG_DWORD,
+                   (const BYTE *)&zero, sizeof(zero));
+    RegCloseKey(k);
+    log_msg(LOG_INFO, L"survived %llus — crash-loop counter reset", CRASHLOOP_WINDOW);
+}
+
+/* AutoRestartShell=0 turns any exit into a logoff, which makes a crash far
+ * worse than it needs to be. We cannot set it (HKLM, needs admin), but saying
+ * so in the log turns a mystifying sign-out into an explicable one. */
+static void warn_if_no_autorestart(void) {
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+                      0, KEY_QUERY_VALUE, &k) != ERROR_SUCCESS)
+        return;
+
+    /* Winlogon writes this as REG_DWORD on some installs and REG_SZ ("0"/"1")
+     * on others, so read raw bytes and interpret by type rather than assuming
+     * either. A byte buffer also keeps the DWORD read from type-punning a
+     * wchar_t array, which strict aliasing does not allow. */
+    BYTE  buf[16] = {0};
+    DWORD sz = sizeof(buf), type = 0;
+    if (RegQueryValueExW(k, L"AutoRestartShell", NULL, &type,
+                         buf, &sz) == ERROR_SUCCESS) {
+        bool off = false;
+        if (type == REG_DWORD && sz >= sizeof(DWORD)) {
+            DWORD v;
+            memcpy(&v, buf, sizeof(v));
+            off = (v == 0);
+        } else if (sz >= sizeof(wchar_t)) {
+            wchar_t c;
+            memcpy(&c, buf, sizeof(c));
+            off = (c == L'0');
+        }
+        if (off)
+            log_err(L"AutoRestartShell is 0: if mshell exits or crashes, "
+                    L"Windows will LOG YOU OUT rather than restart the shell.");
+    }
+    RegCloseKey(k);
+}
+
 void resolve_config_path(wchar_t *out, size_t out_len) {
     wchar_t dir[MAX_PATH];
     wchar_t appdata[MAX_PATH];
@@ -360,6 +481,17 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         bar_reconfigure();    /* ditto, and its height is DPI-scaled */
         tile_current();
         return 0;
+
+    case WM_TIMER:
+        /* We have been up long enough to count as a healthy run, so the
+         * launches recorded before this one were not a loop. One-shot: kill the
+         * timer so this is the only time it fires. */
+        if (wp == TIMER_CRASHLOOP_HEALTHY) {
+            KillTimer(hwnd, TIMER_CRASHLOOP_HEALTHY);
+            crashloop_mark_healthy();
+            return 0;
+        }
+        break;
 
     case WM_WTSSESSION_CHANGE:
         /* Returning from the secure desktop (lock/unlock, fast-user-switch,
@@ -641,6 +773,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Ask for lock/unlock notifications (WM_WTSSESSION_CHANGE) so we can clear
      * stuck modifiers when returning from the secure desktop. */
     WTSRegisterSessionNotification(g.message_window, NOTIFY_FOR_THIS_SESSION);
+
+    /* --- crash-loop guard ---
+     * Before the config, because deciding to skip it is the whole point. Only
+     * as the real shell: under --test a crash costs you a process, not a
+     * session, and repeatedly starting and stopping a test instance is a normal
+     * thing to do that must not trip safe mode. */
+    if (!g.test_mode) {
+        warn_if_no_autorestart();
+        g.safe_mode = crashloop_record_launch();
+        SetTimer(g.message_window, TIMER_CRASHLOOP_HEALTHY,
+                 (UINT)(CRASHLOOP_WINDOW * 1000), NULL);
+    }
 
     /* --- configuration (never fatal: falls back to a built-in keymap) --- */
     resolve_config_path(g.config_path, MAX_PATH);

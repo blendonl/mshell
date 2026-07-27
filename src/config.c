@@ -637,6 +637,25 @@ void config_reload(void) {
  * =========================================================================== */
 bool config_init(void) {
     g.L = NULL;
+
+    /* Safe mode: we restarted several times in quick succession, which means
+     * something here is killing us before anyone can type. The config is by far
+     * the likeliest culprit — it is arbitrary Lua that runs at startup — and as
+     * the shell there is no other surface to fix it from, so skip it entirely
+     * this once and hand over the built-in keymap. */
+    if (g.safe_mode) {
+        log_err(L"SAFE MODE: %ls was NOT loaded because mshell restarted "
+                L"repeatedly in quick succession. The built-in keymap is in "
+                L"use: Win+Shift+Return (cmd), Win+Shift+R (reload), "
+                L"Win+Shift+Q (quit), Win+J / Win+K (focus), Win+Shift+C "
+                L"(close). Fix the config and press Win+Shift+R, or just "
+                L"restart once this run has settled.",
+                g.config_path);
+        config_load_builtin();
+        config_watch_sync();
+        return true;
+    }
+
     if (!config_load(g.config_path)) {
         log_err(L"config: user config failed — falling back to the built-in "
                 L"keymap. ONLY these work: Win+Shift+Return (cmd), Win+Shift+R "
