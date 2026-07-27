@@ -853,7 +853,7 @@ static int lua_mshell_set_float_policy(lua_State *L) {
  *           rendering, so it is instantly and correctly there when it comes
  *           back. This is the same mechanism Windows' own virtual desktops
  *           use.
- *   "hide"  ShowWindow(SW_HIDE), which is what mshell did before 0.12.1. DWM
+ *   "hide"  ShowWindow(SW_HIDE), which is what mshell did before 0.13.0. DWM
  *           throws the window's surface away and Chromium/Electron/WPF apps
  *           shut their renderer down, so windows commonly come back BLACK
  *           until something forces a repaint. Only worth choosing if cloaking

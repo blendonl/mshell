@@ -72,22 +72,45 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_OBJECT_HIDE:
-        /* A managed window was hidden and it wasn't us.
+        /* A managed window was hidden. The question this handler answers is
+         * WHO hid it: the app minimising itself to the tray (Discord, Slack,
+         * Telegram, Steam) or mshell taking it off the screen for a desktop
+         * switch, monocle, or a stowed scratchpad.
          *
-         * Every hide mshell performs — desktop switches, monocle, moving a
-         * window to another desktop — runs inside events_suppress_begin(), and
-         * this callback returns early while suppressed. So reaching here means
-         * the APP hid its own window: minimise-to-tray, which Discord, Slack,
-         * Telegram and Steam all do.
+         * The suppression counter cannot answer it. The hooks are
+         * WINEVENT_OUTOFCONTEXT, so the system QUEUES events across the process
+         * boundary and delivers them the next time this thread pumps — which is
+         * after the tiling pass that hid the window has already run
+         * events_suppress_end(). Our own hide therefore arrives here looking
+         * exactly like the app's, sometimes several keystrokes later. The
+         * LOCATIONCHANGE case below has the same problem and solves it the same
+         * way: compare state, don't trust the counter.
          *
-         * That has to be recorded, not just re-tiled around. The window stays
-         * managed (it is still the app's window, on this desktop, and will come
-         * back), but it leaves the layout — otherwise collect_clients keeps
-         * handing it a tile and flush_placements, which shows anything in the
-         * placement list that isn't visible, drags it straight back onto the
-         * screen. */
+         * wm_hidden is that state — window_hide() sets it before the SW_HIDE and
+         * window_show() clears it only once the window is back — and `cloaked`
+         * narrows it to the hides that can produce this event at all: cloaking
+         * leaves the visible bit alone and is silent here, which is why the
+         * default policy never sees this and set_hide_policy("hide") does.
+         *
+         * Getting it wrong loses the window for good. app_hidden means "not
+         * ours to reveal", so window_show() refuses it, the desktop-switch show
+         * loop skips it, and collect_clients leaves it out of the layout: a
+         * window mshell hid one moment and disowned the next is off the screen
+         * with nothing left that will ever bring it back — no taskbar under
+         * mshell, and a hidden window has no Alt+Tab entry either. Monocle was
+         * the reliable way to hit it: one hide, at the end of the pass, with no
+         * later blocking call to give the queued event a chance to arrive while
+         * suppression was still up. Win+Space and the other window was gone.
+         *
+         * A real tray-hide has to be recorded, not just re-tiled around. The
+         * window stays managed (it is still the app's window, on this desktop,
+         * and will come back), but it leaves the layout — otherwise
+         * collect_clients keeps handing it a tile and flush_placements, which
+         * shows anything in the placement list that isn't visible, drags it
+         * straight back onto the screen. */
         {
             ManagedWindow *mw = window_find(hwnd);
+            if (mw && mw->wm_hidden && !mw->cloaked) break;   /* our own hide */
             if (mw && !mw->app_hidden) {
                 mw->app_hidden  = true;
                 mw->has_applied = false;
