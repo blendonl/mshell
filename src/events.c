@@ -112,6 +112,25 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         }
         break;
 
+    /* A window's state changed. We only subscribe to this at all when urgency
+     * tracking is on (see events_sync_urgency), because it fires for every
+     * control on the system.
+     *
+     * Flashing for attention is a state change on a window that is NOT the
+     * foreground one — which is exactly the condition worth surfacing, and it
+     * needs no access to the flash flag itself (there is no cross-process way
+     * to read it). A window you are already looking at is never urgent. */
+    case EVENT_OBJECT_STATECHANGE: {
+        if (!g.urgency_enabled) break;
+        ManagedWindow *mw = window_find(hwnd);
+        if (!mw || mw->urgent) break;
+        if (hwnd == GetForegroundWindow()) break;
+        mw->urgent = true;
+        log_msg(LOG_INFO, L"urgent: a window asked for attention");
+        bar_refresh();
+        break;
+    }
+
     case EVENT_SYSTEM_FOREGROUND:
         /* Focus changed behind our back — the user clicked a window, or an app
          * activated itself on startup. Re-sync our idea of who is focused:
@@ -389,9 +408,43 @@ bool events_init(void) {
 }
 
 /* ===========================================================================
+ * Urgency tracking is opt-in, so its hook comes and goes with the setting.
+ * Called after every config load, since a reload can flip it either way.
+ *
+ * It is separate from every other hook here because EVENT_OBJECT_STATECHANGE
+ * (0x800A) fires for every control on the system — a checkbox toggling in a
+ * background app reaches us. 0.8.0 narrowed the object range specifically to
+ * stop that traffic, so this stays off unless asked for.
+ * =========================================================================== */
+void events_sync_urgency(void) {
+    if (g.urgency_enabled && !g.statechange_hook) {
+        g.statechange_hook = SetWinEventHook(
+            EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_STATECHANGE,
+            NULL, events_win_event_proc, 0, 0, WINEVENT_OUTOFCONTEXT);
+        if (g.statechange_hook)
+            log_msg(LOG_INFO, L"urgency tracking on (STATECHANGE hook)");
+        else
+            log_msg(LOG_WARN, L"SetWinEventHook(STATECHANGE) failed: %lu — "
+                              L"urgency will not be noticed", GetLastError());
+    } else if (!g.urgency_enabled && g.statechange_hook) {
+        UnhookWinEvent(g.statechange_hook);
+        g.statechange_hook = NULL;
+        log_msg(LOG_INFO, L"urgency tracking off");
+
+        /* Nothing will clear these now, and a ring stuck on the urgent colour
+         * is worse than no urgency at all. */
+        for (int i = 0; i < g.managed_count; i++) g.managed[i].urgent = false;
+    }
+}
+
+/* ===========================================================================
  * Tear down WinEvent hooks
  * =========================================================================== */
 void events_shutdown(void) {
+    if (g.statechange_hook) {
+        UnhookWinEvent(g.statechange_hook);
+        g.statechange_hook = NULL;
+    }
     if (g.win_event_hook) {
         UnhookWinEvent(g.win_event_hook);
         g.win_event_hook = NULL;

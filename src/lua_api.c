@@ -519,15 +519,70 @@ static int lua_mshell_block_system_keys(lua_State *L) {
  * mshell.set_border(width, color)
  *   color is an integer, e.g. 0x333333
  * =========================================================================== */
+static COLORREF rgb_from_lua(unsigned c) {
+    return RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+}
+
 static int lua_mshell_set_border(lua_State *L) {
+    /* Two shapes, because the positional one was here first and configs use it:
+     *
+     *   set_border(width [, color])
+     *   set_border{ width = 2, focused = 0xffffff, floating = 0x89b4fa,
+     *               urgent = 0xf38ba8, corners = "square" }
+     *
+     * The table form is how the per-state colours are reachable; floating and
+     * urgent both default to the focused colour, so an existing config that
+     * only ever set one sees no change. */
+    if (lua_istable(L, 1)) {
+        lua_getfield(L, 1, "width");
+        if (lua_isnumber(L, -1))
+            g.border_width = clamp_i((int)lua_tointeger(L, -1), 0, 10);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "focused");
+        if (lua_isnumber(L, -1)) {
+            g.border_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+            /* Seed the others so naming only `focused` still means one colour
+             * everywhere, exactly as the positional form did. */
+            g.border_color_float  = g.border_color;
+            g.border_color_urgent = g.border_color;
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "floating");
+        if (lua_isnumber(L, -1))
+            g.border_color_float = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "urgent");
+        if (lua_isnumber(L, -1))
+            g.border_color_urgent = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "corners");
+        if (lua_isstring(L, -1)) {
+            const char *c = lua_tostring(L, -1);
+            if      (!strcmp(c, "square"))  g.corner_pref = 1;  /* DONOTROUND  */
+            else if (!strcmp(c, "round"))   g.corner_pref = 2;  /* ROUND       */
+            else if (!strcmp(c, "small"))   g.corner_pref = 3;  /* ROUNDSMALL  */
+            else if (!strcmp(c, "default")) g.corner_pref = 0;  /* DEFAULT     */
+            else {
+                lua_pop(L, 1);
+                return luaL_error(L, "set_border: unknown corners '%s' "
+                                     "(square|round|small|default)", c);
+            }
+        }
+        lua_pop(L, 1);
+        return 0;
+    }
+
     int width = (int)luaL_checkinteger(L, 1);
-    if (width < 0) width = 0;
-    if (width > 10) width = 10;
-    g.border_width = width;
+    g.border_width = clamp_i(width, 0, 10);
 
     if (lua_gettop(L) >= 2) {
-        unsigned c = (unsigned)luaL_checkinteger(L, 2);   /* 0xRRGGBB */
-        g.border_color = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+        g.border_color = rgb_from_lua((unsigned)luaL_checkinteger(L, 2));
+        g.border_color_float  = g.border_color;
+        g.border_color_urgent = g.border_color;
     }
     return 0;
 }
@@ -966,6 +1021,19 @@ static int lua_mshell_spawn(lua_State *L) {
     g.startup_commands[g.startup_count].args = wargs;
     g.startup_commands[g.startup_count].cwd  = wcwd;
     g.startup_count++;
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_urgency(enabled)
+ *
+ * Off by default, and deliberately: noticing that a window flashed for
+ * attention costs a hook on EVENT_OBJECT_STATECHANGE, which fires for every
+ * control on the system. 0.8.0 narrowed the object-event range specifically to
+ * stop that traffic, so turning it back on is a choice with a cost attached.
+ * =========================================================================== */
+static int lua_mshell_set_urgency(lua_State *L) {
+    g.urgency_enabled = lua_toboolean(L, 1);
     return 0;
 }
 
@@ -1511,6 +1579,7 @@ void lua_register_api(lua_State *L) {
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
         {"setenv",          lua_mshell_setenv},
+        {"set_urgency",     lua_mshell_set_urgency},
         {"notify",          lua_mshell_notify},
         {"set_notify",      lua_mshell_set_notify},
         {"log",             lua_mshell_log},

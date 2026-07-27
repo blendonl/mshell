@@ -301,7 +301,10 @@ ManagedWindow *window_find(HWND hwnd) {
  * and reverse them on unmanage / shutdown so apps look normal again.
  * =========================================================================== */
 static void window_apply_flat(HWND hwnd) {
-    DWORD corner = DWMWCP_DONOTROUND;
+    /* Square by default, but configurable: a tiled grid with rounded corners
+     * has a gap at every junction that the gap setting did not ask for, while a
+     * mostly-floating setup may want Windows' own look back. */
+    DWORD corner = (DWORD)g.corner_pref;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
     BOOL disable = TRUE;
@@ -1031,6 +1034,9 @@ void window_focus(HWND hwnd) {
         ManagedWindow *mw = window_find(hwnd);
         int mon = mw ? mw->monitor : monitor_of_window(hwnd);
         if (mon >= 0 && mon < g.monitor_count) g.focused_monitor = mon;
+
+        /* Looking at it is what "attention given" means. */
+        if (mw) mw->urgent = false;
     }
 
     /* Keep the focus ring on the newly-focused window. */

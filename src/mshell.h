@@ -262,6 +262,9 @@ typedef enum {
      * over --msg as well as from a binding. */
     ACTION_NOTIFY,
 
+    /* Go to the window that asked for attention. */
+    ACTION_JUMP_URGENT,
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -450,6 +453,7 @@ typedef struct {
                                       * one refused window would fail the whole
                                       * DeferWindowPos group.                 */
     bool      always_on_top;         /* user asked for the topmost band      */
+    bool      urgent;                /* flashed for attention while elsewhere */
     bool      sticky;                /* follows you to every desktop         */
     bool      scratchpad;            /* the scratchpad window (see ACTION_
                                       * TOGGLE_SCRATCHPAD); hidden when away  */
@@ -660,6 +664,17 @@ typedef struct {
     bool     smart_gaps;      /* drop all gaps when a monitor has one window  */
     int      border_width;    /* focused-window ring thickness (0 = off)      */
     COLORREF border_color;    /* focused-window ring color                    */
+    /* Per-state ring colours. A tiled window and a floating one behave
+     * differently enough — one obeys the layout, the other does not — that
+     * telling them apart at a glance is worth a colour. Urgent is a window that
+     * asked for attention while you were elsewhere. Both default to
+     * border_color, so a config that never sets them sees no change. */
+    COLORREF border_color_float;
+    COLORREF border_color_urgent;
+    /* DWMWA_WINDOW_CORNER_PREFERENCE for MANAGED windows. Square by default
+     * because a tiled grid with rounded corners has gaps at every junction that
+     * the gap setting did not ask for. */
+    int      corner_pref;     /* DWMWCP_* */
     COLORREF background_color;/* solid desktop backdrop color                 */
 
     /* --- status bar ---
@@ -674,6 +689,11 @@ typedef struct {
     HWND     bar_windows[MAX_MONITORS];   /* one per display, or NULL          */
 
     /* --- which-key submap hint --- */
+    /* Urgency tracking is OPT-IN because it costs a hook on
+     * EVENT_OBJECT_STATECHANGE, which fires for every control on the system.
+     * 0.8.0 deliberately narrowed the object range to stop exactly that
+     * traffic, so switching it back on is the user's call, not the default. */
+    bool     urgency_enabled;
     bool     notify_enabled;     /* show mshell's own on-screen notifications  */
     bool     notify_desktop;     /* announce a desktop switch (the bar usually
                                   * already lists them, so off by default)      */
@@ -713,6 +733,7 @@ typedef struct {
     HWND     border_window;   /* layered overlay marking the focused window   */
     HWND     whichkey_window; /* layered overlay: submap hint ("which-key")   */
     HWND     notify_window;   /* layered overlay: mshell's own toasts         */
+    HWINEVENTHOOK statechange_hook;  /* only while urgency_enabled */
 
     /* --- hooks --- */
     HHOOK         kb_hook;
@@ -1085,6 +1106,7 @@ void     whichkey_hide(void);
  * Prototypes — events.c
  * =========================================================================== */
 bool     events_init(void);
+void     events_sync_urgency(void);   /* opt-in STATECHANGE hook on/off */
 void     events_shutdown(void);
 void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
