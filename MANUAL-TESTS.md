@@ -1,7 +1,8 @@
 # Manual test checklist
 
-`make test` covers the logic with no Windows in it — rule pattern matching and
-the tiling split arithmetic. Everything below needs a real Windows machine,
+`make test` covers the logic with no Windows in it — rule pattern matching, the
+tiling split arithmetic and the which-key panel's grid. Everything below needs
+a real Windows machine,
 because it involves the shell, the window manager, or hardware.
 
 Run these against `mshell.exe --test` (alongside Explorer, so quitting exits
@@ -253,6 +254,38 @@ The three modes are distinct and each key is its own toggle:
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
+
+## Which-key panel
+
+`make test` covers the grid arithmetic (`whichkey_math`), so what is left here
+is everything a number cannot tell you: whether it is where you asked for it,
+and whether it is still readable.
+
+- Enter a submap with no `set_whichkey` call in the config: the panel is at the
+  bottom centre, as it has always been. This is the upgrade check — an existing
+  config must look untouched.
+- `position` through all nine values, saving between each: `top`, `center`,
+  `left`, `right` and the four corners each land where the name says, with the
+  same gap to the edge. On a **secondary** monitor too — focus a window there
+  first, since the panel follows the focus, not the primary display.
+- `margin = 0`: it sits flush against the edge. A large `margin` moves it in
+  without letting it grow off the far side.
+- `max_width = 0.3` on a wide submap: labels are ellipsized with "…" at a
+  character boundary, never cut mid-glyph. Narrow it further until columns are
+  dropped, then check the log — it must name how many bindings did not fit.
+- `max_height = 0.2`: the panel wraps into more columns rather than growing
+  past it.
+- `max_rows = 4`: columns break every 4 rows.
+- `font = "Consolas"` (or any installed family) and `font_size = 28`: the panel
+  re-measures around them — nothing is clipped and the columns still line up.
+  A **missing** family (`font = "Nope UI"`) falls back and still renders.
+- `border_width = 6`: the outline is 6px on all four sides, none of it clipped.
+  `border_width = 0`: no outline at all.
+- `opacity = 120`: the desktop shows through. `rounded = false`: square corners.
+- All of the above on a **scaled display** (150%+): spacing and font grow with
+  it, and the same config gives the same proportions as at 100%.
+- Change any of these and save — the panel picks them up on the next submap
+  without a restart.
 
 ## Launcher
 

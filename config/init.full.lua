@@ -155,13 +155,50 @@ mshell.set_bar({
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call
 -- just shows the knobs (values below are the defaults).
+--
+-- Every pixel value here is a DESIGN pixel at 96 DPI and is scaled for the
+-- monitor the panel appears on, so one number is right on every display.
 mshell.set_whichkey({
     enabled = true,
     delay   = 150,          -- ms before it appears; 0 = show instantly
+
+    -- Colors
     bg      = 0x1e1e2e,     -- panel background
     fg      = 0xcdd6f4,     -- action-label text
     key_fg  = 0x7aa2f7,     -- key + header accent
     border  = 0x7aa2f7,     -- panel outline
+
+    -- Where it sits on the focused monitor. One of: bottom, top, center,
+    -- left, right, top_left, top_right, bottom_left, bottom_right.
+    position = "bottom",
+    margin   = -1,          -- gap to the monitor edge; negative = automatic
+                            -- (5% of the monitor's height), which is what the
+                            -- panel has always used
+
+    -- How big it may get. Both take EITHER a fraction of the monitor
+    -- (0 < v <= 1) or design pixels (v > 1); 0 means only the monitor limits
+    -- it. Labels that no longer fit are ellipsized, and if bindings have to be
+    -- dropped entirely mshell says which in the log.
+    max_width  = 0,         -- e.g. 0.5 for half the screen, or 900
+    max_height = 0,         -- e.g. 0.4, or 600
+    max_rows   = 12,        -- rows in a column before a new column starts
+
+    -- Spacing
+    padding        = 14,    -- panel inner padding
+    row_spacing    = 6,     -- extra vertical space per row
+    column_spacing = 30,    -- gap between columns
+    key_spacing    = 10,    -- gap between a key and its label
+    header_spacing = 8,     -- gap under the header
+
+    -- Text. Any installed family; an unknown name falls back to the system
+    -- default the way it does anywhere else in Windows.
+    font      = "Segoe UI",
+    font_size = 18,
+
+    -- Chrome
+    border_width = 1,       -- outline thickness; 0 = no outline
+    opacity      = 235,     -- 0 (invisible) to 255 (opaque)
+    rounded      = true,    -- Win11 rounded corners; ignored on older Windows
 })
 
 -- How much goes to %LOCALAPPDATA%\mshell\mshell.log (and DebugView). The file

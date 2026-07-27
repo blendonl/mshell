@@ -44,8 +44,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
   chords still work too. Submaps are **persisting**
   (stay until an exit key) or **one-shot** (next key drops back to root),
   expressive enough to spawn programs, switch desktops, and nest — with an
-  optional **which-key hint** that lists the active submap's keys (configurable
-  delay; `set_whichkey`).
+  optional **which-key hint** that lists the active submap's keys (delay,
+  placement, maximum size, spacing, font and chrome; `set_whichkey`).
 - **Lua configuration** that reloads **when you save it** (or on `Win+Shift+R`)
   and is *atomic* — a broken config keeps the previous one instead of
   stranding you.
@@ -143,7 +143,7 @@ The release ships two, and they are for different moments:
 | File | What it is |
 |------|-----------|
 | `config/init.lua` | **The default.** ~130 lines, assumes nothing is installed but Windows, and opens `cmd.exe` because that is the one terminal every machine has. This is what `install.bat` puts at `%APPDATA%\mshell\init.lua`. |
-| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
+| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key layout and styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
 
 A default that launched Alacritty, Firefox, Discord and Valorant would greet
 most new users with a log full of launch failures, so it doesn't. Everything
