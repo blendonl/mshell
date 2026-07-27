@@ -877,7 +877,8 @@ static int lua_mshell_set_manage_owned(lua_State *L) {
     return 0;
 }
 
-/* mshell.set_float_on_top(enabled) — keep floating windows above tiled ones */
+/* mshell.set_float_on_top(enabled) — keep floating windows above tiled ones.
+ * On by default; pass false to let a float sink behind the window you focus. */
 static int lua_mshell_set_float_on_top(lua_State *L) {
     g.float_on_top = lua_toboolean(L, 1);
     return 0;

@@ -60,7 +60,7 @@ static void config_apply_defaults(void) {
     g.fullscreen_policy = FS_CONTENT;   /* app fullscreen stays in its tile */
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
-    g.float_on_top     = false;
+    g.float_on_top     = true;   /* a float is an overlay, not a peer */
     g.min_win_w        = DEFAULT_MIN_WIN_W;
     g.min_win_h        = DEFAULT_MIN_WIN_H;
 
