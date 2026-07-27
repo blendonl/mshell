@@ -74,7 +74,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
   still tile windows owned by elevated processes — without your `init.lua` ever
   becoming administrator-level code. No config, no Lua, no scripting: it moves
-  windows and nothing else.
+  windows and nothing else. Installed by `install.bat`; started by
+  `install.bat /helper` from an administrator prompt.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 
