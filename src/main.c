@@ -911,6 +911,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     g.background_color = DEFAULT_BACKGROUND_COLOR;
     g.float_policy     = FLOAT_RULES;
     g.fullscreen_policy = FS_CONTENT;
+    g.float_placement  = FLOAT_PLACE_CENTER;
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
     g.float_on_top     = true;   /* a float is an overlay, not a peer */
