@@ -261,6 +261,13 @@ const WindowRule *window_rule_lookup(HWND hwnd) {
 
     int is_dlg = -1;   /* answered once, and only if a rule actually asks */
 
+    /* Fetched lazily for the same reason is_dlg is: this runs for every window
+     * that appears anywhere on the system, and most configs have no title rule
+     * at all. GetWindowTextW can block on a hung app, so it is also the one
+     * criterion worth not asking for speculatively. */
+    wchar_t title[256];
+    int     have_title = 0;
+
     for (int i = 0; i < g.rule_count; i++) {
         WindowRule *r = &g.rules[i];
 
@@ -268,6 +275,20 @@ const WindowRule *window_rule_lookup(HWND hwnd) {
         if (r->class_match[0]   && !wildcard_match(r->class_match, cls))    continue;
         if (r->process_match[0] && !wildcard_match(r->process_match, proc)) continue;
         if (r->path_match[0]    && !wildcard_match(r->path_match, path))    continue;
+        if (r->title_match[0]) {
+            if (!have_title) {
+                title[0] = L'\0';
+                /* SendMessageTimeout rather than GetWindowText: the latter can
+                 * hang us on a window whose thread is not pumping, and this runs
+                 * on the thread that also services keybinds. */
+                DWORD_PTR res = 0;
+                if (SendMessageTimeoutW(hwnd, WM_GETTEXT, 256, (LPARAM)title,
+                                        SMTO_ABORTIFHUNG | SMTO_BLOCK, 100, &res))
+                    title[255] = L'\0';
+                have_title = 1;
+            }
+            if (!wildcard_match(r->title_match, title)) continue;
+        }
 
         if (r->set_dialog) {
             if (is_dlg < 0) is_dlg = window_is_dialog(hwnd) ? 1 : 0;

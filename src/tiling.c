@@ -324,7 +324,8 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
      * that monitor's own client count. A per-desktop or per-monitor override
      * belongs in this block and nowhere else. */
     LayoutParams lp;
-    int inner = g.inner_gap, outer = g.outer_gap;
+    int inner = (dt->inner_gap >= 0) ? dt->inner_gap : g.inner_gap;
+    int outer = (dt->outer_gap >= 0) ? dt->outer_gap : g.outer_gap;
     if (g.smart_gaps && n == 1) { inner = 0; outer = 0; }
 
     int pre = outer - inner / 2;

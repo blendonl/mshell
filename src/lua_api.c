@@ -724,6 +724,25 @@ static int lua_mshell_desktop_rule(lua_State *L) {
     }
     lua_pop(L, 1);
 
+    /* gaps = 8  or  gaps = {inner, outer} — the same two shapes set_gaps
+     * takes, so there is one thing to remember rather than two. */
+    lua_getfield(L, 2, "gaps");
+    if (lua_isnumber(L, -1)) {
+        int v = clamp_i((int)lua_tointeger(L, -1), 0, 100);
+        r->set_gaps = true; r->inner_gap = v; r->outer_gap = v;
+    } else if (lua_istable(L, -1)) {
+        int t = lua_absindex(L, -1);
+        lua_rawgeti(L, t, 1);
+        lua_rawgeti(L, t, 2);
+        int inner = lua_isnumber(L, -2) ? (int)lua_tointeger(L, -2) : 0;
+        int outer = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : inner;
+        lua_pop(L, 2);
+        r->set_gaps  = true;
+        r->inner_gap = clamp_i(inner, 0, 100);
+        r->outer_gap = clamp_i(outer, 0, 100);
+    }
+    lua_pop(L, 1);
+
     lua_getfield(L, 2, "float");
     if (!lua_isnil(L, -1)) { r->set_float = true;
                              r->float_all = (bool)lua_toboolean(L, -1); }
@@ -872,7 +891,8 @@ static int lua_mshell_set_min_window_size(lua_State *L) {
 /* ===========================================================================
  * mshell.rule(match, action [, opts])
  *
- *   match  — table with optional "class", "process" and/or "path" keys. Each is
+ *   match  — table with optional "class", "process", "path" and/or "title"
+ *            keys. Each is
  *            a case-insensitive wildcard pattern (`*` any run, `?` one char,
  *            `/` == `\`), so one rule can cover a whole game library:
  *              class   = "UnityWndClass"
@@ -944,6 +964,16 @@ static int lua_mshell_rule(lua_State *L) {
     lua_getfield(L, 1, "path");
     if (lua_isstring(L, -1)) {
         u8_to_w(lua_tostring(L, -1), r->path_match, MAX_PATH);
+    }
+    lua_pop(L, 1);
+
+    /* Often the only thing that separates two windows of one app — a
+     * picture-in-picture player, a splash screen — where class and process are
+     * identical. Matched against the title at the moment the window is adopted;
+     * a title that changes later does not re-run the rules. */
+    lua_getfield(L, 1, "title");
+    if (lua_isstring(L, -1)) {
+        u8_to_w(lua_tostring(L, -1), r->title_match, 256);
     }
     lua_pop(L, 1);
 
