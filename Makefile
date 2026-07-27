@@ -67,6 +67,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/helper.c     \
               $(SRC_DIR)/match.c      \
               $(SRC_DIR)/layout_math.c \
+              $(SRC_DIR)/whichkey_math.c \
               $(SRC_DIR)/log.c \
               $(SRC_DIR)/overlay.c \
               $(SRC_DIR)/system.c \
@@ -148,13 +149,15 @@ DIST_FILES = install.bat uninstall.bat \
 
 # --- Host-side tests ---
 # mshell itself cross-compiles to Windows and cannot run here, but the logic
-# with no Windows in it can: match.c (rule patterns) and layout_math.c (the
-# proportional split). Those are built with the HOST compiler and run directly,
-# so `make test` needs no emulator and no Windows machine. Everything else is
-# covered by MANUAL-TESTS.md.
+# with no Windows in it can: match.c (rule patterns), layout_math.c (the
+# proportional split) and whichkey_math.c (the hint panel's grid and anchor).
+# Those are built with the HOST compiler and run directly, so `make test` needs
+# no emulator and no Windows machine. Everything else is covered by
+# MANUAL-TESTS.md.
 HOST_CC   = cc
 TEST_DIR  = test
-TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math
+TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
+            $(TEST_DIR)/test_whichkey_math
 
 # --- Rules ---
 .PHONY: all clean check-lua dist test regs msi
@@ -274,6 +277,10 @@ $(TEST_DIR)/test_match: $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c $(SRC_DIR)/m
 $(TEST_DIR)/test_layout_math: $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c $(SRC_DIR)/layout_math.h
 	@echo "  HOSTCC $@"
 	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c
+
+$(TEST_DIR)/test_whichkey_math: $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c $(SRC_DIR)/whichkey_math.h
+	@echo "  HOSTCC $@"
+	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c
 
 test: $(TEST_BINS)
 	@echo "  TEST"
