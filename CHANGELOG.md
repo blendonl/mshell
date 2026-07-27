@@ -21,6 +21,75 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Added
 
+- **On-screen notifications.** With no Explorer there is no toast host, no tray
+  balloon and no taskbar, so anything mshell had to say went to a log file
+  nobody has reason to be reading. The case that matters is a failed config
+  reload: keeping the previous config running is right *and* completely silent,
+  so a broken edit was indistinguishable from one that worked. It now says so on
+  screen, with the Lua error. `mshell.notify(text [, kind [, ms]])`,
+  `mshell.set_notify{}`, and a `notify` action so `--msg` can raise one too.
+
+  Deliberately mshell's own messages only — real Windows toasts are WinRT/WNS
+  and need a registered Explorer-class shell, which a replacement shell is not.
+
+- **Session and power actions:** `lock`, `logoff`, `reboot`, `shutdown`,
+  `sleep`, `hibernate`. Replacing Explorer removes every other route to these,
+  and `quit` is not a substitute — as the shell, exiting ends the session
+  whatever you meant by it.
+
+- **Media keys.** `volume_up`, `volume_down`, `volume_mute`, `media_play`,
+  `media_next`, `media_prev`, `media_stop`. A keyboard *with* dedicated volume
+  keys already worked (Windows handles those below our hook), but one without
+  had no route to volume at all, since every `Win+key` belongs to mshell. The
+  media and browser VKs are also bindable now, for a keyboard that has them.
+
+- **Screenshots:** `screenshot` and `screenshot_window`, written to
+  `Pictures\Screenshots` and left on the clipboard. PrintScreen is remapped to
+  Snip by a shell setting and `Win+Shift+S` is a Win chord and therefore ours,
+  so there was previously no screenshot at all.
+
+- **`toggle_always_on_top`**, **`last_window`** (the window-level counterpart of
+  `last_desktop`, backed by a per-desktop focus history), and
+  **`resize_left/down/up/right`** for floating windows. `move_*` now literally
+  moves a floating window instead of being a no-op — a tiled window has no
+  position of its own, so there it still swaps places.
+
+- **A panic key.** Starts Explorer alongside mshell and stops the hook binding
+  anything, so a misbehaving shell does not need Task Manager. It does not quit,
+  because exiting as the shell ends the session — which is what someone reaching
+  for a panic key is trying to avoid. Undone by any reload.
+
+- **Vim-style repeat counts inside submaps:** `3j` focuses down three times.
+  Only for a digit the map does not already bind, so existing configs (desktops
+  on `1`..`9` in the `go` map) are unaffected. Which actions repeat is a
+  whitelist — `3q` must not be three quits.
+
+- **`spawn` takes a working directory**, threaded through keybindings, submaps,
+  startup programs and a desktop rule's `app`. **`mshell.setenv(name, value)`**
+  is the environment half, process-wide so one call covers every launch.
+
+- **Per-state border colours and configurable corners:**
+  `set_border{ width, focused, floating, urgent, corners }`. Naming only
+  `focused` behaves exactly as the old positional form did.
+
+- **Opt-in urgency tracking** (`mshell.set_urgency(true)`) plus a `jump_urgent`
+  action. Off by default because noticing a window flash needs a hook on
+  `EVENT_OBJECT_STATECHANGE`, which fires for every control on the system — and
+  0.8.0 narrowed the object range specifically to stop that traffic.
+
+- **`rule{ title = "..." }`** — often the only thing separating two windows of
+  one app. Fetched lazily and through `SendMessageTimeoutW`, since rule lookup
+  runs for every window on the system and a hung app must not block the thread
+  that services keybinds.
+
+- **`desktop_rule{ gaps = ... }`** — per-desktop gap overrides.
+
+- **Crash-loop detection.** As the shell a startup crash is a black screen,
+  AutoRestartShell relaunches us, and the loop has no exit that does not involve
+  Task Manager. Three launches inside a minute start the next run in safe mode
+  with `init.lua` skipped. A run that survives a minute clears the counter.
+  Skipped under `--test`, and mshell also warns when `AutoRestartShell` is `0`.
+
 - **`mshell.set_log_level("error"|"warn"|"info"|"debug"|"trace")`.** `"info"` is
   the default and `"debug"` is what `--verbose` has always given you.
   `mshell.set_verbose(true)` still works and now means `"debug"`.
@@ -28,6 +97,18 @@ All notable changes to mshell are documented here. This project adheres to
   levels and rotation too. It stays a separate file: the helper may hold a
   different token than the shell, so one file would mean two processes
   appending under different ACLs.
+
+### Internal
+
+- **`overlay.c`** — the backdrop, focus ring, which-key panel and status bar had
+  each hand-rolled the same class registration, DPI scaling, font cache and
+  double-buffered paint. Shared now, before the notification surface became a
+  fifth copy.
+- **`LayoutParams`** — the layout functions read `dt->n_master` and
+  `dt->master_ratio` directly, so every knob was per-desktop by construction and
+  a per-monitor value had nowhere to come from. They now take parameters
+  resolved once in `tile_monitor`, which is what made per-desktop gaps a
+  two-line change.
 
 ## 0.11.0 — 2026-07-26
 

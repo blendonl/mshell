@@ -263,13 +263,35 @@ mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 ```
 
-API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `set_gaps`,
-`set_smart_gaps`, `set_border`, `set_background`, `set_whichkey`,
+API: `bind`, `submap`, `set_leader`, `rule`, `spawn`, `setenv`, `set_gaps`,
+`set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
+`set_notify`, `notify`, `set_urgency`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
-`set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_manage_owned`,
-`set_float_on_top`,
+`set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_mouse`,
+`set_manage_owned`, `set_float_on_top`,
 `set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
-`block_system_keys`, `log`.
+`block_system_keys`, `log`, `on`, `get_monitors`, `get_desktops`,
+`get_current_desktop`, `get_focused_window`.
+
+**Notifications.** There is no Explorer, so there is no toast host and no tray —
+mshell paints its own. A config that fails to reload says so on screen with the
+Lua error, which matters because the atomic rollback that keeps your previous
+config running is otherwise completely silent. `mshell.notify("text", "warn")`
+raises one yourself, and `mshell.exe --msg 'notify hello'` from a script does the
+same. It is deliberately mshell's own messages only: real Windows toasts are
+WinRT/WNS and require being a registered Explorer-class shell.
+
+**A panic key.** `mshell.bind({mod, shft}, "Escape", "panic")` starts Explorer
+alongside mshell and stops the hook binding anything, so a shell that is
+misbehaving does not need Task Manager to escape. It deliberately does not quit —
+exiting as the shell ends the session, which is the thing you were avoiding. Any
+reload undoes it (`mshell.exe --msg reload`, or saving `init.lua`); no keybinding
+can, because not binding keys is the point.
+
+**Safe mode.** Three starts inside a minute means the previous two did not
+survive one, so the next run skips `init.lua` entirely and comes up on the
+built-in keymap with the reason in the log. As the shell, a config that crashes
+at startup otherwise loops with no way in.
 
 **Auto-reload.** mshell watches the folder holding your `init.lua` and reloads
 250 ms after the last write, so saving in your editor applies the config —
