@@ -151,6 +151,69 @@ The three modes are distinct and each key is its own toggle:
 - With the helper installed, `mshelld.log` sits beside it and follows the same
   rules.
 
+## New actions
+
+- **always-on-top**: `toggle_always_on_top` on a floating window keeps it over
+  the tiled grid; toggling off demotes it. A window that was already topmost on
+  its own account is never demoted.
+- **last_window**: focus A, focus B, `last_window` -> A, again -> B. After
+  closing A it goes to the next most recent instead, not to a dead window.
+- **floating move/resize**: `move_*` moves a floating window and still swaps a
+  tiled one; `resize_*` changes a floating window's size and is a no-op on a
+  tiled one.
+- **session**: `lock` locks. Test `logoff`/`reboot`/`shutdown`/`sleep` only if
+  you mean it — they do exactly what they say.
+- **media**: `volume_up`/`volume_down`/`volume_mute` move the volume and show
+  Windows' own indicator. `media_play` controls a playing track.
+- **screenshot**: `screenshot` writes a PNG to `Pictures\Screenshots` and puts
+  the image on the clipboard (paste it somewhere to confirm).
+  `screenshot_window` captures only the focused window, at the same bounds the
+  focus ring hugs. A layered/translucent window is captured, not a hole.
+- **counts**: in the leader map, `3j` focuses down three times. `3q` quits ONCE
+  (counts do not repeat non-motion actions). In the `go` map, `1` still switches
+  to desktop 1 rather than starting a count.
+- **spawn cwd**: bind `{"spawn", {"cmd.exe", nil, "C:\\Windows"}}` and confirm
+  the shell opens there.
+- **setenv**: `mshell.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
+  %FOO%`.
+
+## Notifications
+
+- A syntax error in `init.lua` while mshell is running shows a red-striped toast
+  naming the Lua error, and the previous config keeps working.
+- `mshell.exe --msg 'notify hello'` raises one from outside.
+- Several in quick succession stack, newest at the top, and expire
+  independently.
+- The toast sits below the status bar, not under it.
+- With `set_notify{ desktop_switch = true }`, switching desktops announces it.
+
+## Panic and safe mode
+
+- **panic**: bind it, press it. Explorer appears, the Start menu and Alt+Tab
+  work, and no mshell keybinding fires any more. `mshell.exe --msg reload`
+  restores normal operation. (Confirm no keybinding can undo it — that is the
+  design, not a bug.)
+- **safe mode**: make `init.lua` crash or fail at startup, then start mshell
+  three times inside a minute. The third run logs SAFE MODE and comes up on the
+  built-in keymap without reading the config. Wait a minute with a good config
+  and the counter resets.
+- mshell warns in the log if `AutoRestartShell` is `0`.
+
+## Borders, urgency and rules
+
+- `set_border{ width = 2, focused = 0xffffff, floating = 0x89b4fa }` — the ring
+  changes colour when the focused window is floating.
+- `set_border{ corners = "round" }` rounds managed windows' corners; `"square"`
+  is the default.
+- With `set_urgency(true)`, make a background app flash for attention (a chat
+  mention works): its ring turns the urgent colour and `jump_urgent` goes to it,
+  switching desktops if needed. Focusing it clears the flag. With urgency off
+  (the default), no STATECHANGE hook is installed — check the log.
+- `rule({ title = "Picture-in-Picture" }, "float")` floats only that window of a
+  browser, leaving the main window tiled.
+- `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
+  the others keep the global gaps.
+
 ## Shell-mode only
 
 These cannot be tested with `--test` and need a real install. Have Task Manager
