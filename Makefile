@@ -70,7 +70,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/log.c \
               $(SRC_DIR)/overlay.c \
               $(SRC_DIR)/system.c \
-              $(SRC_DIR)/screenshot.c
+              $(SRC_DIR)/screenshot.c \
+              $(SRC_DIR)/notify.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:

@@ -190,7 +190,14 @@ static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk
         action = action_name_to_enum(action_str);
         if (action == ACTION_NONE) luaL_error(L, "unknown action: %s", action_str);
 
-        if (action == ACTION_SWITCH_DESKTOP || action == ACTION_MOVE_TO_DESKTOP) {
+        if (action == ACTION_NOTIFY) {
+            /* The message rides in `command`, the same slot spawn and the
+             * desktop actions use — there is one string slot, and a notify has
+             * exactly one string. */
+            if (!str_arg) luaL_error(L, "notify requires a message string");
+            command = u8_to_w_dup(str_arg);
+        } else if (action == ACTION_SWITCH_DESKTOP ||
+                   action == ACTION_MOVE_TO_DESKTOP) {
             /* Desktop actions carry a NAME, not an index — in `command`, the
              * same slot spawn uses, since a name is a string and there is no
              * number to put in `arg`. */
@@ -963,6 +970,52 @@ static int lua_mshell_spawn(lua_State *L) {
 }
 
 /* ===========================================================================
+ * mshell.notify(text [, kind [, ms]])
+ *
+ *   kind — "info" (default), "warn" or "error"; picks the accent colour.
+ *
+ * Unlike most of the API this is callable at RUNTIME as well as config time —
+ * it is the one thing an event handler most obviously wants, and it touches no
+ * state a reload is rebuilding.
+ * =========================================================================== */
+static int lua_mshell_notify(lua_State *L) {
+    const char *text = luaL_checkstring(L, 1);
+    const char *kind = luaL_optstring(L, 2, "info");
+    int         ms   = (int)luaL_optinteger(L, 3, 4000);
+
+    NotifyKind k;
+    if      (!_stricmp(kind, "info"))  k = NOTIFY_INFO;
+    else if (!_stricmp(kind, "warn"))  k = NOTIFY_WARN;
+    else if (!_stricmp(kind, "error")) k = NOTIFY_ERROR;
+    else return luaL_error(L, "notify: unknown kind '%s' (info|warn|error)", kind);
+
+    wchar_t w[NOTIFY_TEXT_CAP];
+    u8_to_w(text, w, NOTIFY_TEXT_CAP);
+    notify_show(w, k, ms);
+    return 0;
+}
+
+/* ===========================================================================
+ * mshell.set_notify{ enabled = true, desktop_switch = false }
+ *
+ * desktop_switch is off by default because the status bar already lists every
+ * live desktop with the current one marked — a toast saying the same thing is
+ * redundant unless the bar is disabled.
+ * =========================================================================== */
+static int lua_mshell_set_notify(lua_State *L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    lua_getfield(L, 1, "enabled");
+    if (!lua_isnil(L, -1)) g.notify_enabled = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "desktop_switch");
+    if (!lua_isnil(L, -1)) g.notify_desktop = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
  * mshell.setenv(name, value)
  *
  * The environment half of "spawn with an environment". Deliberately
@@ -1458,6 +1511,8 @@ void lua_register_api(lua_State *L) {
         {"rule",            lua_mshell_rule},
         {"spawn",           lua_mshell_spawn},
         {"setenv",          lua_mshell_setenv},
+        {"notify",          lua_mshell_notify},
+        {"set_notify",      lua_mshell_set_notify},
         {"log",             lua_mshell_log},
         {"on",              lua_mshell_on},
 

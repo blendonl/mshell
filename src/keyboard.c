@@ -231,6 +231,7 @@ static const ActionNameEntry action_names[] = {
     {"media_stop",       ACTION_MEDIA_STOP},
     {"screenshot",       ACTION_SCREENSHOT},
     {"screenshot_window", ACTION_SCREENSHOT_WINDOW},
+    {"notify",           ACTION_NOTIFY},
     {NULL, ACTION_NONE}
 };
 
@@ -1384,6 +1385,10 @@ void execute_action(Action action, int arg, const wchar_t *command,
     /* -- screenshots ----------------------------------------------------- */
     case ACTION_SCREENSHOT:        screenshot_screen(); break;
     case ACTION_SCREENSHOT_WINDOW: screenshot_window(); break;
+
+    case ACTION_NOTIFY:
+        if (command && command[0]) notify_show(command, NOTIFY_INFO, 4000);
+        break;
 
     case ACTION_QUIT:
         g.running = false;
