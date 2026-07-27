@@ -199,6 +199,19 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- Ignore windows smaller than this (default 120x80):
 -- mshell.set_min_window_size(120, 80)
 
+-- How a window is taken OFF the screen — for a desktop you are not on, for
+-- monocle's unfocused windows, for a stowed scratchpad.
+--
+--   "cloak" (default) asks DWM to stop compositing it. The window goes on
+--           rendering, so it is instantly and correctly there when it comes
+--           back. Same mechanism Windows' own virtual desktops use.
+--   "hide"  ShowWindow(SW_HIDE), what mshell did before 0.12.1. DWM throws the
+--           window's surface away and Chromium/Electron/WPF apps shut their
+--           renderer down, so windows commonly came back BLACK.
+--
+-- Only worth changing if cloaking misbehaves for some app you use:
+-- mshell.set_hide_policy("hide")
+
 ----------------------------------------------------------------------
 -- Fullscreen
 ----------------------------------------------------------------------

@@ -297,6 +297,41 @@ The three modes are distinct and each key is its own toggle:
   **deleted**, not set to a default.
 - `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
 
+## Hiding a desktop (cloak vs hide)
+
+The bug this guards against is a whole desktop of windows coming back **black**,
+so the apps that must appear here are the ones that render off the UI thread —
+Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
+
+- Put a Chromium-based app and VS Code on desktop `1`, switch to `2`, switch
+  back. Both draw their real content **immediately** — no black rectangle, no
+  blank window that fills in a second later, no needing a resize or a click to
+  come to life. Repeat the switch ten times: still clean every time.
+- Do the same with a video playing in the browser. It is still playing and still
+  visible on return.
+- Switch to an **empty** desktop, then type. The keystrokes go nowhere — *not*
+  into the window you just left. (Cloaking, unlike hiding, does not disturb the
+  foreground, so this is handled deliberately.)
+- Send the last window off the current desktop with `move_to_desktop`, then
+  type. Same check.
+- Monocle: with three windows, cycle focus repeatedly. Each one is fully drawn
+  when it comes up. Then switch to another desktop and back — the same single
+  window is showing, and no other window flashed on the way.
+- Leave monocle for `tiling` (`Win+Space`). All three windows are visible; none
+  stayed hidden.
+- Close Discord to the tray **while on another desktop**, then click its tray
+  icon from that other desktop. Its window does **not** appear over the desktop
+  you are on. Switch to the desktop it lives on: it is there and tiled.
+- Quit (`Win+Shift+Q`) with windows on three desktops. Every window is visible
+  and usable afterwards — a cloaked window that outlives mshell keeps a taskbar
+  button that does nothing, so this is the check that matters most.
+- Kill `mshell.exe` from Task Manager with windows on three desktops (shell mode
+  — Winlogon restarts it). The restarted mshell uncloaks what the dead one left
+  behind; the log says `uncloaked N window(s)`.
+- `mshell.set_hide_policy("hide")`, save, then switch desktops. Desktops still
+  work. Windows may flicker and a GPU-heavy app may briefly blank — that is the
+  mechanism, and it is why `"cloak"` is the default.
+
 ## Shell-mode only
 
 These cannot be tested with `--test` and need a real install. Have Task Manager
