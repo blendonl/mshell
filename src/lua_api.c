@@ -1111,6 +1111,49 @@ static int lua_mshell_spawn(lua_State *L) {
 }
 
 /* ===========================================================================
+ * mshell.set_animation(ms)   |   mshell.set_dim{ enabled=, color= }
+ *
+ * Both off by default. They are the two features that cost frames rather than
+ * bytes, and a tiling WM's appeal is that windows are where you put them
+ * instantly — so motion is something you ask for.
+ *
+ * Dimming does NOT make anybody's window layered. See anim.c: that changes how
+ * another process's window is composited, and can leave a GPU-accelerated app
+ * rendering black. It is a scrim per monitor with the focused window punched
+ * out of its region instead.
+ * =========================================================================== */
+static int lua_mshell_set_animation(lua_State *L) {
+    int ms = (int)luaL_checkinteger(L, 1);
+    /* Capped: past a fifth of a second the window manager feels laggy rather
+     * than animated, and the tiler is placing windows behind the motion. */
+    g.anim_ms = clamp_i(ms, 0, 200);
+    return 0;
+}
+
+static int lua_mshell_set_dim(lua_State *L) {
+    if (!lua_istable(L, 1)) {
+        g.dim_enabled = lua_toboolean(L, 1);
+        return 0;
+    }
+    lua_getfield(L, 1, "enabled");
+    if (!lua_isnil(L, -1)) g.dim_enabled = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "color");
+    if (lua_isnumber(L, -1))
+        g.dim_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+    lua_pop(L, 1);
+
+    /* Opacity is how strong the dimming looks; it is the layered alpha of the
+     * scrim rather than anything applied to a window. */
+    lua_getfield(L, 1, "opacity");
+    if (lua_isnumber(L, -1))
+        g.dim_alpha = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
+    lua_pop(L, 1);
+    return 0;
+}
+
+/* ===========================================================================
  * mshell.set_mouse(enabled)  |  mshell.set_mouse{ drag_swap=, follow=,
  *                                                 mod_drag= }
  *
@@ -1797,6 +1840,8 @@ void lua_register_api(lua_State *L) {
         {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
         {"set_attach",      lua_mshell_set_attach},
         {"set_mouse",       lua_mshell_set_mouse_tbl},
+        {"set_animation",   lua_mshell_set_animation},
+        {"set_dim",         lua_mshell_set_dim},
         {"set_manage_owned",lua_mshell_set_manage_owned},
         {"set_float_on_top",lua_mshell_set_float_on_top},
         {"set_min_window_size",lua_mshell_set_min_window_size},

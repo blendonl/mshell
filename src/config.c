@@ -38,6 +38,10 @@ static void config_apply_defaults(void) {
     g.bar_fg           = DEFAULT_BAR_FG;
     g.bar_accent       = DEFAULT_BAR_ACCENT;
     g.bar_dim          = DEFAULT_BAR_DIM;
+    g.anim_ms          = 0;       /* instant; motion is opt-in */
+    g.dim_enabled      = false;
+    g.dim_color        = RGB(0x00, 0x00, 0x00);
+    g.dim_alpha        = 90;      /* a suggestion, not a blackout */
     g.minimize_never   = false;   /* 0.8.0 added minimize FOR a reason */
     g.urgency_enabled  = false;   /* costs a system-wide STATECHANGE hook */
     g.notify_enabled   = true;
@@ -122,6 +126,10 @@ typedef struct {
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
+    int       anim_ms;
+    bool      dim_enabled;
+    COLORREF  dim_color;
+    BYTE      dim_alpha;
     bool      minimize_never;
     bool      urgency_enabled;
     bool      notify_enabled, notify_desktop;
@@ -175,6 +183,10 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->bar_fg            = g.bar_fg;
     s->bar_accent        = g.bar_accent;
     s->bar_dim           = g.bar_dim;
+    s->anim_ms           = g.anim_ms;
+    s->dim_enabled       = g.dim_enabled;
+    s->dim_color         = g.dim_color;
+    s->dim_alpha         = g.dim_alpha;
     s->minimize_never    = g.minimize_never;
     s->urgency_enabled   = g.urgency_enabled;
     s->notify_enabled    = g.notify_enabled;
@@ -263,6 +275,10 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.bar_fg            = s->bar_fg;
     g.bar_accent        = s->bar_accent;
     g.bar_dim           = s->bar_dim;
+    g.anim_ms           = s->anim_ms;
+    g.dim_enabled       = s->dim_enabled;
+    g.dim_color         = s->dim_color;
+    g.dim_alpha         = s->dim_alpha;
     g.minimize_never    = s->minimize_never;
     g.urgency_enabled   = s->urgency_enabled;
     g.notify_enabled    = s->notify_enabled;

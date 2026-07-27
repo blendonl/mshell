@@ -57,6 +57,11 @@ void border_hide(void) {
 
 /* Draw the ring around the currently focused window (if any). */
 void border_refresh(void) {
+    /* The dim scrim is placed relative to the focused window, so it moves at
+     * exactly the moments the ring does — one call site rather than two sets
+     * that can drift apart. */
+    anim_dim_refresh();
+
     if (!g.border_window) return;
 
     int bw = g.border_width;
