@@ -458,6 +458,15 @@ void desktop_switch(const wchar_t *name) {
     /* 7. If we just landed on an empty desktop that has a configured app,
      *    launch it. Must happen after current_desktop_id is updated so the new
      *    window is managed onto THIS desktop. */
+    /* Opt-in, because the status bar already lists every live desktop with
+     * the current one marked — this is for a setup that turned the bar off. */
+    if (g.notify_desktop) {
+        wchar_t msg[DESKTOP_NAME_MAX + 16];
+        _snwprintf(msg, DESKTOP_NAME_MAX + 15, L"desktop: %ls", name);
+        msg[DESKTOP_NAME_MAX + 15] = L'\0';
+        notify_show(msg, NOTIFY_INFO, 1200);
+    }
+
     desktop_launch_app_if_empty(desktop_slot_by_id(target_id));
 
     /* 8. Tell the config, once everything above has settled — the handler gets

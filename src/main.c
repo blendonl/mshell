@@ -824,6 +824,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     background_init();
     border_init();
     whichkey_init();
+    notify_init();
     bar_init();
     /* Monitors were measured before the config was read, so the work areas do
      * not yet account for a bar the config just enabled. Re-measure, then
@@ -908,6 +909,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* tear down our own helper windows */
     bar_shutdown();
+    notify_shutdown();
     whichkey_shutdown();
     border_shutdown();
     background_shutdown();

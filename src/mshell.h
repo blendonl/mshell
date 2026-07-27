@@ -258,6 +258,10 @@ typedef enum {
     ACTION_SCREENSHOT,          /* the whole virtual screen */
     ACTION_SCREENSHOT_WINDOW,   /* just the focused window  */
 
+    /* Show a message on screen. The text rides in `command`, so this works
+     * over --msg as well as from a binding. */
+    ACTION_NOTIFY,
+
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
@@ -283,6 +287,15 @@ typedef enum {
     LAYOUT_COLUMNS,      /* equal vertical columns                           */
     LAYOUT_COUNT
 } Layout;
+
+/* ---------------------------------------------------------------------------
+ * On-screen notification severity — picks the accent stripe's colour.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    NOTIFY_INFO = 0,
+    NOTIFY_WARN,
+    NOTIFY_ERROR,
+} NotifyKind;
 
 /* ---------------------------------------------------------------------------
  * Resolved layout parameters for ONE monitor's slice of a desktop.
@@ -661,6 +674,9 @@ typedef struct {
     HWND     bar_windows[MAX_MONITORS];   /* one per display, or NULL          */
 
     /* --- which-key submap hint --- */
+    bool     notify_enabled;     /* show mshell's own on-screen notifications  */
+    bool     notify_desktop;     /* announce a desktop switch (the bar usually
+                                  * already lists them, so off by default)      */
     bool     whichkey_enabled;   /* show a hint panel when a submap is active  */
     int      whichkey_delay;     /* ms before it appears (0 = instant)         */
     COLORREF whichkey_bg;        /* panel background                           */
@@ -696,6 +712,7 @@ typedef struct {
     HWND     background_window;/* bottom-most solid-color desktop backdrop    */
     HWND     border_window;   /* layered overlay marking the focused window   */
     HWND     whichkey_window; /* layered overlay: submap hint ("which-key")   */
+    HWND     notify_window;   /* layered overlay: mshell's own toasts         */
 
     /* --- hooks --- */
     HHOOK         kb_hook;
@@ -970,6 +987,15 @@ void     system_media_key(Action action);
  * --------------------------------------------------------------------------- */
 void     screenshot_screen(void);
 void     screenshot_window(void);
+
+/* ---------------------------------------------------------------------------
+ * Prototypes — notify.c (mshell's OWN on-screen messages; deliberately not a
+ * host for other applications' notifications — see the file header)
+ * --------------------------------------------------------------------------- */
+bool     notify_init(void);
+void     notify_shutdown(void);
+void     notify_show(const wchar_t *text, NotifyKind kind, int ms);
+#define NOTIFY_TEXT_CAP 512   /* matches notify.c's per-toast buffer */
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything
  * that can empty a desktop; it decides for itself whether there's work to do. */

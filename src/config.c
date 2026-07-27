@@ -33,6 +33,8 @@ static void config_apply_defaults(void) {
     g.bar_fg           = DEFAULT_BAR_FG;
     g.bar_accent       = DEFAULT_BAR_ACCENT;
     g.bar_dim          = DEFAULT_BAR_DIM;
+    g.notify_enabled   = true;
+    g.notify_desktop   = false;   /* the bar already lists the desktops */
     g.whichkey_enabled = true;
     g.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
     g.whichkey_bg      = DEFAULT_WHICHKEY_BG;
@@ -108,6 +110,7 @@ typedef struct {
     int       bar_height;
     unsigned  bar_modules;
     COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
+    bool      notify_enabled, notify_desktop;
     bool      whichkey_enabled;
     int       whichkey_delay;
     COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
@@ -151,6 +154,8 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->bar_fg            = g.bar_fg;
     s->bar_accent        = g.bar_accent;
     s->bar_dim           = g.bar_dim;
+    s->notify_enabled    = g.notify_enabled;
+    s->notify_desktop    = g.notify_desktop;
     s->whichkey_enabled  = g.whichkey_enabled;
     s->whichkey_delay    = g.whichkey_delay;
     s->whichkey_bg       = g.whichkey_bg;
@@ -227,6 +232,8 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.bar_fg            = s->bar_fg;
     g.bar_accent        = s->bar_accent;
     g.bar_dim           = s->bar_dim;
+    g.notify_enabled    = s->notify_enabled;
+    g.notify_desktop    = s->notify_desktop;
     g.whichkey_enabled  = s->whichkey_enabled;
     g.whichkey_delay    = s->whichkey_delay;
     g.whichkey_bg       = s->whichkey_bg;
@@ -386,6 +393,19 @@ bool config_load(const wchar_t *path) {
         log_err(L"config: the ENTIRE file was rejected — an error anywhere in "
                 L"init.lua discards every binding and startup program in it, "
                 L"not just the failing line.");
+
+        /* Say it on screen too. The rollback below is exactly what makes this
+         * necessary: keeping the previous config running is the right
+         * behaviour and also completely silent, so a broken edit is otherwise
+         * indistinguishable from one that worked. */
+        {
+            wchar_t msg[NOTIFY_TEXT_CAP];
+            _snwprintf(msg, NOTIFY_TEXT_CAP - 1,
+                       L"Config error — previous config kept\n%hs",
+                       lua_tostring(L, -1));
+            msg[NOTIFY_TEXT_CAP - 1] = L'\0';
+            notify_show(msg, NOTIFY_ERROR, 12000);
+        }
         /* Roll back: discard the partial new config, restore the snapshot. */
         config_snapshot_restore(&snap);
         lua_close(L);
