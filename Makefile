@@ -63,7 +63,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/session.c    \
               $(SRC_DIR)/helper.c     \
               $(SRC_DIR)/match.c      \
-              $(SRC_DIR)/layout_math.c
+              $(SRC_DIR)/layout_math.c \
+              $(SRC_DIR)/log.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:
@@ -114,7 +115,9 @@ TARGET   = mshell.exe
 # The privileged helper: a second, tiny binary with no Lua and no config. See
 # src/proto.h for why it exists and what was deliberately left out of it.
 HELPER        = mshelld.exe
-HELPER_SRCS   = $(SRC_DIR)/mshelld.c
+# log.c is shared with mshell.exe. It depends on nothing but the Win32 API —
+# in particular not on the MShell global — precisely so it can link here.
+HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
 HELPER_LDLIBS = -luser32 -ladvapi32
 
@@ -155,7 +158,13 @@ $(HELPER): $(HELPER_OBJS)
 
 # The helper deliberately does NOT depend on mshell.h — it shares only proto.h,
 # which is the point: it has no access to the shell's types or state.
-$(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h
+$(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h $(SRC_DIR)/log.h
+	@echo "  CC    $<"
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# log.c links into BOTH binaries, so like mshelld.o it must not pick up a
+# dependency on mshell.h — it deliberately has no access to the shell's state.
+$(SRC_DIR)/log.o: $(SRC_DIR)/log.c $(SRC_DIR)/log.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
