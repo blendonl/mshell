@@ -843,7 +843,11 @@ bool     spawn_command(const wchar_t *cmd, const wchar_t *args,
 bool     kb_take_pending(unsigned seq, Action *action, int *arg,
                          wchar_t *cmd, size_t cmd_cap,
                          wchar_t *args, size_t args_cap,
-                         wchar_t *cwd, size_t cwd_cap);
+                         wchar_t *cwd, size_t cwd_cap, int *count);
+
+/* Is repeating this action meaningful and safe? Counts repeat motion and sizing;
+ * they must never turn one keystroke into three shutdowns or three spawns. */
+bool     action_is_repeatable(Action action);
 KeyMap  *keymap_new(const wchar_t *name, bool persist);
 void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                             Action action, int arg, KeyMap *submap,
