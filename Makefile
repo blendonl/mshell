@@ -121,6 +121,10 @@ LUA_SRCS  = $(LUA_DIR)/lapi.c       \
 ALL_SRCS = $(MSHELL_SRCS) $(LUA_SRCS)
 ALL_OBJS = $(ALL_SRCS:.c=.o)
 
+# mshell's own objects, apart from Lua's — the ones a version bump has to
+# invalidate. See the version stamp under Rules.
+MSHELL_OBJS = $(MSHELL_SRCS:.c=.o)
+
 # Resources: the application manifest (DPI awareness) + VERSIONINFO.
 RES_OBJ  = $(SRC_DIR)/mshell.res.o
 
@@ -163,6 +167,30 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
 .PHONY: all clean check-lua dist test regs msi
 
 all: check-lua $(TARGET) $(HELPER)
+
+# --- Version stamp ---
+# VERSION reaches the compiler as -DMSHELL_VERSION and windres as -DVER_MAJOR
+# and friends. Those are command-line flags, and make compares timestamps, not
+# command lines: bump VERSION and every object already on disk is still "up to
+# date", so the new number reaches only the files something else happened to
+# make stale. The build then succeeds and lies — a zip named for one version
+# holding a binary that reports another in its VERSIONINFO, its log banner and
+# its update-check User-Agent. Whether a release came out right depended on
+# whether the tree happened to have been cleaned since the bump.
+#
+# The stamp turns the flag into a file. Its NAME carries the version, so a bump
+# names a file that does not exist yet, and everything that bakes the version
+# in is declared to depend on it. Lua's objects are deliberately not: they are
+# compiled with the same CFLAGS but never mention MSHELL_VERSION, and
+# recompiling 32 files to change a string none of them contain is a minute
+# spent on nothing.
+VERSION_STAMP = .version-$(VERSION)
+
+$(VERSION_STAMP):
+	@rm -f .version-*
+	@touch $@
+
+$(MSHELL_OBJS) $(HELPER_OBJS) $(RES_OBJ): $(VERSION_STAMP)
 
 $(TARGET): $(ALL_OBJS) $(RES_OBJ)
 	@echo "  LINK  $@"
@@ -290,6 +318,7 @@ test: $(TEST_BINS)
 
 clean:
 	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS)
+	rm -f .version-*
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
 	# vendor/lua can't poison our cross-compile link step.
