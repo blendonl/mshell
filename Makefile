@@ -40,8 +40,10 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
 # advapi32: the IPC pipe's DACL (ConvertSidToStringSid,
 # ConvertStringSecurityDescriptorToSecurityDescriptor).
 # powrprof: SetSuspendState (sleep/hibernate actions in system.c).
+# windowscodecs: WIC, which encodes screenshots to PNG. Not GDI+, whose headers
+# are C++-only under mingw-w64.
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lpowrprof -lm
+           -ladvapi32 -lpowrprof -lwindowscodecs -lm
 
 # --- Paths ---
 SRC_DIR  = src
@@ -67,7 +69,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/layout_math.c \
               $(SRC_DIR)/log.c \
               $(SRC_DIR)/overlay.c \
-              $(SRC_DIR)/system.c
+              $(SRC_DIR)/system.c \
+              $(SRC_DIR)/screenshot.c
 
 # --- Lua sources (amalgamated or individual) ---
 # Lua 5.4 core source files:
