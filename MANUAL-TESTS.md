@@ -5,8 +5,9 @@ the tiling split arithmetic. Everything below needs a real Windows machine,
 because it involves the shell, the window manager, or hardware.
 
 Run these against `mshell.exe --test` (alongside Explorer, so quitting exits
-instead of logging you out) unless a step says otherwise. `%TEMP%\mshell.log` is
-written on every run and is the first place to look.
+instead of logging you out) unless a step says otherwise.
+`%LOCALAPPDATA%\mshell\mshell.log` is written on every run and is the first
+place to look.
 
 ## Regression checks for the 0.8.0 fixes
 
@@ -65,7 +66,7 @@ From a normal terminal, with mshell running:
   shutdown-only saving would miss).
 - **--check**: `mshell.exe --check` on a good config prints counts; on a broken
   one prints the Lua error. Run it while mshell is running and confirm
-  `%TEMP%\mshell.log` is **not** truncated.
+  `%LOCALAPPDATA%\mshell\mshell.log` is **not** truncated.
 - **Mouse**: drag a tiled window onto another — they swap. Drag it onto empty
   space — it snaps back. Drag a floating window — it moves normally.
 - **Crash**: not easily forced, but if mshell ever does die, check that windows
@@ -128,6 +129,27 @@ The three modes are distinct and each key is its own toggle:
 - `require` a module placed beside `init.lua`: it resolves.
 - A submap with a numeric or unknown key errors loudly rather than silently
   ignoring that binding.
+
+## Logging
+
+- `%LOCALAPPDATA%\mshell\mshell.log` is created on first run, and the directory
+  with it.
+- Every line reads `YYYY-MM-DD HH:MM:SS.mmm [LEVEL] …`.
+- **Append, not truncate**: note the last line, restart mshell, and confirm the
+  old lines are still above the new startup line. Then `taskkill /F /IM
+  mshell.exe` and restart — still appended. This is the case that used to lose
+  exactly the evidence a crash was worth having.
+- At the default level there is no per-keystroke tracing. Add `--verbose`, or
+  `mshell.set_log_level("debug")` and reload, and it appears without a restart.
+- `mshell.set_log_level("nonsense")` is a config error naming the valid levels,
+  and — being atomic — leaves the previous config running.
+- `mshell.set_verbose(true)` still behaves as it always did.
+- **Rotation**: run at `"debug"` until the file passes 5 MB (holding a key with
+  a bound repeat gets there), then confirm `mshell.log.1` appears and
+  `mshell.log` restarts small. Past two rotations, `mshell.log.2` exists and
+  there is no `.3`.
+- With the helper installed, `mshelld.log` sits beside it and follows the same
+  rules.
 
 ## Shell-mode only
 

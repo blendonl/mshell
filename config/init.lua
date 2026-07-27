@@ -13,7 +13,8 @@
     Location:  %APPDATA%\mshell\init.lua
     Reload:    save the file (auto-reload), or press Win+Shift+R.
     Safety:    a syntax error keeps the PREVIOUS config running and writes the
-               reason to %TEMP%\mshell.log — a bad edit cannot strand you.
+               reason to %LOCALAPPDATA%\mshell\mshell.log — a bad edit cannot
+               strand you.
 --]]
 
 -- The one thing worth changing first. cmd.exe is used because it is the only

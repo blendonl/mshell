@@ -3,6 +3,32 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Changed
+
+- **The log is appended to rather than truncated, and it moved.** It was opened
+  `"w"` on every start, so the run that mattered — the one that crashed — had
+  its evidence deleted by the restart that followed it. It is now opened for
+  append at `%LOCALAPPDATA%\mshell\mshell.log`, out of `%TEMP%` where cleaners
+  reach, and rotates at 5 MB keeping two older generations.
+- **Lines carry a timestamp and a level.** `YYYY-MM-DD HH:MM:SS.mmm [LEVEL] `.
+  There were previously two levels expressed as a boolean, which left no way to
+  record something noteworthy-but-not-broken: startup, config loaded and
+  shutdown all had to borrow the error channel to be written at all.
+- **Writes are synchronised.** The IPC server already logged from its own
+  thread, so two threads could interleave mid-line.
+
+### Added
+
+- **`mshell.set_log_level("error"|"warn"|"info"|"debug"|"trace")`.** `"info"` is
+  the default and `"debug"` is what `--verbose` has always given you.
+  `mshell.set_verbose(true)` still works and now means `"debug"`.
+- `mshelld.exe` shares the same logger, so `mshelld.log` gets timestamps,
+  levels and rotation too. It stays a separate file: the helper may hold a
+  different token than the shell, so one file would mean two processes
+  appending under different ACLs.
+
 ## 0.11.0 — 2026-07-26
 
 The features a tiling WM is expected to have, and the end of the elevated-config
