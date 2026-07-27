@@ -75,6 +75,12 @@ tiled, driven entirely from the keyboard and configured in Lua.
   admits only the owning user.
 - **Sticky windows**, a **scratchpad**, dwm-style **zoom**, and mouse
   drag-to-swap between tiles.
+- **The things replacing Explorer takes away**: lock, log off, reboot, shut
+  down, sleep and hibernate, because there is no Start menu to pick them from;
+  volume and media keys, because every `Win+*` combo belongs to mshell and a
+  keyboard without dedicated media keys would otherwise have no route to volume
+  at all; and screenshots to `Pictures\Screenshots` and the clipboard. The
+  worked config reaches all of them through submaps, so none needs a chord.
 - **Session persistence**: per-desktop layout, master ratio and master count
   survive a restart, and you come back to the desktop you left.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
@@ -202,13 +208,32 @@ On top of the core bindings above, it adds four submaps and a game desktop:
 
 | Keys | Action |
 |------|--------|
-| `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts) |
+| `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts, `Tab` = last window, `o` = always on top) |
 | `Win+r` | **resize** submap (persisting; ratio + per-window `cfact`; `Esc` exits) |
-| `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop) |
-| `Win+o` | **launch** submap (one-shot; terminal, browser, files, launcher) |
+| `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop, `u` = jump to urgent) |
+| `Win+o` | **launch** submap (one-shot; terminal, browser, files, `p` = the built-in launcher) |
 | `Win+v` / `Win+Shift+v` | Go to / send window to the `game` desktop (Valorant) |
 | `Win+Alt+f` | Fullscreen: **both** (the minimal config puts this on `Win+F11`) |
 | `Win+Ctrl+i` | A Lua-function binding: logs the current desktop and window |
+
+Everything a shell is expected to have but a tiling WM has no chord left for —
+power, volume, screenshots, manual tiling — lives in five more submaps that are
+deliberately **leader-only**. A tap and two bare keys reaches any of them, so
+nothing needs three keys held at once:
+
+| Keys | Action |
+|------|--------|
+| **Tap `Win`** then `u` | **media** submap (persisting; `k`/`j` volume, `m` mute, `Space` play, `h`/`l` track, `s` stop) |
+| **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `x` panic, `i` notify current state) |
+| **Tap `Win`** then `x p` | **power** submap (one-shot; `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `d` shut down) |
+| **Tap `Win`** then `c` | **capture** submap (one-shot; `s` whole screen, `w` focused window) |
+| **Tap `Win`** then `b` | **bsp** submap (persisting; `b` manual layout, `h`/`v` splits, `t`/`s` tabbed/stacked, `n`/`p` cycle, `=`/`-` resize) |
+
+Counts work in the persisting maps, so `u` then `10k` is ten volume steps. The
+destructive power actions are nested a layer deeper on purpose: mshell has no
+confirmation dialog, so `Win` `x` `p` `d` being four deliberate taps — `Esc`
+bailing out at every one — is what stands between you and an accidental
+shutdown.
 
 ## Configuration
 
@@ -290,10 +315,12 @@ takes, and any split can become a **tabbed** or **stacked** container showing on
 window at a time. The tree does not replace the window list — it is an index
 over it — so a desktop moves between `bsp` and the dynamic layouts freely.
 
-**A launcher.** `mshell.bind({mod}, "p", "launcher")` opens a filter over your
-Start-menu shortcuts; anything that matches nothing is run as typed, so it is a
-Run box too. It types without ever taking focus, because the keyboard hook hands
-it keys directly.
+**A launcher.** The `launcher` action opens a filter over your Start-menu
+shortcuts; anything that matches nothing is run as typed, so it is a Run box too.
+It types without ever taking focus, because the keyboard hook hands it keys
+directly. `init.full.lua` puts it on `Win` `o` `p` — in the one-shot `launch`
+submap rather than on the persisting leader, because a map you are still *in*
+would be swallowing keys the moment the launcher closed.
 
 **Registry tweaks you can undo.** `mshell.exe --tweaks list` shows what is
 applied and why; `apply` records the previous value before writing, so `revert`
@@ -307,8 +334,8 @@ raises one yourself, and `mshell.exe --msg 'notify hello'` from a script does th
 same. It is deliberately mshell's own messages only: real Windows toasts are
 WinRT/WNS and require being a registered Explorer-class shell.
 
-**A panic key.** `mshell.bind({mod, shft}, "Escape", "panic")` starts Explorer
-alongside mshell and stops the hook binding anything, so a shell that is
+**A panic key.** The `panic` action — `Win` `x` `x` in `init.full.lua` — starts
+Explorer alongside mshell and stops the hook binding anything, so a shell that is
 misbehaving does not need Task Manager to escape. It deliberately does not quit —
 exiting as the shell ends the session, which is the thing you were avoiding. Any
 reload undoes it (`mshell.exe --msg reload`, or saving `init.lua`); no keybinding
