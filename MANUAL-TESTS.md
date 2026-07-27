@@ -236,6 +236,32 @@ The three modes are distinct and each key is its own toggle:
   (the default), no STATECHANGE hook is installed — check the log.
 - `rule({ title = "Picture-in-Picture" }, "float")` floats only that window of a
   browser, leaving the main window tiled.
+
+## Floating placement
+
+- Open a window with a `"float"` rule (Task Manager will do). It appears in the
+  **middle** of the monitor at its own size, in one step — no frame in the
+  corner followed by a jump.
+- `Win+f` on a tiled window: it keeps the size of the tile it left and moves to
+  the centre. `Win+f` again re-tiles it.
+- Open a file picker (`Ctrl+O` in any app, with the default `dialog = true`
+  rule): centred too.
+- On a second monitor, a float centres on the monitor it opened on, not on the
+  primary. With `desktop_rule(..., { monitor = 1 })` it centres on the pinned
+  display.
+- With the bar at the top (and again with `position = "bottom"`), a centred
+  float sits in the middle of the space *beside* the bar, never under it.
+- A window taller or wider than the work area is pinned to the top-left corner
+  of it rather than hanging off two edges.
+- `set_float_placement("none")`, save, open a float: it stays exactly where the
+  app put it. Windows already open are unaffected until they float again.
+- `rule({ process = "Flow.Launcher.exe" }, "float", { center = false })` — that
+  overlay keeps its own position while other floats still centre.
+- A rule with `geometry = {x, y, w, h}` still lands on that exact rect, and one
+  with `fullscreen = true` still covers the monitor.
+- Maximise a floating window (its own button, or `Win+Up`): it stays maximised
+  rather than being shrunk to a centred rect. Same for a minimised one — it does
+  not pop back open to be centred.
 - `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
   the others keep the global gaps.
 

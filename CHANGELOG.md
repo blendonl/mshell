@@ -35,6 +35,28 @@ All notable changes to mshell are documented here. This project adheres to
   disappear behind the grid on the next keystroke is not what floating it
   meant. `mshell.set_float_on_top(false)` restores the old behaviour.
 
+- **Floating windows are centred on their monitor.** Where a float SITS was the
+  one thing about it nobody owned: its size is the app's business and the layout
+  never touches its rect, so it opened wherever that app last happened to be or
+  at the next step of Windows' cascade — which, on a shell with no taskbar and
+  no desktop behind it, reads as "somewhere near the top left, for no reason".
+  The window deliberately kept out of the grid is also the one being looked at,
+  so it now goes in the middle: both the window that opens floating (a `"float"`
+  rule, a `dialog` rule, a desktop with `float = true`) and the one `Win+f` just
+  took out of the grid.
+
+  Position only — the size stays whatever the app asked for, clamped to fit. The
+  monitor's *work area*, not its full bounds, so a centred window never slides
+  under the bar. A rule's `geometry` and `fullscreen = true` both place the
+  window themselves and are unaffected, as are minimised, maximised and
+  fullscreen windows.
+
+  `mshell.set_float_placement("none")` restores the old behaviour, and
+  `center = false` in a rule's opts answers for one app — worth setting on an
+  overlay that already positions itself, which is why the example config now
+  passes it to the Flow Launcher rule. `center = true` opts a single app in
+  under a config that set `"none"`.
+
 ## 0.12.0 — 2026-07-27
 
 The release that fills in what a tiling WM is expected to have and what a shell

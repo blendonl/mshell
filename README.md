@@ -23,6 +23,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
   across monitors (`Win+,` / `Win+.`).
 - **Force-tiled mode** (`set_float_policy("never")`) so *every* window joins the
   grid and nothing is ever stacked on top of another window.
+- **Floating windows are centred** on their monitor rather than left wherever
+  the app opened them — `set_float_placement` and a per-rule `center` decide.
 - **Flicker-free placement**: a whole layout pass is applied in one
   `DeferWindowPos` batch, windows already in place are skipped, and geometry is
   computed against DWM's real visible frame so gaps are pixel-accurate.
@@ -228,6 +230,7 @@ mshell.desktop_rule("chat", { layout = "monocle", monitor = 1 })
 mshell.set_layout("tiling")       -- tiling|monocle|grid|spiral|centered|bstack|columns
 mshell.set_nmaster(1)             -- windows in the master area
 mshell.set_float_policy("never")  -- force EVERY window into the grid
+mshell.set_float_placement("center")  -- floats land mid-monitor ("none" = don't move them)
 mshell.set_attach("master")       -- new windows become master (dwm-style)
 
 mshell.bind({"LWin"}, "h", "focus_left")
@@ -269,7 +272,8 @@ API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
 `set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
-`set_float_policy`, `set_fullscreen_policy`, `set_attach`, `set_mouse`,
+`set_float_policy`, `set_fullscreen_policy`, `set_float_placement`,
+`set_attach`, `set_mouse`,
 `set_manage_owned`, `set_float_on_top`,
 `set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
 `set_animation`, `set_dim`, `set_minimize_policy`, `set_update_check`,
@@ -384,6 +388,16 @@ order among themselves, with the focused one on top, and a float that has been
 promoted to always-on-top or fullscreen sits above the rest of them. Pass
 `mshell.set_float_on_top(false)` for the old behaviour, where a float is an
 ordinary window in the stack and sinks behind whatever you focus next.
+
+**Floating windows land in the middle.** A float is the window you deliberately
+kept out of the grid, so mshell centres it on its monitor's work area rather
+than leaving it wherever the app opened it — both a window that opens floating
+and one `Win+f` just untiled. Only the position is decided: the size stays the
+app's own, clamped to fit. `mshell.set_float_placement("none")` turns it off,
+and `center = false` (or `true`) in a rule's opts answers for one app — useful
+for an overlay that already positions itself well. A rule with an explicit
+`geometry = {x, y, w, h}` or `fullscreen = true` places the window itself and is
+unaffected either way.
 
 **Desktops are dynamic, and a desktop is its name.** There is no desktop count
 to configure and no `1..9`: a desktop is a *name* — a word (`"web"`) or a number

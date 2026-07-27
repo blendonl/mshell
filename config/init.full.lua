@@ -194,6 +194,19 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- whatever you focus next:
 -- mshell.set_float_on_top(false)
 
+-- Where a floating window goes. A float is the window you are looking at — the
+-- one deliberately kept out of the grid — so by default mshell centres it on
+-- its monitor instead of leaving it wherever the app happened to open it. This
+-- covers both a window that opens floating (a "float" rule, or a desktop with
+-- float = true) and one Win+f just took out of the grid. Position only: the
+-- size stays the app's own, clamped to the monitor. "none" restores the old
+-- behaviour of never moving a float:
+-- mshell.set_float_placement("none")
+--
+-- Per app, either way, in the rule's opts: `center = false` leaves that one
+-- app's windows alone, `center = true` centres them under a config that set
+-- "none". A rule with an explicit `geometry` already overrides both.
+
 -- Also tile owned/dialog windows (aggressive — modal dialogs tile poorly):
 -- mshell.set_manage_owned(true)
 
@@ -638,7 +651,11 @@ mshell.rule({ process = "Taskmgr.exe" }, "float")
 
 -- Flow Launcher: its search box is a transient popup, not a window to tile.
 -- Float it and drop the focus ring so mshell leaves the overlay alone.
-mshell.rule({ process = "Flow.Launcher.exe" }, "float", { ring = false })
+-- `center = false` because it already places itself where a launcher belongs —
+-- centred horizontally, high on the screen — and the default centring would
+-- drop it to the middle of the display, which is not where you look for it.
+mshell.rule({ process = "Flow.Launcher.exe" },
+            "float", { ring = false, center = false })
 
 -- --- System dialogs: file pickers, message boxes, permission prompts ---
 --
@@ -698,6 +715,8 @@ mshell.rule({ class = "OperationStatusWindow" }, "float")
 --   decorate = false  strip the title bar and add no border — floating windows
 --                     normally keep their own chrome, this makes them bare
 --   fullscreen = true park it over the monitor's full bounds, ignoring gaps
+--                     (this one also settles where the window goes, so the
+--                     default centring never applies to it)
 -- Long-bracket strings ([[...]]) keep Windows paths readable — no \\ escaping.
 -- Matching on `path` rather than on each .exe means one rule covers everything
 -- installed in a folder, including games you haven't bought yet. Naming a
