@@ -3,6 +3,38 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Fixed
+
+- **Floating windows no longer sink behind tiled ones when the focus moves.**
+  The z-order pass that raises floats ran only at the end of a tiling pass, and
+  focusing a window is not a tiling pass: activation raises the window you moved
+  to, so focusing a tiled window — with a keybind, with a click, or by
+  focus-follows-mouse — put it straight over the float you had been looking at,
+  with nothing left to put the float back. Every focus change now re-asserts it,
+  from `window_focus()` and from the foreground WinEvent, which is the only
+  place that hears about a click.
+
+- **Floats keep their order among themselves.** The pass raised them in desktop
+  order, so two overlapping floats swapped places whenever it ran. It now walks
+  the system z-order and re-stacks them as they were, with the focused float on
+  top. Floats already in the topmost band (`toggle_always_on_top`, fullscreen)
+  are left to the topmost pass rather than threaded into that chain — placing a
+  window after a topmost one promotes it, which would have dragged the others up
+  with it.
+
+- **The focus ring sits on its window, not at the top of the stack.** It was
+  pinned to `HWND_TOP`, which with floats above the grid meant the ring of a
+  covered tiled window painted a coloured line across the float on top of it.
+
+### Changed
+
+- **`set_float_on_top` now defaults to true.** A window you floated is an
+  overlay — a picture-in-picture, a calculator, a dialog — and having it
+  disappear behind the grid on the next keystroke is not what floating it
+  meant. `mshell.set_float_on_top(false)` restores the old behaviour.
+
 ## 0.12.0 — 2026-07-27
 
 The release that fills in what a tiling WM is expected to have and what a shell

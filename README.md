@@ -374,8 +374,16 @@ re-asserted whenever the window moves, not just once when it opens.
 `"float"` rule is downgraded to `"manage"` and `Win+f` becomes a no-op, so
 nothing is ever stacked on top of a tiled window. (Owned/modal dialogs are
 still left alone unless you also set `set_manage_owned(true)`, which is
-aggressive — many dialogs are fixed-size and tile poorly.) When windows *do*
-float, `set_float_on_top(true)` keeps them above the tiled grid.
+aggressive — many dialogs are fixed-size and tile poorly.)
+
+**A float is an overlay.** Floating windows stay above the tiled grid — that is
+the default, and it holds across focus changes: focusing a tiled window, with a
+keybind or with the mouse, does not bury the float you were looking at, because
+activation raising the tiled window is undone on the spot. Floats keep their own
+order among themselves, with the focused one on top, and a float that has been
+promoted to always-on-top or fullscreen sits above the rest of them. Pass
+`mshell.set_float_on_top(false)` for the old behaviour, where a float is an
+ordinary window in the stack and sinks behind whatever you focus next.
 
 **Desktops are dynamic, and a desktop is its name.** There is no desktop count
 to configure and no `1..9`: a desktop is a *name* — a word (`"web"`) or a number

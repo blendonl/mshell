@@ -189,9 +189,10 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- window. Uncomment to guarantee a fully-tiled desktop:
 -- mshell.set_float_policy("never")
 
--- When windows DO float (the default policy), keep them above the tiled grid
--- instead of letting them sink behind a tiled window:
--- mshell.set_float_on_top(true)
+-- Floating windows stay above the tiled grid, through focus changes too. Turn
+-- this off to make a float an ordinary window in the stack, which sinks behind
+-- whatever you focus next:
+-- mshell.set_float_on_top(false)
 
 -- Also tile owned/dialog windows (aggressive — modal dialogs tile poorly):
 -- mshell.set_manage_owned(true)

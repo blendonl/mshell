@@ -297,6 +297,22 @@ The three modes are distinct and each key is its own toggle:
   **deleted**, not set to a default.
 - `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
 
+## Floating windows stay on top
+
+Open one tiled window and one floating one (`Win+f`), overlapping.
+
+- Focus the tiled window with `Win+h`/`Win+l`: the float stays visible on top.
+- Click the tiled window where the float does *not* cover it: same — the float
+  comes straight back over it rather than staying buried.
+- Two overlapping floats: focusing the lower one raises it, and focusing a tiled
+  window afterwards leaves the two floats in that same order instead of
+  swapping them.
+- `toggle_always_on_top` on one of two floats keeps it over the other one.
+- `mshell.set_float_on_top(false)` and reload: the old behaviour is back — the
+  float sinks behind whatever you focus.
+- A float minimized and restored is still on top; one moved to another desktop
+  does not raise itself over the desktop you are looking at.
+
 ## Shell-mode only
 
 These cannot be tested with `--test` and need a real install. Have Task Manager
