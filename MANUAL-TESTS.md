@@ -468,6 +468,12 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 - `mshell.set_hide_policy("hide")`, save, then switch desktops. Desktops still
   work. Windows may flicker and a GPU-heavy app may briefly blank — that is the
   mechanism, and it is why `"cloak"` is the default.
+- Still on `"hide"`, with two windows on one desktop: `Win+Space` into monocle,
+  `Win+Space` again to leave it. The second window comes back. Ten times over,
+  switching desktops away and back in between. Then read the log: an `app hid
+  its own window` line naming a window *mshell* hid is the bug — our own hide,
+  delivered late and mistaken for a minimise-to-tray — and the window it names
+  never returns, on any layout or desktop.
 
 ## Shell-mode only
 
