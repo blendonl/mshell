@@ -3,6 +3,37 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Fixed
+
+- **A window mshell hid could be disowned a moment later and lost for good.**
+  The `EVENT_OBJECT_HIDE` handler has to decide who hid a window — the app
+  minimising itself to the tray, or mshell taking it off the screen for a
+  desktop switch, monocle or the scratchpad — and it read that off the
+  suppression counter. The counter cannot answer it: the WinEvent hooks are
+  out-of-context, so the system queues events across the process boundary and
+  delivers them the next time the message loop pumps, long after the pass that
+  hid the window released it. mshell's own hide then arrived looking exactly
+  like the app's, the window was marked `app_hidden` — which means "not ours to
+  reveal" — and from there nothing would ever show it again: `window_show()`
+  refuses it, the desktop-switch show loop skips it, and the tiler leaves it out
+  of the layout. Under mshell there is no taskbar, and a hidden window has no
+  Alt+Tab entry, so the window was simply gone.
+
+  Monocle was the reliable way to hit it — one hide, at the very end of the
+  pass, with no later blocking call to let the queued event arrive while
+  suppression was still up. `Win+Space` into monocle and the other window did
+  not come back; it read as the layout key closing it. Who hid a window is now
+  decided from state (`wm_hidden`, and not cloaked) rather than from timing,
+  which is what the `LOCATIONCHANGE` handler already does for the same reason.
+
+  Only the `SW_HIDE` path can produce the event at all, which is why 0.13.0
+  making cloaking the default hid this rather than fixing it: it is still
+  reachable there through `set_hide_policy("hide")` and through a DWM that
+  refuses to cloak (composition off — some VMs and remote sessions), and it was
+  unconditional in 0.12.0 and earlier, where every hide was `SW_HIDE`.
+
 ## 0.13.0 — 2026-07-27
 
 ### Added
@@ -137,30 +168,6 @@ All notable changes to mshell are documented here. This project adheres to
   nothing, so it survived a layout change and each pass hid the window again
   before re-showing it. It is now recomputed on every tiling pass, which also
   removes a hide/show flicker on every desktop switch.
-
-- **A window mshell hid could be disowned a moment later and lost for good.**
-  The `EVENT_OBJECT_HIDE` handler has to decide who hid a window — the app
-  minimising itself to the tray, or mshell taking it off the screen for a
-  desktop switch, monocle or the scratchpad — and it read that off the
-  suppression counter. The counter cannot answer it: the WinEvent hooks are
-  out-of-context, so the system queues events across the process boundary and
-  delivers them the next time the message loop pumps, long after the pass that
-  hid the window released it. mshell's own hide then arrived looking exactly
-  like the app's, the window was marked `app_hidden` — which means "not ours to
-  reveal" — and from there nothing would ever show it again: `window_show()`
-  refuses it, the desktop-switch show loop skips it, and the tiler leaves it out
-  of the layout. Under mshell there is no taskbar, and a hidden window has no
-  Alt+Tab entry, so the window was simply gone.
-
-  Monocle was the reliable way to hit it — one hide, at the very end of the
-  pass, with no later blocking call to let the queued event arrive while
-  suppression was still up. `Win+Space` into monocle and the other window did
-  not come back; it read as the layout key closing it. Who hid a window is now
-  decided from state (`wm_hidden`, and not cloaked) rather than from timing,
-  which is what the `LOCATIONCHANGE` handler already does for the same reason.
-  Only the `SW_HIDE` path can produce the event at all, so this affects
-  `set_hide_policy("hide")`, a DWM that refuses to cloak (composition off, some
-  VMs and remote sessions), and every build from before cloaking landed.
 
 - **An app un-traying itself while you were elsewhere put its window on the
   desktop you were looking at.** Clicking Discord's tray icon from another
