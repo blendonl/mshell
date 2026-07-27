@@ -418,14 +418,17 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int     arg;
         wchar_t cmd[MAX_PATH];
         wchar_t args[SPAWN_ARGS_MAX];
+        wchar_t cwd[MAX_PATH];
 
         if (kb_take_pending((unsigned)lp, &action, &arg,
-                            cmd, MAX_PATH, args, SPAWN_ARGS_MAX)) {
+                            cmd, MAX_PATH, args, SPAWN_ARGS_MAX,
+                            cwd, MAX_PATH)) {
             log_w(L"hook match: vk=0x%02X mods=0x%X -> action=%d",
                   (unsigned)(wp & 0xFFFF), (unsigned)((wp >> 16) & 0xFFFF),
                   (int)action);
             execute_action(action, arg, cmd[0] ? cmd : NULL,
-                           args[0] ? args : NULL);
+                           args[0] ? args : NULL,
+                           cwd[0] ? cwd : NULL);
         }
         return 0;
     }
@@ -856,7 +859,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     for (int i = 0; i < g.startup_count; i++) {
         if (g.startup_commands[i].cmd)
             spawn_command(g.startup_commands[i].cmd,
-                          g.startup_commands[i].args, L"startup");
+                          g.startup_commands[i].args,
+                          g.startup_commands[i].cwd, L"startup");
     }
 
     /* --- per-desktop auto-launch for the initial desktop ---

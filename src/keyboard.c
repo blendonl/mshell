@@ -281,7 +281,7 @@ KeyMap *keymap_new(const wchar_t *name, bool persist) {
 void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                         Action action, int arg, KeyMap *submap,
                         const wchar_t *command, const wchar_t *args,
-                        bool terminal) {
+                        const wchar_t *cwd, bool terminal) {
     if (!map) return;
 
     /* grow the array if it's full */
@@ -316,6 +316,7 @@ void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
     kb->submap    = submap;
     kb->command   = command ? _wcsdup(command) : NULL;
     kb->args      = (args && args[0]) ? _wcsdup(args) : NULL;
+    kb->cwd       = (cwd  && cwd[0])  ? _wcsdup(cwd)  : NULL;
     kb->terminal  = terminal;
 }
 
@@ -426,6 +427,7 @@ typedef struct {
     int      arg;
     wchar_t  command[MAX_PATH];
     wchar_t  args[SPAWN_ARGS_MAX];
+    wchar_t  cwd[MAX_PATH];
 } PendingAction;
 
 /* Bounded copy that does not zero-pad the destination (unlike wcsncpy). Used
@@ -454,6 +456,7 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
     p->gen    = g.config_gen;
     pend_copy(p->command, MAX_PATH,        b->command);
     pend_copy(p->args,    SPAWN_ARGS_MAX,  b->args);
+    pend_copy(p->cwd,     MAX_PATH,        b->cwd);
     p->seq = seq;   /* last: the slot is only valid once fully written */
 
     /* wParam still carries the triggering key (low word) + modifiers (high
@@ -469,7 +472,8 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
  * worth saying out loud. */
 bool kb_take_pending(unsigned seq, Action *action, int *arg,
                      wchar_t *cmd, size_t cmd_cap,
-                     wchar_t *args, size_t args_cap) {
+                     wchar_t *args, size_t args_cap,
+                     wchar_t *cwd, size_t cwd_cap) {
     bool ok = false;
 
     kb_lock();
@@ -488,6 +492,7 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
             *arg    = p->arg;
             pend_copy(cmd,  cmd_cap,  p->command);
             pend_copy(args, args_cap, p->args);
+            pend_copy(cwd,  cwd_cap,  p->cwd);
             ok = true;
         }
     }
@@ -889,16 +894,20 @@ static void adjust_cfact(HWND focus, float delta) {
  * between updates. Arguments must therefore be a separate string — that is the
  * shape of the API — which is exactly why they could not be expressed before.
  * =========================================================================== */
-bool spawn_command(const wchar_t *cmd, const wchar_t *args, const wchar_t *ctx) {
+bool spawn_command(const wchar_t *cmd, const wchar_t *args,
+                   const wchar_t *cwd, const wchar_t *ctx) {
     if (!cmd || !cmd[0]) {
         log_err(L"%ls: nothing to launch (empty command)", ctx ? ctx : L"spawn");
         return false;
     }
 
     const wchar_t *params = (args && args[0]) ? args : NULL;
+    /* NULL means "inherit ours", which for a Winlogon-launched shell is
+     * C:\Windows\system32 — rarely what you want, but never surprising. */
+    const wchar_t *dir    = (cwd && cwd[0]) ? cwd : NULL;
 
     INT_PTR code = (INT_PTR)ShellExecuteW(NULL, L"open", cmd, params,
-                                          NULL, SW_SHOWNORMAL);
+                                          dir, SW_SHOWNORMAL);
     if (code <= 32) {   /* the documented failure range */
         log_err(L"%ls: FAILED to launch '%ls'%ls%ls (code %lld) — not on PATH "
                 L"or not installed? Try a full path.",
@@ -914,7 +923,7 @@ bool spawn_command(const wchar_t *cmd, const wchar_t *args, const wchar_t *ctx) 
 }
 
 void execute_action(Action action, int arg, const wchar_t *command,
-                    const wchar_t *args) {
+                    const wchar_t *args, const wchar_t *cwd) {
     Desktop *dt  = desktop_current();
     HWND     focus = desktop_get_focused();
     int      fi   = dt->focused;   /* focused index in desktop array */
@@ -937,7 +946,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
         if (command && command[0]) {
             /* Launch detached; the WinEvent hook picks the new window up and
              * tiles it when it appears. */
-            spawn_command(command, args, L"keybind");
+            spawn_command(command, args, cwd, L"keybind");
         } else {
             log_w(L"spawn: no command set on binding");
         }
@@ -1331,7 +1340,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
         g.panicked = true;              /* checked by the hook, first thing */
         kb_reset_state();               /* drop any half-held modifier */
         whichkey_hide();
-        spawn_command(L"explorer.exe", NULL, L"panic");
+        spawn_command(L"explorer.exe", NULL, NULL, L"panic");
         break;
 
     default:

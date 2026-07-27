@@ -225,7 +225,7 @@ void ipc_handle_request(void *req_ptr) {
         return;
     }
 
-    execute_action(action, arg ? _wtoi(arg) : 0, arg, NULL);
+    execute_action(action, arg ? _wtoi(arg) : 0, arg, NULL, NULL);
     snprintf(r->reply, IPC_REPLY_MAX, "ok");
     IPC_DONE();
     #undef IPC_DONE

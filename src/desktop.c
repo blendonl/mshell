@@ -143,6 +143,7 @@ void desktop_apply_rules(int slot) {
     dt->float_all    = false;
     dt->app[0]       = L'\0';
     dt->app_args[0]  = L'\0';
+    dt->app_cwd[0]   = L'\0';
 
     for (int i = 0; i < g.desktop_rule_count; i++) {
         const DesktopRule *r = &g.desktop_rules[i];
@@ -155,6 +156,8 @@ void desktop_apply_rules(int slot) {
              * that replaces the app must not inherit the old one's. */
             wcsncpy(dt->app_args, r->app_args, SPAWN_ARGS_MAX - 1);
             dt->app_args[SPAWN_ARGS_MAX - 1] = L'\0';
+            wcsncpy(dt->app_cwd, r->app_cwd, MAX_PATH - 1);
+            dt->app_cwd[MAX_PATH - 1] = L'\0';
         }
         if (r->set_float)   dt->float_all    = r->float_all;
         if (r->set_layout)  dt->layout       = r->layout;
@@ -773,7 +776,7 @@ void desktop_launch_app_if_empty(int slot) {
 
     /* On failure do NOT latch app_pending, so a corrected config takes effect
      * on the next visit instead of the desktop staying stuck as "launching". */
-    if (!spawn_command(dt->app, dt->app_args, ctx)) return;
+    if (!spawn_command(dt->app, dt->app_args, dt->app_cwd, ctx)) return;
 
     dt->app_pending = true;
 }

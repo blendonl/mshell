@@ -372,6 +372,7 @@ typedef struct {
     KeyMap  *submap;      /* target submap for ACTION_ENTER_SUBMAP           */
     wchar_t *command;     /* program to launch for ACTION_SPAWN (owned)      */
     wchar_t *args;        /* its command-line arguments, or NULL (owned)     */
+    wchar_t *cwd;         /* working directory to start it in, or NULL (owned)*/
     bool     terminal;    /* return to root map after this action fires      */
 } KeyBinding;
 
@@ -490,6 +491,7 @@ typedef struct {
     int     monitor;        /* pinned display, or -1 for "wherever it opens" */
     wchar_t app[MAX_PATH];  /* auto-launch while empty; "" = none         */
     wchar_t app_args[SPAWN_ARGS_MAX];  /* its arguments; "" = none        */
+    wchar_t app_cwd[MAX_PATH];         /* its working directory; "" = ours */
 
     bool   app_pending;     /* an `app` auto-launch is in flight          */
 } Desktop;
@@ -513,6 +515,7 @@ typedef struct {
 
     wchar_t app[MAX_PATH];                  /* "" = don't touch the app      */
     wchar_t app_args[SPAWN_ARGS_MAX];       /* arguments for it; "" = none   */
+    wchar_t app_cwd[MAX_PATH];              /* working directory; "" = ours  */
 
     bool    set_float;    bool   float_all;
     bool    set_layout;   Layout layout;
@@ -556,6 +559,7 @@ typedef struct {
 typedef struct {
     wchar_t *cmd;    /* owned */
     wchar_t *args;   /* owned; NULL when none were given */
+    wchar_t *cwd;    /* owned; NULL to inherit ours */
 } StartupCommand;
 
 /* ---------------------------------------------------------------------------
@@ -820,7 +824,7 @@ DWORD    mod_name_to_flag(const char *name);
 Action   action_name_to_enum(const char *name);
 const char *action_enum_to_name(Action action); /* reverse lookup (or NULL)        */
 void     execute_action(Action action, int arg, const wchar_t *command,
-                        const wchar_t *args);
+                        const wchar_t *args, const wchar_t *cwd);
 
 /* Launch `cmd` with `args` (either may be NULL/empty). ShellExecuteW, so PATH
  * is resolved and .lnk shortcuts work — which is why arguments have to be a
@@ -829,7 +833,7 @@ void     execute_action(Action action, int arg, const wchar_t *command,
  * program that silently never appears is indistinguishable from mshell
  * ignoring the request. Returns false and logs when the launch fails. */
 bool     spawn_command(const wchar_t *cmd, const wchar_t *args,
-                       const wchar_t *ctx);
+                       const wchar_t *cwd, const wchar_t *ctx);
 
 /* Copy out the action a WM_MSHELL_ACTION message refers to (its lParam is the
  * sequence number). The hook records actions BY VALUE rather than posting the
@@ -838,12 +842,13 @@ bool     spawn_command(const wchar_t *cmd, const wchar_t *args,
  * lapped before the main thread drained it. */
 bool     kb_take_pending(unsigned seq, Action *action, int *arg,
                          wchar_t *cmd, size_t cmd_cap,
-                         wchar_t *args, size_t args_cap);
+                         wchar_t *args, size_t args_cap,
+                         wchar_t *cwd, size_t cwd_cap);
 KeyMap  *keymap_new(const wchar_t *name, bool persist);
 void     keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                             Action action, int arg, KeyMap *submap,
                             const wchar_t *command, const wchar_t *args,
-                            bool terminal);
+                            const wchar_t *cwd, bool terminal);
 
 /* ===========================================================================
  * Prototypes — window.c
