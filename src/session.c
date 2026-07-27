@@ -24,8 +24,6 @@
 
 #include "mshell.h"
 
-#define SESSION_FILE  L"session.txt"
-
 /* Remembered settings, keyed by name. Applied in desktop_apply_rules AFTER the
  * config's rules, so a value you changed at runtime beats the rule's default —
  * but a rule you edit still wins on the next reload, because reloading rewrites

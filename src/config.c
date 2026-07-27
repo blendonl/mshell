@@ -586,8 +586,16 @@ void config_load_builtin(void) {
  * file and renaming it over the target, which leaves any file-handle-based
  * watch pointing at a file that no longer exists. Watching the directory also
  * picks up extra Lua modules kept beside init.lua and require()d from it — the
- * whole folder is mshell's config. We never write there, so a reload can't
- * trigger itself.
+ * whole folder is mshell's config.
+ *
+ * One file in that folder is NOT config: session.txt, which session_save()
+ * rewrites on every layout change. FindFirstChangeNotification can't say which
+ * file changed, so with it every session write came back as a "config edit"
+ * ~250 ms later — a reload whose desktop_apply_rules re-applied the startup
+ * session snapshot and snapped the layout back (Win+Space looked like it
+ * refused to stick). ReadDirectoryChangesW reports filenames, so batches that
+ * touch only session.txt are ignored and a reload can no longer trigger
+ * itself. Anything else in the folder still reloads, exactly as before.
  *
  * The wait lives on its own thread and only ever PostMessages: the reload has
  * to run on the main thread (config_load takes kb_lock and re-tiles).
@@ -605,33 +613,91 @@ static HANDLE   g_watch_stop_evt;
 static wchar_t  g_watch_dir[MAX_PATH];  /* what the live thread is watching   */
 static unsigned g_watch_generation;     /* main thread only; bumped per start */
 
-/* Wait out a write burst. True → reload; false → the thread should stop.
- * Either way the change handle is left ARMED, so the caller's next wait is
- * still live (an un-re-armed handle silently never signals again). */
-static bool config_watch_debounce(HANDLE *waits, HANDLE chg) {
+/* What one batch of directory changes adds up to. */
+typedef enum {
+    BATCH_STOP,       /* stop requested, or the read broke — exit the thread */
+    BATCH_NONE,       /* debounce tick elapsed with nothing arriving         */
+    BATCH_SESSION,    /* only our own session.txt write — not a config edit  */
+    BATCH_RELEVANT    /* something else changed — a real config edit         */
+} BatchResult;
+
+#define WATCH_BUF_SIZE 4096   /* one batch; a config folder is never busy   */
+
+/* True when any record in the batch names a file other than the session state
+ * we write ourselves. FileName is not NUL-terminated, so compare by length. */
+static bool watch_batch_relevant(const BYTE *buf) {
+    const size_t sess_len = sizeof(SESSION_FILE) / sizeof(wchar_t) - 1;
+    const BYTE *p = buf;
+    for (;;) {
+        const FILE_NOTIFY_INFORMATION *ni = (const FILE_NOTIFY_INFORMATION *)p;
+        DWORD chars = ni->FileNameLength / sizeof(wchar_t);
+        if (chars != sess_len ||
+            _wcsnicmp(ni->FileName, SESSION_FILE, sess_len) != 0)
+            return true;
+        if (!ni->NextEntryOffset) return false;
+        p += ni->NextEntryOffset;
+    }
+}
+
+/* Arm one ReadDirectoryChangesW and wait for it, the stop event, or `ms`
+ * (INFINITE for the idle wait, CONFIG_DEBOUNCE_MS inside a burst). */
+static BatchResult watch_next_batch(HANDLE dir, OVERLAPPED *ov, BYTE *buf,
+                                    DWORD ms) {
+    ResetEvent(ov->hEvent);
+    if (!ReadDirectoryChangesW(dir, buf, WATCH_BUF_SIZE, FALSE,
+                               FILE_NOTIFY_CHANGE_LAST_WRITE |
+                               FILE_NOTIFY_CHANGE_FILE_NAME  |
+                               FILE_NOTIFY_CHANGE_SIZE,
+                               NULL, ov, NULL))
+        return BATCH_STOP;
+
+    HANDLE waits[2] = { g_watch_stop_evt, ov->hEvent };
+    DWORD r = WaitForMultipleObjects(2, waits, FALSE, ms);
+    if (r == WAIT_TIMEOUT) return BATCH_NONE;
+    if (r != WAIT_OBJECT_0 + 1) {
+        /* Stop (or a broken wait) with the read still pending: cancel it and
+         * wait for the cancellation to land, because `ov` and `buf` live on
+         * this thread's stack and the kernel writes to both. */
+        CancelIoEx(dir, ov);
+        DWORD bytes;
+        GetOverlappedResult(dir, ov, &bytes, TRUE);
+        return BATCH_STOP;
+    }
+
+    DWORD bytes = 0;
+    if (!GetOverlappedResult(dir, ov, &bytes, FALSE)) {
+        /* ERROR_NOTIFY_ENUM_DIR: the buffer overflowed and changes were
+         * dropped. Treat it as a relevant change — a spurious reload costs a
+         * blink, a missed edit costs a mystery. */
+        return GetLastError() == ERROR_NOTIFY_ENUM_DIR ? BATCH_RELEVANT
+                                                       : BATCH_STOP;
+    }
+    return watch_batch_relevant(buf) ? BATCH_RELEVANT : BATCH_SESSION;
+}
+
+/* Wait out a write burst. True → reload; false → the thread should stop. */
+static bool config_watch_debounce(HANDLE dir, OVERLAPPED *ov, BYTE *buf) {
     for (unsigned waited = 0; waited < CONFIG_DEBOUNCE_MAX;
          waited += CONFIG_DEBOUNCE_MS) {
-        if (!FindNextChangeNotification(chg)) return false;   /* re-arm */
-
-        DWORD r = WaitForMultipleObjects(2, waits, FALSE, CONFIG_DEBOUNCE_MS);
-        if (r == WAIT_TIMEOUT)      return true;   /* quiet, still armed */
-        if (r != WAIT_OBJECT_0 + 1) return false;  /* stop, or the wait broke */
+        BatchResult b = watch_next_batch(dir, ov, buf, CONFIG_DEBOUNCE_MS);
+        if (b == BATCH_STOP) return false;
+        if (b == BATCH_NONE) return true;   /* quiet */
         /* another change — keep waiting */
     }
-    /* Something is writing continuously; reload rather than starve, but re-arm
-     * first since we just consumed a notification. */
-    return FindNextChangeNotification(chg) != 0;
+    /* Something is writing continuously; reload rather than starve. */
+    return true;
 }
 
 static DWORD WINAPI config_watch_proc(LPVOID param) {
     WatchArgs *wa = (WatchArgs *)param;
 
-    HANDLE chg = FindFirstChangeNotificationW(
-                     wa->dir, FALSE,
-                     FILE_NOTIFY_CHANGE_LAST_WRITE |
-                     FILE_NOTIFY_CHANGE_FILE_NAME  |
-                     FILE_NOTIFY_CHANGE_SIZE);
-    if (chg == INVALID_HANDLE_VALUE) {
+    HANDLE dir = CreateFileW(wa->dir, FILE_LIST_DIRECTORY,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE |
+                             FILE_SHARE_DELETE,
+                             NULL, OPEN_EXISTING,
+                             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+                             NULL);
+    if (dir == INVALID_HANDLE_VALUE) {
         /* Usually the folder doesn't exist yet. Not fatal — Win+Shift+R still
          * reloads, and it re-syncs the watcher once the folder is there. */
         log_w(L"config: cannot watch %ls (err %lu) — auto-reload inactive until "
@@ -640,17 +706,27 @@ static DWORD WINAPI config_watch_proc(LPVOID param) {
         return 1;
     }
 
-    HANDLE waits[2] = { g_watch_stop_evt, chg };
+    OVERLAPPED ov = {0};
+    ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);   /* manual reset */
+    if (!ov.hEvent) {
+        CloseHandle(dir);
+        free(wa);
+        return 1;
+    }
+
+    BYTE buf[WATCH_BUF_SIZE];
     for (;;) {
-        if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1)
-            break;                    /* stop requested (or the wait failed) */
-        if (!config_watch_debounce(waits, chg)) break;
+        BatchResult b = watch_next_batch(dir, &ov, buf, INFINITE);
+        if (b == BATCH_STOP) break;
+        if (b == BATCH_SESSION) continue;   /* our own write — not config */
+        if (!config_watch_debounce(dir, &ov, buf)) break;
 
         PostMessageW(g.message_window, WM_MSHELL_CONFIG_CHANGED,
                      (WPARAM)wa->generation, 0);
     }
 
-    FindCloseChangeNotification(chg);
+    CloseHandle(ov.hEvent);
+    CloseHandle(dir);
     free(wa);
     return 0;
 }
@@ -701,7 +777,7 @@ void config_watch_sync(void) {
                 config_dir_of(g.config_path, dir, MAX_PATH);
 
     if (g_watch_thread) {
-        /* "Alive" matters: a watcher whose FindFirstChangeNotification failed
+        /* "Alive" matters: a watcher whose CreateFileW on the folder failed
          * (folder not created yet) has already exited, and must be restarted
          * rather than counted as watching. */
         bool alive = WaitForSingleObject(g_watch_thread, 0) == WAIT_TIMEOUT;

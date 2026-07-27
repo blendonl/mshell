@@ -183,6 +183,13 @@ The three modes are distinct and each key is its own toggle:
 - `require` a module placed beside `init.lua`: it resolves.
 - A submap with a numeric or unknown key errors loudly rather than silently
   ignoring that binding.
+- Press `Win+Space` once and wait a second: the new layout **stays**. Then hold
+  it so autorepeat cycles through every layout, and release: the layout you
+  released on stays. (Regression: the session write that follows every layout
+  change tripped the directory watcher, and the self-triggered reload re-applied
+  the startup session snapshot — the layout visibly flipped, then snapped back
+  ~250 ms later. The log must NOT show `config: file changed on disk` after a
+  `Win+Space`; it must show it after actually saving `init.lua`.)
 
 ## Logging
 

@@ -12,6 +12,18 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Fixed
 
+- **A layout change no longer snaps back a quarter-second later.** Every layout
+  action saves the session, and the session file lives in the config folder —
+  which the auto-reload watcher watches. `FindFirstChangeNotification` reports
+  that *something* in the folder changed but not *what*, so each `Win+Space`
+  came back ~250 ms later as a phantom config edit. The reload's
+  `desktop_apply_rules` re-applied the session snapshot taken at startup, and
+  the layout reverted to wherever it had been when mshell launched: a single
+  press flashed the next layout and undid it; holding the key cycled through
+  every layout and then reset to the original one. The watcher now uses
+  `ReadDirectoryChangesW`, which names the changed files, and batches touching
+  only `session.txt` are ignored. A real `init.lua` save still reloads exactly
+  as before.
 - **The focus ring now follows a floating window while it moves.** A native
   move/resize of the focused float and a mod+drag both left the ring behind at
   the old rect until something else refreshed it; both paths now refresh the

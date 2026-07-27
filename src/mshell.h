@@ -1479,6 +1479,11 @@ bool     window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
  * across restarts. Window placement is deliberately NOT saved: an HWND means
  * nothing next boot, and guessing from titles would scatter your windows.
  * =========================================================================== */
+/* Lives beside the config, which is also the folder the auto-reload watcher
+ * watches — config.c needs the name to tell our own writes apart from a
+ * config edit. */
+#define SESSION_FILE  L"session.txt"
+
 void     session_load(void);              /* read the file; call once at start */
 void     session_apply(Desktop *dt);      /* from desktop_apply_rules          */
 void     session_save(void);              /* whenever a saved value changes    */
