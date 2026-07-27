@@ -3,6 +3,47 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Added
+
+- **The which-key panel is fully configurable.** It had four colours and a
+  delay; everything that decided its shape was a `#define`, so the one overlay
+  whose whole job is to be read was also the one you could not fit to your
+  screen or your eyesight. `mshell.set_whichkey{}` now also takes:
+  - `position` — `bottom` (the default and the old placement), `top`,
+    `center`, `left`, `right`, `top_left`, `top_right`, `bottom_left`,
+    `bottom_right`, and `margin` for the gap to the monitor edge (a negative
+    margin keeps the old automatic 5%-of-the-height inset).
+  - `max_width` / `max_height` — either a fraction of the monitor (`0.5`) or
+    design pixels (`900`); `0` means the monitor is the only limit. Text that
+    no longer fits is ellipsized rather than clipped mid-glyph, and a panel
+    that has to drop bindings says which ones in the log instead of looking
+    complete.
+  - `max_rows` — rows in a column before a new column starts (was a fixed 12).
+  - `padding`, `row_spacing`, `column_spacing`, `key_spacing`,
+    `header_spacing` — every gap in the layout, in design pixels at 96 DPI and
+    scaled per monitor like the rest.
+  - `font` and `font_size` — any installed family, at any size.
+  - `border_width`, `opacity` and `rounded` — the panel's chrome. A border
+    thicker than a pixel is drawn as four fills rather than a wide pen, which
+    GDI would centre on the path and clip in half.
+
+  All of it applies on reload, without restarting. Defaults are unchanged, so
+  an existing `init.lua` gets the same panel it had.
+
+### Internal
+
+- **`whichkey_math.c`** — the panel's grid arithmetic (how many columns, what
+  gives way to a maximum size, where an anchor lands) split out with no Windows
+  in it, and covered by `make test` alongside `match.c` and `layout_math.c`.
+  The panel is drawn on a screen nobody is watching while the config that
+  shapes it is being written, which makes "it looked right" the one check that
+  was never available.
+- `overlay_font_face()` extends the shared overlay font cache with a family
+  name; the cache key gains the face, so the other overlays keep their font and
+  their single rebuild-on-DPI-change.
+
 ## 0.12.0 — 2026-07-27
 
 The release that fills in what a tiling WM is expected to have and what a shell
