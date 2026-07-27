@@ -1539,15 +1539,22 @@ static int lua_mshell_log(lua_State *L) {
  * mshell.set_bar(opts) — the status bar.
  *   opts — table, any subset of:
  *     enabled  = true|false      show it at all                  (default true)
- *     position = "top"|"bottom"                                  (default top)
+ *     mode     = "top_bar"|"floating"                        (default top_bar)
+ *     position = "top"|"bottom"          top_bar mode only      (default top)
  *     height   = 28              design pixels at 96 DPI, scaled per monitor
  *     bg / fg / accent / dim = 0xRRGGBB
- *     modules  = {"desktops", "layout", "title", "clock"}   drawn left to right
+ *     modules  = {"desktops", "layout", "title", "clock", "notifications"}
  *
- * One bar per monitor, all showing the same thing — a desktop in mshell spans
- * every display, so there is no per-monitor desktop list to show. The bar
- * reserves its strip out of each monitor's work area, so tiled windows sit
+ * top_bar: one strip per monitor, all showing the same thing — a desktop in
+ * mshell spans every display, so there is no per-monitor desktop list to show.
+ * It reserves its strip out of each monitor's work area, so tiled windows sit
  * below it while a fullscreen window still covers it.
+ *
+ * floating: one panel in the middle of the focused monitor, sections stacked
+ * rather than in a row, reserving nothing — it floats over the windows instead
+ * of pushing them down. That extra room is what "notifications" needs, so in
+ * this mode the panel is where mshell's messages appear and notify.c stops
+ * raising its own toasts. `height` still drives the type scale.
  * =========================================================================== */
 static int lua_mshell_set_bar(lua_State *L) {
     reject_at_runtime(L, "set_bar");
@@ -1555,6 +1562,16 @@ static int lua_mshell_set_bar(lua_State *L) {
 
     lua_getfield(L, 1, "enabled");
     if (!lua_isnil(L, -1)) g.bar_enabled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "mode");
+    if (lua_isstring(L, -1)) {
+        const char *s = lua_tostring(L, -1);
+        if      (strcmp(s, "top_bar")  == 0) g.bar_mode = BAR_MODE_TOP_BAR;
+        else if (strcmp(s, "floating") == 0) g.bar_mode = BAR_MODE_FLOATING;
+        else return luaL_error(L, "set_bar: mode must be 'top_bar' or "
+                                  "'floating'");
+    }
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "position");
@@ -1600,11 +1617,13 @@ static int lua_mshell_set_bar(lua_State *L) {
             else if (m && strcmp(m, "layout")   == 0) mods |= BAR_MOD_LAYOUT;
             else if (m && strcmp(m, "title")    == 0) mods |= BAR_MOD_TITLE;
             else if (m && strcmp(m, "clock")    == 0) mods |= BAR_MOD_CLOCK;
+            else if (m && strcmp(m, "notifications") == 0)
+                mods |= BAR_MOD_NOTIFICATIONS;
             else {
                 lua_pop(L, 2);
                 return luaL_error(L, "set_bar: unknown module '%s' (expected "
-                                     "desktops, layout, title or clock)",
-                                  m ? m : "?");
+                                     "desktops, layout, title, clock or "
+                                     "notifications)", m ? m : "?");
             }
             lua_pop(L, 1);
         }
