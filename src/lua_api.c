@@ -1618,12 +1618,41 @@ static int lua_mshell_set_bar(lua_State *L) {
 /* ===========================================================================
  * mshell.set_whichkey(opts) — the submap hint ("which-key") panel.
  *   opts — table, any subset of:
- *     enabled = true|false   show the hint at all         (default true)
- *     delay   = <ms>         pause before it appears; 0 = instant (default 150)
- *     bg      = 0xRRGGBB     panel background
- *     fg      = 0xRRGGBB     action-label text
- *     key_fg  = 0xRRGGBB     key + header accent
- *     border  = 0xRRGGBB     panel outline
+ *     enabled  = true|false  show the hint at all         (default true)
+ *     delay    = <ms>        pause before it appears; 0 = instant (default 150)
+ *
+ *     -- placement on the focused monitor
+ *     position = "bottom"    bottom|top|center|left|right|top_left|top_right|
+ *                            bottom_left|bottom_right       (default "bottom")
+ *     margin   = <px>        gap to the monitor edge; negative = auto, which is
+ *                            5% of the monitor's height     (default auto)
+ *
+ *     -- size. max_width/max_height take EITHER a fraction of the monitor
+ *     -- (0 < v <= 1) or design pixels (v > 1); 0 means "only the monitor
+ *     -- limits it". Overflowing text is ellipsized, never clipped mid-glyph.
+ *     max_width  = 0.5 | 900
+ *     max_height = 0.4 | 600
+ *     max_rows   = 12        rows in a column before a new column starts
+ *
+ *     -- spacing, design px at 96 DPI (scaled per monitor)
+ *     padding        = 14    panel inner padding
+ *     row_spacing    = 6     extra vertical space per row
+ *     column_spacing = 30    gap between columns
+ *     key_spacing    = 10    gap between a key and its label
+ *     header_spacing = 8     gap under the header
+ *
+ *     -- text
+ *     font      = "Segoe UI"   family name; an unknown one falls back to the
+ *                              system default, silently, as GDI does
+ *     font_size = 18           text height in design px
+ *
+ *     -- chrome
+ *     border_width = 1       outline thickness in design px; 0 = no outline
+ *     opacity      = 235     whole-panel alpha, 0 (invisible) - 255 (opaque)
+ *     rounded      = true    Win11 rounded corners (ignored on older Windows)
+ *
+ *     -- colors
+ *     bg / fg / key_fg / border = 0xRRGGBB
  * =========================================================================== */
 static int lua_mshell_set_whichkey(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -1632,9 +1661,88 @@ static int lua_mshell_set_whichkey(lua_State *L) {
     if (!lua_isnil(L, -1)) g.whichkey_enabled = lua_toboolean(L, -1);
     lua_pop(L, 1);
 
-    lua_getfield(L, 1, "delay");
+    lua_getfield(L, 1, "rounded");
+    if (!lua_isnil(L, -1)) g.whichkey_rounded = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "position");
+    if (lua_isstring(L, -1)) {
+        const char *s = lua_tostring(L, -1);
+        const struct { const char *name; WhichKeyPos pos; } places[] = {
+            {"bottom",       WK_POS_BOTTOM},
+            {"top",          WK_POS_TOP},
+            {"center",       WK_POS_CENTER},
+            {"centre",       WK_POS_CENTER},
+            {"left",         WK_POS_LEFT},
+            {"right",        WK_POS_RIGHT},
+            {"top_left",     WK_POS_TOP_LEFT},
+            {"top_right",    WK_POS_TOP_RIGHT},
+            {"bottom_left",  WK_POS_BOTTOM_LEFT},
+            {"bottom_right", WK_POS_BOTTOM_RIGHT},
+        };
+        size_t i = 0;
+        for (; i < sizeof places / sizeof places[0]; i++)
+            if (strcmp(s, places[i].name) == 0) {
+                g.whichkey_pos = places[i].pos;
+                break;
+            }
+        if (i == sizeof places / sizeof places[0]) {
+            lua_pop(L, 1);
+            return luaL_error(L, "set_whichkey: unknown position '%s' (expected "
+                                 "bottom, top, center, left, right, top_left, "
+                                 "top_right, bottom_left or bottom_right)", s);
+        }
+    }
+    lua_pop(L, 1);
+
+    /* Every plain integer knob, with the range each one is useful over. The
+     * ceilings are generous rather than tasteful — they exist so a typo'd
+     * value can't produce a panel that is off-screen or a mile tall. */
+    const struct { const char *field; int *dst; int lo, hi; } ints[] = {
+        {"delay",          &g.whichkey_delay,      0, 5000},
+        {"margin",         &g.whichkey_margin,    -1, 2000},
+        {"max_rows",       &g.whichkey_max_rows,   1, WHICHKEY_MAX_ROWS},
+        {"padding",        &g.whichkey_padding,    0, 200},
+        {"row_spacing",    &g.whichkey_row_gap,    0, 100},
+        {"column_spacing", &g.whichkey_col_gap,    0, 400},
+        {"key_spacing",    &g.whichkey_key_gap,    0, 200},
+        {"header_spacing", &g.whichkey_hdr_gap,    0, 200},
+        {"font_size",      &g.whichkey_font_size,  6, 96},
+        {"border_width",   &g.whichkey_border_w,   0, 20},
+    };
+    for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
+        lua_getfield(L, 1, ints[i].field);
+        if (lua_isnumber(L, -1))
+            *ints[i].dst = clamp_i((int)lua_tointeger(L, -1),
+                                   ints[i].lo, ints[i].hi);
+        lua_pop(L, 1);
+    }
+
+    /* Fraction-or-pixels, so "half the screen" and "900 px" are both sayable
+     * without a second field to say which one you meant. */
+    const struct { const char *field; float *dst; } maxes[] = {
+        {"max_width",  &g.whichkey_max_w},
+        {"max_height", &g.whichkey_max_h},
+    };
+    for (size_t i = 0; i < sizeof maxes / sizeof maxes[0]; i++) {
+        lua_getfield(L, 1, maxes[i].field);
+        if (lua_isnumber(L, -1)) {
+            double v = lua_tonumber(L, -1);
+            if (v < 0)      v = 0;        /* 0 = no limit of our own */
+            if (v > 20000)  v = 20000;
+            *maxes[i].dst = (float)v;
+        }
+        lua_pop(L, 1);
+    }
+
+    lua_getfield(L, 1, "opacity");
     if (lua_isnumber(L, -1))
-        g.whichkey_delay = clamp_i((int)lua_tointeger(L, -1), 0, 5000);
+        g.whichkey_opacity = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "font");
+    if (lua_isstring(L, -1))
+        u8_to_w(lua_tostring(L, -1), g.whichkey_font, LF_FACESIZE);
     lua_pop(L, 1);
 
     /* 0xRRGGBB → COLORREF, for each color field that is present. */

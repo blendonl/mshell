@@ -164,6 +164,21 @@
 #define DEFAULT_WHICHKEY_KEY_FG   RGB(0x7a, 0xa2, 0xf7)  /* key + header accent   */
 #define DEFAULT_WHICHKEY_BORDER   RGB(0x7a, 0xa2, 0xf7)  /* panel outline         */
 
+/* Geometry, spacing and text. All the pixel values are DESIGN pixels at 96 DPI
+ * and are scaled for the monitor the panel appears on. */
+#define WHICHKEY_MAX_ROWS         64   /* hard cap on the bindings shown at once */
+#define DEFAULT_WHICHKEY_MARGIN   -1   /* <0 = auto: 5% of the monitor's height  */
+#define DEFAULT_WHICHKEY_PADDING  14   /* panel inner padding                    */
+#define DEFAULT_WHICHKEY_ROW_GAP  6    /* extra vertical space per row           */
+#define DEFAULT_WHICHKEY_COL_GAP  30   /* gap between columns                    */
+#define DEFAULT_WHICHKEY_KEY_GAP  10   /* gap between a key and its label        */
+#define DEFAULT_WHICHKEY_HDR_GAP  8    /* gap under the header                   */
+#define DEFAULT_WHICHKEY_MAX_ROWS 12   /* wrap into a new column past this many  */
+#define DEFAULT_WHICHKEY_FONT     L"Segoe UI"
+#define DEFAULT_WHICHKEY_FONT_SIZE 18
+#define DEFAULT_WHICHKEY_BORDER_W 1    /* outline thickness; 0 = no outline      */
+#define DEFAULT_WHICHKEY_OPACITY  235  /* 0-255, like the focus ring             */
+
 /* ---------------------------------------------------------------------------
  * Action enum — every possible WM operation
  * --------------------------------------------------------------------------- */
@@ -433,6 +448,24 @@ typedef enum {
     ATTACH_MASTER,
     ATTACH_AFTER,
 } AttachPolicy;
+
+/* ---------------------------------------------------------------------------
+ * Where the which-key panel sits on the focused monitor. Nine anchors: the
+ * three horizontal positions crossed with the three vertical ones, minus the
+ * combinations nobody names that way. WK_POS_BOTTOM (bottom centre) is the
+ * default and the historical placement.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    WK_POS_BOTTOM = 0,
+    WK_POS_TOP,
+    WK_POS_CENTER,
+    WK_POS_LEFT,
+    WK_POS_RIGHT,
+    WK_POS_TOP_LEFT,
+    WK_POS_TOP_RIGHT,
+    WK_POS_BOTTOM_LEFT,
+    WK_POS_BOTTOM_RIGHT,
+} WhichKeyPos;
 
 /* ---------------------------------------------------------------------------
  * Forward-declare KeyMap (used by KeyBinding)
@@ -837,6 +870,28 @@ typedef struct {
     COLORREF whichkey_fg;        /* action-label text                          */
     COLORREF whichkey_key_fg;    /* key + header accent                        */
     COLORREF whichkey_border;    /* panel outline                              */
+    /* Geometry and text. Every pixel field is a DESIGN pixel at 96 DPI, scaled
+     * for whichever monitor the panel lands on. Defaults live in
+     * config_apply_defaults(), which runs before whichkey_init() on every
+     * path — startup, reload and the built-in fallback config alike. */
+    WhichKeyPos whichkey_pos;    /* which edge/corner it anchors to            */
+    int      whichkey_margin;    /* gap to the monitor edge; <0 = auto         */
+    /* 0 = bound only by the monitor, ≤1 = a fraction of it, >1 = design px.
+     * A float because "half the screen" is the useful way to say it and a
+     * pixel count is the other. */
+    float    whichkey_max_w;
+    float    whichkey_max_h;
+    int      whichkey_max_rows;  /* rows per column before a new one starts    */
+    int      whichkey_padding;   /* panel inner padding                        */
+    int      whichkey_row_gap;   /* extra vertical space per row               */
+    int      whichkey_col_gap;   /* gap between columns                        */
+    int      whichkey_key_gap;   /* gap between a key and its label            */
+    int      whichkey_hdr_gap;   /* gap under the header                       */
+    wchar_t  whichkey_font[LF_FACESIZE];   /* family name; empty = Segoe UI    */
+    int      whichkey_font_size; /* text height in design px                   */
+    int      whichkey_border_w;  /* outline thickness; 0 = none                */
+    BYTE     whichkey_opacity;   /* whole-panel alpha, 0-255                   */
+    bool     whichkey_rounded;   /* Win11 rounded corners                      */
 
     /* --- tiling policy --- */
     FloatPolicy  float_policy;   /* FLOAT_RULES (default) or FLOAT_NEVER      */
