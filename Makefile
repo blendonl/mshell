@@ -164,9 +164,17 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
             $(TEST_DIR)/test_whichkey_math
 
 # --- Rules ---
-.PHONY: all clean check-lua dist test regs msi
+.PHONY: all clean check-lua dist test regs msi print-version
 
 all: check-lua $(TARGET) $(HELPER)
+
+# The release workflow decides whether to cut a release by comparing VERSION
+# against the tags already pushed, so something outside the Makefile has to
+# learn the version. It asks here rather than parsing line 10 with sed: a
+# second reader of the single source of truth is a second thing that can come
+# to disagree with it, and this one cannot.
+print-version:
+	@echo $(VERSION)
 
 # --- Version stamp ---
 # VERSION reaches the compiler as -DMSHELL_VERSION and windres as -DVER_MAJOR
