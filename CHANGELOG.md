@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.13.5 — 2026-07-28
+
 ### Added
 
 - **An `update` action, on `Win+Shift+u`** (and `Win` `x` `u` in
