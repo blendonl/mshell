@@ -647,24 +647,23 @@ static int lua_mshell_set_log_level(lua_State *L) {
 }
 
 /* ===========================================================================
- * mshell.set_start_desktop(name) — the desktop you land on at startup.
+ * mshell.set_start_desktop — REMOVED. The desktop you start on is a property of
+ * that desktop, so it is declared where the rest of its properties are:
  *
- * There is no desktop count to configure: desktops are created when you switch
- * to them and destroyed when you leave them empty, so at startup exactly one
- * exists and this names it. Defaults to "1".
+ *   mshell.desktop_rule("term", { default = true })
+ *
+ * This stub exists to say that out loud. Without it the call raises "attempt to
+ * call a nil value (field 'set_start_desktop')", the whole config is rejected,
+ * and you are staring at the fallback keymap trying to work out which line
+ * broke — for a config that was correct one release ago.
  * =========================================================================== */
 static int lua_mshell_set_start_desktop(lua_State *L) {
-    const char *name = luaL_checkstring(L, 1);
-
-    wchar_t wname[DESKTOP_NAME_MAX];
-    u8_to_w(name, wname, DESKTOP_NAME_MAX);
-    if (!desktop_name_ok(wname))
-        return luaL_error(L, "set_start_desktop: '%s' is not a usable desktop "
-                             "name — it must be non-empty, contain no spaces, "
-                             "and be under %d characters", name, DESKTOP_NAME_MAX);
-
-    wcscpy(g.start_desktop, wname);
-    return 0;
+    const char *name = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1)
+                                                     : "1";
+    return luaL_error(L, "set_start_desktop has been removed — the start "
+                         "desktop is a desktop rule now: "
+                         "mshell.desktop_rule(\"%s\", { default = true })",
+                      name);
 }
 
 /* ===========================================================================
@@ -674,6 +673,9 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  *             pattern: "web" for one desktop, "game-*" for a family, "*" for
  *             every desktop.
  *   opts    — table, any subset of:
+ *               default      = true           this is the desktop mshell
+ *                              starts on; "always" to outrank the session's
+ *                              memory of where you were (see below)
  *               app          = "firefox.exe"  open this when you enter the
  *                              desktop and it has no windows (and again after
  *                              you close the last one and come back)
@@ -697,6 +699,20 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  * Rules are matched when a desktop is created and re-applied on config reload,
  * so editing one takes effect on desktops that already exist — including a
  * layout you changed at runtime, which goes back to what the rule says.
+ *
+ * `default` is the exception to all of the above, because it names a desktop
+ * rather than describing one: exactly one desktop exists at startup and this
+ * says which. It therefore needs a literal name — "start on game-*" has no
+ * answer — and it is read once, when the config is loaded, rather than each
+ * time a desktop is created. Declare it twice and the LAST one wins, which is
+ * the same layering rule the other fields follow.
+ *
+ *   default = true        start here on a genuinely first run. On a restart the
+ *                         session's memory of where you were still wins, so
+ *                         restarting the shell leaves you where you are.
+ *   default = "always"    start here every time, session or not — for a config
+ *                         that says "I begin the day on 'term'" and means it.
+ *   default = "remember"  spells out the default; same as true.
  * =========================================================================== */
 static int lua_mshell_desktop_rule(lua_State *L) {
     reject_at_runtime(L, "desktop_rule");
@@ -713,6 +729,48 @@ static int lua_mshell_desktop_rule(lua_State *L) {
     if (!r->name_match[0])
         return luaL_error(L, "desktop_rule: the pattern is empty — use \"*\" to "
                              "match every desktop");
+
+    /* default = true | "always" | "remember" — the desktop to start on.
+     *
+     * Resolved here rather than stored on the rule: it is a single global
+     * answer, not a per-desktop one, and assigning it as each rule is read is
+     * what makes the last declaration win for free. */
+    lua_getfield(L, 2, "default");
+    {
+        int t = lua_type(L, -1);
+        if (t != LUA_TNIL && t != LUA_TBOOLEAN && t != LUA_TSTRING)
+            return luaL_error(L, "desktop_rule '%s': default must be true, "
+                                 "false, \"remember\" or \"always\"", pattern);
+
+        if (t == LUA_TSTRING || (t == LUA_TBOOLEAN && lua_toboolean(L, -1))) {
+            bool always = false;
+            if (t == LUA_TSTRING) {
+                const char *policy = lua_tostring(L, -1);
+                if      (strcmp(policy, "always")   == 0) always = true;
+                else if (strcmp(policy, "remember") == 0) always = false;
+                else return luaL_error(L, "desktop_rule '%s': unknown default "
+                                          "'%s' (expected true, false, "
+                                          "\"remember\" or \"always\")",
+                                       pattern, policy);
+            }
+
+            /* A pattern cannot be created, only matched. */
+            if (wcspbrk(r->name_match, L"*?"))
+                return luaL_error(L, "desktop_rule '%s': default needs a "
+                                     "literal desktop name, not a pattern — "
+                                     "mshell has to know which single desktop "
+                                     "to create at startup", pattern);
+            if (!desktop_name_ok(r->name_match))
+                return luaL_error(L, "desktop_rule '%s': not a usable desktop "
+                                     "name — it must be non-empty, contain no "
+                                     "spaces, and be under %d characters",
+                                  pattern, DESKTOP_NAME_MAX);
+
+            wcscpy(g.start_desktop, r->name_match);
+            g.start_desktop_always = always;
+        }
+    }
+    lua_pop(L, 1);
 
     /* app = "firefox.exe"          — launch it with no arguments
      * app = {"wt.exe", "-p Ubuntu"} — launch it with arguments */

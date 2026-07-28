@@ -134,6 +134,7 @@ typedef struct {
     LuaHook   lua_hooks[MAX_LUA_HOOKS];
     int       lua_hook_count;
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
+    bool      start_desktop_always;
     int       inner_gap, outer_gap, border_width;
     bool      smart_gaps;
     COLORREF  border_color, border_color_float, border_color_urgent;
@@ -194,6 +195,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     memcpy(s->lua_hooks, g.lua_hooks, sizeof(g.lua_hooks));
     s->lua_hook_count = g.lua_hook_count;
     wcscpy(s->start_desktop, g.start_desktop);
+    s->start_desktop_always = g.start_desktop_always;
     s->inner_gap         = g.inner_gap;
     s->outer_gap         = g.outer_gap;
     s->smart_gaps        = g.smart_gaps;
@@ -279,6 +281,7 @@ static void config_detach(void) {
     g.monitor_rule_count = 0;
     g.lua_hook_count     = 0;   /* refs die with the lua_State */
     g.start_desktop[0]   = L'\0';
+    g.start_desktop_always = false;
     g.root_map      = NULL;
     g.current_map   = NULL;
     g.leader_map    = NULL;
@@ -305,6 +308,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     memcpy(g.lua_hooks, s->lua_hooks, sizeof(g.lua_hooks));
     g.lua_hook_count = s->lua_hook_count;
     wcscpy(g.start_desktop, s->start_desktop);
+    g.start_desktop_always = s->start_desktop_always;
     g.inner_gap         = s->inner_gap;
     g.outer_gap         = s->outer_gap;
     g.smart_gaps        = s->smart_gaps;

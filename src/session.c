@@ -127,7 +127,9 @@ void session_apply(Desktop *dt) {
 
 /* The desktop to start on: the one you were last on, if it was recorded.
  * Returns NULL when there is nothing to restore, and the caller falls back to
- * the config's set_start_desktop. */
+ * the desktop rule that claimed `default`. Outranked by `default = "always"`,
+ * which is desktop_init's call to make, not ours — the session is recorded the
+ * same either way. */
 const wchar_t *session_start_desktop(void) {
     return s_saved_current[0] ? s_saved_current : NULL;
 }

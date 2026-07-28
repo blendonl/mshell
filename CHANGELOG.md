@@ -3,6 +3,38 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Changed
+
+- **The start desktop is a desktop rule now: `default = true`.** Where you begin
+  is a property of a desktop, so it is declared where that desktop's app,
+  layout, monitor and keys already are — one row of the config instead of a row
+  plus a setter further down the file. It needs a literal name rather than a
+  pattern (mshell has to create exactly one desktop at startup), and if two
+  rules claim it the **last** one wins, which is the layering rule the other
+  fields already follow.
+
+  ```lua
+  mshell.desktop_rule("term", { default = true, app = "alacritty.exe" })
+  ```
+
+  **`mshell.set_start_desktop` is gone.** Calling it now fails the config load
+  with a message naming the replacement, rather than the "attempt to call a nil
+  value" a removed function would otherwise give you.
+
+### Added
+
+- **`default = "always"` — the config decides where you start, every time.**
+  Naming a start desktop only ever settled a *first* run: the session file
+  remembers the desktop you were last on and that beat the config on every
+  subsequent start, so a config that said "I begin on `term`" was silently
+  ignored from the second boot onwards. `default = true` keeps that behaviour
+  (a restart leaves you where you are); `default = "always"` outranks the
+  session and lands you on the named desktop every start. The session is still
+  written either way, so going back to `default = true` returns you to wherever
+  you actually were.
+
 ## 0.13.3 — 2026-07-27
 
 ### Added
