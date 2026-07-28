@@ -46,12 +46,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      # msitools supplies wixl for the MSI. Lua's source is vendored in the
-      # repo, so unlike a from-scratch build there is nothing to fetch.
-      - name: Install mingw-w64 and msitools
+      # The MSI needs `wixl`, which is its own package — installing `msitools`
+      # gets you msiinfo and msibuild but no wixl, and `make msi` then skips
+      # and blames the package you just installed. Lua's source is vendored in
+      # the repo, so unlike a from-scratch build there is nothing to fetch.
+      - name: Install mingw-w64 and wixl
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 msitools
+          sudo apt-get install -y gcc-mingw-w64-x86-64 wixl
+
+          # `make msi` skips rather than fails when wixl is absent, which is
+          # right for a local build. Here it would mean discovering the problem
+          # after a full compile, so establish it now.
+          command -v wixl >/dev/null || {
+            echo "::error::wixl is not on PATH after installing it"; exit 1; }
+          wixl --version
 
       # Before the bump, so a broken tree costs ten seconds rather than a
       # rewritten changelog and a half-built release.
