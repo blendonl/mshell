@@ -278,10 +278,15 @@ regs: $(TARGET)
 	    echo "  SKIP  regs — wine not installed (the .reg files are checked in)"; \
 	fi
 
-# An MSI, built on Linux with wixl (msitools) so CI stays single-platform.
+# An MSI, built on Linux with wixl so CI stays single-platform.
 # UNSIGNED: there is no code-signing certificate, so SmartScreen will warn. The
 # zip remains the primary artifact; this is for people who want an installer
 # that Add/Remove Programs knows about.
+#
+# The package is `wixl`, not `msitools`. Both are built from the msitools
+# source, so the name below is the easy thing to get wrong: installing
+# msitools gets you msiinfo and msibuild, this target still skips, and the
+# reason it gives you is the package you just installed.
 msi: $(TARGET) $(HELPER)
 	@if command -v wixl >/dev/null 2>&1; then \
 	    echo "  MSI   dist/mshell-$(VERSION).msi"; \
@@ -289,7 +294,7 @@ msi: $(TARGET) $(HELPER)
 	    wixl -D Version=$(VERSION) -o "dist/mshell-$(VERSION).msi" \
 	         packaging/mshell.wxs; \
 	else \
-	    echo "  SKIP  msi — wixl not installed (apt install msitools)"; \
+	    echo "  SKIP  msi — wixl not installed (apt install wixl)"; \
 	fi
 
 # Assemble dist/mshell-$(VERSION)-win64/ and zip it. Uses Python's zipfile so
