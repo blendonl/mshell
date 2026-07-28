@@ -215,6 +215,7 @@ static const ActionNameEntry action_names[] = {
     {"spawn",            ACTION_SPAWN},
     {"reload",           ACTION_RELOAD},
     {"quit",             ACTION_QUIT},
+    {"update",           ACTION_UPDATE},
     {"panic",            ACTION_PANIC},
     {"lock",             ACTION_LOCK},
     {"logoff",           ACTION_LOGOFF},
@@ -1486,6 +1487,13 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_QUIT:
         g.running = false;
         PostQuitMessage(0);
+        break;
+
+    /* Returns at once: the fetch and the install run on their own thread and
+     * report by notification, because this one must not block the thread that
+     * services keybinds for the length of a download. */
+    case ACTION_UPDATE:
+        update_install_async();
         break;
 
     /* -- panic --------------------------------------------------------
