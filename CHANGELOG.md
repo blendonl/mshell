@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.13.4 — 2026-07-28
+
 ### Added
 
 - **`default = "always"` — the config decides where you start, every time.**
