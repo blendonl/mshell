@@ -1,0 +1,146 @@
+# Cuts a GitHub release when a push to main carries a new VERSION.
+#
+# The Makefile's VERSION is already the single source of truth — it is baked
+# into the binary, the VERSIONINFO, the log banner and the zip name — so this
+# workflow makes it the release trigger too, rather than introducing a second
+# thing to keep in step with it. Bumping VERSION and writing the changelog
+# section IS the release; merging that to main publishes it.
+#
+# Every other push to main is a no-op: the tag for the current VERSION already
+# exists, the gate says so, and the release job is skipped. That is the common
+# case and it costs one checkout.
+#
+# What this deliberately does NOT do is derive the version or the notes from
+# commit messages. CHANGELOG.md is written by hand, in prose, and is the better
+# artifact; a generated list of subject lines would be a downgrade that also
+# quietly stopped anyone writing the real thing.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Creating the tag and the release needs write access to the repo contents.
+permissions:
+  contents: write
+
+# Two pushes landing close together must not race to publish the same tag, and
+# an interrupted publish is worse than a slow one — so queue, never cancel.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Cheap checks only: decide whether there is a release to cut, and if there
+  # is, fail now rather than after a full build if the changelog is missing.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      release: ${{ steps.gate.outputs.release }}
+    steps:
+      # fetch-depth: 0 for the tags — the whole decision below is "does this
+      # version already have one".
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether this push is a release
+        id: gate
+        run: |
+          version=$(make -s print-version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "VERSION is $version and v$version is already tagged — nothing to release."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "VERSION is $version and v$version does not exist yet — releasing."
+          fi
+
+      # A release whose notes are empty because the changelog section was never
+      # written is exactly the kind of thing that only gets noticed once it is
+      # published and immutable. Catch it here, ten seconds in.
+      - name: Require a changelog section for this version
+        if: steps.gate.outputs.release == 'true'
+        run: |
+          version="${{ steps.gate.outputs.version }}"
+          if ! grep -qE "^## $version( |$)" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::No '## $version' section in CHANGELOG.md."
+            echo "The release notes come from that section. Move the Unreleased"
+            echo "entries under a '## $version — YYYY-MM-DD' heading and push again."
+            exit 1
+          fi
+
+  release:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # msitools supplies wixl for the optional MSI; Lua's source is vendored
+      # in the repo, so unlike a from-scratch build there is nothing to fetch.
+      - name: Install mingw-w64 and msitools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 msitools
+
+      - name: Host-side unit tests
+        run: make test
+
+      # One invocation so every object is compiled under the same flags, and
+      # -Werror so a release is never built to a laxer standard than CI. The
+      # checkout is clean, so the version stamp has nothing stale to catch —
+      # but the binary and the zip still get their version from the same place.
+      - name: Build and package
+        run: make CFLAGS_EXTRA=-Werror dist msi
+
+      # `make msi` prints SKIP and succeeds when wixl is missing, which is the
+      # right behaviour for a local build and the wrong one here: an apt failure
+      # would otherwise ship a release quietly missing an artifact.
+      - name: Check both artifacts exist
+        run: |
+          zip="dist/mshell-$VERSION-win64.zip"
+          msi="dist/mshell-$VERSION.msi"
+          for f in "$zip" "$msi"; do
+            test -s "$f" || { echo "::error::$f was not produced"; exit 1; }
+          done
+          ls -l "$zip" "$msi"
+
+      # Pull this version's section out of the changelog verbatim. Matching is
+      # by exact heading prefix, so "## 0.13.3" cannot pick up "## 0.13.30".
+      - name: Extract the release notes
+        run: |
+          awk -v v="$VERSION" '
+            BEGIN { head = "## " v }
+            !found && index($0, head) == 1 {
+              c = substr($0, length(head) + 1, 1)
+              if (c == "" || c == " ") { found = 1; next }
+            }
+            found && index($0, "## ") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+          # Trim the blank lines left by cutting between headings.
+          sed -i -e '/./,$!d' "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md" || {
+            echo "::error::the '## $VERSION' section in CHANGELOG.md is empty"; exit 1; }
+          cat "$RUNNER_TEMP/notes.md"
+
+      # `gh release create` makes the tag itself, pointed at this commit, so the
+      # tag and the release cannot disagree about what was built. Published, not
+      # drafted, and not a prerelease: src/update.c polls /releases/latest, and
+      # that endpoint ignores both.
+      - name: Publish
+        run: |
+          gh release create "v$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "mshell $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "dist/mshell-$VERSION-win64.zip" \
+            "dist/mshell-$VERSION.msi"
