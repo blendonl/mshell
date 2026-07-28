@@ -892,6 +892,12 @@ typedef struct {
      * then re-creates it by name. */
     wchar_t  last_desktop[DESKTOP_NAME_MAX];
     wchar_t  start_desktop[DESKTOP_NAME_MAX];
+    /* Both set by a desktop rule's `default` (the last one to claim it wins).
+     * start_desktop_always says whether that name outranks the desktop the
+     * session remembers: false (the default) keeps a restart returning you
+     * where you left off and lets the config name only the FIRST run's
+     * desktop; true makes every start land on it. See desktop_init(). */
+    bool     start_desktop_always;
 
     /* --- desktop rules --- */
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];

@@ -293,18 +293,25 @@ void desktop_gc(int slot) {
  * Startup — bring the first desktop into existence.
  *
  * Called once, after the config has been read: nothing exists before this, and
- * the config's set_start_desktop (default "1") decides what we land on. Every
- * other desktop is created by being switched to.
+ * the desktop rule that claimed `default` (or "1", when none did) decides what
+ * we land on. Every other desktop is created by being switched to.
  * =========================================================================== */
 void desktop_init(void) {
     /* Where you were last beats where the config says to start: coming back to
-     * the desktop you left is what "restart" should feel like. set_start_desktop
+     * the desktop you left is what "restart" should feel like. A `default` rule
      * still decides on a genuinely first run, and deleting session.txt restores
-     * that behaviour. */
+     * that behaviour.
+     *
+     * default = "always" is the config saying it would rather decide — every
+     * start lands on its name, session or no session. The session is still
+     * WRITTEN either way, so turning this back off returns you to wherever you
+     * were when you did. */
     const wchar_t *remembered = session_start_desktop();
-    const wchar_t *name = remembered            ? remembered
-                        : g.start_desktop[0]    ? g.start_desktop
-                                                : DEFAULT_START_DESKTOP;
+    const wchar_t *configured = g.start_desktop[0] ? g.start_desktop : NULL;
+    const wchar_t *name = (configured && g.start_desktop_always) ? configured
+                        : remembered                             ? remembered
+                        : configured                             ? configured
+                                                                 : DEFAULT_START_DESKTOP;
 
     g.desktop_count      = 0;
     g.current_desktop_id = 0;

@@ -321,7 +321,8 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- on it. "1" and "web" are both just names — a number is not an index into
 -- anything, which is why Win+1 goes to a desktop literally called "1".
 --
---   mshell.set_start_desktop("1")   -- the one you land on at startup (default)
+--   mshell.desktop_rule("1", { default = true })       -- the one you land on
+--   mshell.desktop_rule("1", { default = "always" })   -- ...even after a restart
 --
 -- So `switch_desktop "scratch"` always works, whether or not "scratch" appears
 -- anywhere in this file. What this section configures is the desktops you want
@@ -348,7 +349,14 @@ local desktops = {
     -- cancel out. To flip it the other way, add `app = "alacritty.exe"` to the
     -- rule here and delete the spawn; you'd then also get a fresh terminal
     -- whenever you close the last one and come back, which the spawn can't do.
-    { name = "term",  key = "t" },                                  -- leader g t
+    --
+    -- `default` marks the desktop mshell starts on — the only one that exists
+    -- then. On its own it decides a FIRST run only: mshell remembers where you
+    -- were (session.txt, next to this file) and a restart returns you there, so
+    -- restarting the shell doesn't move you. Write `default = "always"` to
+    -- overrule that and land here every time. Claim it twice and the last row
+    -- wins; claim it nowhere and you start on "1".
+    { name = "term",  key = "t", rule = { default = true       } }, -- leader g t
     { name = "web",   key = "b", rule = { app = "firefox.exe"  } }, -- leader g b
     -- `app` takes a bare command, or {command, arguments} when the program
     -- needs them — Discord's launcher does. Written as a table only when there
@@ -375,6 +383,10 @@ local desktops = {
 -- mshell.desktop_rule(pattern, opts). `pattern` is a desktop name, or a
 -- wildcard over names ("game-*", "*"). Every field is optional:
 --
+--   default      = true           the desktop mshell starts on. Needs a real
+--                                 name, not a pattern; the last rule to claim
+--                                 it wins. `default = "always"` also beats the
+--                                 desktop the session remembers you were on.
 --   app          = "firefox.exe"  open this whenever you enter the desktop and
 --                                 it's empty — a desktop that IS your browser
 --                                 rather than one you have to remember to put a
@@ -400,9 +412,6 @@ local desktops = {
 for _, d in ipairs(desktops) do
     if d.rule then mshell.desktop_rule(d.name, d.rule) end
 end
-
--- The desktop you land on at startup. It's the only one that exists then.
-mshell.set_start_desktop("term")
 
 -- Expand the table into the key tables for the two desktop submaps. The submaps
 -- themselves are built further down (they must be declared next to the other
