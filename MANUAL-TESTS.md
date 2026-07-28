@@ -539,6 +539,34 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
   delivered late and mistaken for a minimise-to-tray — and the window it names
   never returns, on any layout or desktop.
 
+## The `update` action
+
+`make test` covers the version comparison and the release-JSON reading
+(`test_update_parse`). What it cannot cover is the network, the unpack, and the
+hand-off to `install.bat` — which restarts the shell, so the last two rows need
+a real install rather than `--test`.
+
+Bind it if your config has not: `mshell.bind({mod, shft}, "u", "update")`.
+
+| # | Test | Expected |
+|---|------|----------|
+| 1 | Press it while already on the latest release. | One notification: "mshell *x.y.z* is the latest release." Nothing is downloaded and nothing restarts. |
+| 2 | Press it with no network (disable the adapter). | "Could not reach GitHub to check for updates." No crash, no partial download left in `%TEMP%\mshell-update`. |
+| 3 | Press it twice in quick succession, or hold the key down. | Only one run happens; the log says `update: already in progress`. |
+| 4 | Press it from a **portable** copy (`--test`, or an exe outside the installed location). | It downloads, verifies and unpacks, then declines: a warning naming the unpacked folder, and `install.bat` is **not** run. Your shell is unchanged. |
+| 5 | Temporarily edit the version in `Makefile` down (e.g. to `0.0.1`), rebuild, install, and press it. | It reports the real latest release as available and proceeds — this is how to exercise the whole path without waiting for a release. |
+| 6 | During #5, watch `%LOCALAPPDATA%\mshell\mshell.log`. | `update: sha256 verified (…)` appears before anything is unpacked. |
+| 7 | Corrupt the check: with a proxy or by pointing `UPDATE_URL` at a release whose digest will not match, run it. | "The download does not match the hash GitHub published. Nothing was installed." Nothing is unpacked. |
+
+**Shell-mode only** (needs a real install, Task Manager ready):
+
+- Run #5 as the installed shell. `install.bat`'s console appears, mshell is
+  killed and comes back on the new build; the version in the log banner is the
+  new one. Windows open beforehand are all still there and visible.
+- Do the same with `AutoRestartShell` set to `0`. install.bat says it is not
+  restarting and why; mshell keeps running on the old build, and the new one is
+  installed for the next sign-in.
+
 ## Shell-mode only
 
 These cannot be tested with `--test` and need a real install. Have Task Manager

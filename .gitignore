@@ -29,6 +29,7 @@ Thumbs.db
 /test/test_match
 /test/test_layout_math
 /test/test_whichkey_math
+/test/test_update_parse
 /mshelld.exe
 
 # Claude Code session state and worktrees — never part of the project.
