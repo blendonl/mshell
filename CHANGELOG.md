@@ -3,6 +3,30 @@
 All notable changes to mshell are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features + fixes).
 
+## Unreleased
+
+### Added
+
+- **Pointer speed, acceleration and the left/right button swap** are now
+  configurable — `set_mouse{ speed = 6, accel = false, swap_buttons = false }`,
+  alongside the gesture settings already on that call. Ranges match the Windows
+  UI: `speed` is the 1..20 slider with 10 as the middle notch, and `accel` is
+  the "enhance pointer precision" checkbox. This is another of the things
+  replacing Explorer takes away: they were reachable only from the Settings page
+  that a machine running mshell no longer has, and turning acceleration off is
+  not a niche request.
+
+  They are **borrowed rather than set**, on the same terms as the foreground
+  lock timeout: these are per-user Windows settings that every application on
+  the machine sees, so mshell snapshots what was there before its first write,
+  applies without `SPIF_UPDATEINIFILE` so nothing is written into your user
+  profile, and puts the originals back at exit — including from the crash
+  handler, since a config with `swap_buttons` on would otherwise leave a machine
+  whose shell just died with its buttons the wrong way round and nothing left to
+  change them from. Ownership is tracked per field, so deleting one line and
+  saving hands that setting back on the reload and leaves the other two alone. A
+  field the config never mentions is never touched.
+
 ## 0.13.3 — 2026-07-27
 
 ### Added
