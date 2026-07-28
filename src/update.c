@@ -27,7 +27,7 @@
 #include <winhttp.h>
 
 #define UPDATE_HOST  L"api.github.com"
-#define UPDATE_PATH  L"/repos/mshell/mshell/releases/latest"
+#define UPDATE_PATH  L"/repos/blendonl/mshell/releases/latest"
 #define UPDATE_KEY   L"Software\\mshell"
 
 /* Compare dotted versions numerically: "0.9.0" < "0.10.0", which a string
