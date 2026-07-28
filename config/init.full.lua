@@ -125,6 +125,15 @@ local valorant = first_existing(
     envpath("ProgramData",  [[\Microsoft\Windows\Start Menu\Programs\Riot Games\VALORANT.lnk]]),
     envpath("USERPROFILE",  [[\Desktop\VALORANT.lnk]]))
 
+-- KovaaK's, a Steam game — launched through Steam rather than by path. Steam
+-- resolves `steam://rungameid/<appid>` itself, so this finds the game in
+-- whichever library folder it's installed in (including one on another drive),
+-- survives the install moving, and lets Steam do its own launch (overlay, cloud
+-- sync) instead of starting the binary behind its back. ShellExecuteW opens a
+-- URL exactly like it opens a .lnk, which is why no path probing is needed
+-- here. 824270 is KovaaK's app id; swap it for any other game's.
+local kovaaks = "steam://rungameid/824270"
+
 ----------------------------------------------------------------------
 -- Appearance
 ----------------------------------------------------------------------
@@ -395,25 +404,32 @@ local desktops = {
     -- restarting the shell doesn't move you. Write `default = "always"` to
     -- overrule that and land here every time. Claim it twice and the last row
     -- wins; claim it nowhere and you start on "1".
-    { name = "term",  key = "t", rule = { default = true       } }, -- leader g t
-    { name = "web",   key = "b", rule = { app = "firefox.exe"  } }, -- leader g b
+    { name = "term",    key = "t", rule = { default = true       } }, -- leader g t
+    { name = "web",     key = "b", rule = { app = "firefox.exe"  } }, -- leader g b
     -- `app` takes a bare command, or {command, arguments} when the program
     -- needs them — Discord's launcher does. Written as a table only when there
     -- are arguments to pass, so both shapes are visible in one file.
-    { name = "chat",  key = "d", rule = { app = discord_args
-                                                and { discord, discord_args }
-                                                or  discord,
-                                          layout = "monocle"   } }, -- leader g d
+    { name = "chat",    key = "d", rule = { app = discord_args
+                                                  and { discord, discord_args }
+                                                  or  discord,
+                                            layout = "monocle"   } }, -- leader g d
     -- The game desktop floats: Valorant is borderless-fullscreen and has no
     -- business in a tiling grid, and anything else you open here (a launcher, a
     -- second game) gets the same treatment without needing its own window rule.
-    { name = "game",  key = "v", rule = { app = valorant,
-                                          float = true         } }, -- leader g v
-    { name = "files", key = "e", rule = { app = "explorer.exe" } }, -- leader g e
-    { name = "media", key = "u" },
-    { name = "notes", key = "n" },
-    { name = "misc",  key = "x" },
-    { name = "tmp",   key = "z" },
+    { name = "game",    key = "v", rule = { app = valorant,
+                                            float = true         } }, -- leader g v
+    -- Aim training gets a desktop of its own rather than sharing "game": it is
+    -- something you do next to a session, not instead of one, so having both
+    -- open at once shouldn't mean closing either. Floats for the same reason
+    -- "game" does — the trainer is borderless, and Steam's own windows (the
+    -- launcher, an update dialog) have no business in a grid either.
+    { name = "kovaaks", key = "k", rule = { app = kovaaks,
+                                            float = true         } }, -- leader g k
+    { name = "files",   key = "e", rule = { app = "explorer.exe" } }, -- leader g e
+    { name = "media",   key = "u" },
+    { name = "notes",   key = "n" },
+    { name = "misc",    key = "x" },
+    { name = "tmp",     key = "z" },
 }
 
 -- ---------------------------------------------------------------------
