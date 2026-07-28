@@ -1074,6 +1074,16 @@ typedef struct {
     HWND     drag_hwnd;
     POINT    drag_start;
 
+    /* Pointer settings that belong to WINDOWS rather than to mshell: the
+     * pointer-speed slider, "enhance pointer precision", and the left/right
+     * button swap. Tri-state, because "the config never mentions it" has to be
+     * distinguishable from "the config asks for the Windows default" — the
+     * first leaves the machine alone, the second overrides it. Borrowed for the
+     * session and handed back at shutdown; see mouse.c for the terms. */
+    int      mouse_speed;   /* 1..20 (10 is Windows' middle notch), 0 = leave */
+    int      mouse_accel;   /* 1 on, 0 off, -1 = leave alone                  */
+    int      mouse_swap;    /* 1 swapped, 0 normal, -1 = leave alone          */
+
     /* --- monitors (re-queried on display change) --- */
     Monitor  monitors[MAX_MONITORS];
     MonitorRule monitor_rules[MAX_MONITOR_RULES];
@@ -1500,6 +1510,12 @@ bool     mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held);
 void     mouse_mod_drag_apply(int dx, int dy);
 void     mouse_sync_hook(void);   /* install/remove the WH_MOUSE_LL hook */
 void     mouse_drag_end(HWND hwnd);
+
+/* Windows' own pointer settings (speed / acceleration / button swap). sync
+ * applies whatever the config asks for and gives back whatever it has stopped
+ * asking for; restore gives back everything. */
+void     mouse_sync_pointer(void);
+void     mouse_restore_pointer(void);
 
 bool     bar_init(void);
 void     bar_shutdown(void);
