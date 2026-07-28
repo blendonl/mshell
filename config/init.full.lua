@@ -652,6 +652,13 @@ mshell.submap("system", {
     -- keys is the point) — the way back is `mshell.exe --msg reload`, or just
     -- saving this file, since auto-reload is on.
     x = "panic",
+    -- Fetch the latest GitHub release and install it. Unlike the daily check
+    -- (set_update_check, further down) this one APPLIES: it downloads the
+    -- release, hashes it against the checksum GitHub published, unpacks it and
+    -- runs the install.bat inside — which restarts mshell, so expect the screen
+    -- to blink. It declines if this session isn't the installed shell, so
+    -- pressing it from a portable copy won't quietly take over your shell.
+    u = "update",
     -- Anything a config can do, a binding can do — including raising a
     -- notification. mshell.notify is one of the few API calls that is legal at
     -- RUNTIME as well as config time, which is what makes this possible.
