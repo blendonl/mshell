@@ -1,146 +1,164 @@
-# Cuts a GitHub release when a push to main carries a new VERSION.
+# Releases mshell on every push to main.
 #
-# The Makefile's VERSION is already the single source of truth — it is baked
-# into the binary, the VERSIONINFO, the log banner and the zip name — so this
-# workflow makes it the release trigger too, rather than introducing a second
-# thing to keep in step with it. Bumping VERSION and writing the changelog
-# section IS the release; merging that to main publishes it.
+# The version is decided here, not by hand: the patch number goes up, the
+# Makefile is rewritten, the Unreleased changelog section is promoted to a
+# released one, and that bump is committed back to main so the tree always
+# states the version it last shipped. The tag is created at that commit, so
+# the tag, the Makefile, the binary's VERSIONINFO and the zip name can never
+# disagree about what was released.
 #
-# Every other push to main is a no-op: the tag for the current VERSION already
-# exists, the gate says so, and the release job is skipped. That is the common
-# case and it costs one checkout.
+# A hand-written VERSION still wins. If the push itself changed VERSION — the
+# way you cut a minor or major release — that number is used as-is rather than
+# bumped past. Only an unchanged VERSION gets the automatic patch.
 #
-# What this deliberately does NOT do is derive the version or the notes from
-# commit messages. CHANGELOG.md is written by hand, in prose, and is the better
-# artifact; a generated list of subject lines would be a downgrade that also
-# quietly stopped anyone writing the real thing.
+# The commit this job makes uses GITHUB_TOKEN, which by design does not start
+# another workflow run, and carries [skip ci] as well. Two guards because the
+# failure mode is an infinite release loop.
 name: release
 
 on:
   push:
     branches: [main]
 
-# Creating the tag and the release needs write access to the repo contents.
+# Rewriting main and creating the release both need write access.
 permissions:
   contents: write
 
-# Two pushes landing close together must not race to publish the same tag, and
-# an interrupted publish is worse than a slow one — so queue, never cancel.
+# Releases must not overlap: two runs would both bump from the same number.
+# Queue them, and never cancel — a half-published release is worse than a slow
+# one.
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  # Cheap checks only: decide whether there is a release to cut, and if there
-  # is, fail now rather than after a full build if the changelog is missing.
-  gate:
+  release:
+    # Escape hatch for the pushes that genuinely should not ship — a typo in a
+    # comment, a README tweak. Everything else releases.
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.gate.outputs.version }}
-      release: ${{ steps.gate.outputs.release }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      # fetch-depth: 0 for the tags — the whole decision below is "does this
-      # version already have one".
+      # Full history: the fallback notes are built from the commit range since
+      # the last tag, and the bump is pushed back to main.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Decide whether this push is a release
-        id: gate
-        run: |
-          version=$(make -s print-version)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "VERSION is $version and v$version is already tagged — nothing to release."
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "VERSION is $version and v$version does not exist yet — releasing."
-          fi
-
-      # A release whose notes are empty because the changelog section was never
-      # written is exactly the kind of thing that only gets noticed once it is
-      # published and immutable. Catch it here, ten seconds in.
-      - name: Require a changelog section for this version
-        if: steps.gate.outputs.release == 'true'
-        run: |
-          version="${{ steps.gate.outputs.version }}"
-          if ! grep -qE "^## $version( |$)" CHANGELOG.md; then
-            echo "::error file=CHANGELOG.md::No '## $version' section in CHANGELOG.md."
-            echo "The release notes come from that section. Move the Unreleased"
-            echo "entries under a '## $version — YYYY-MM-DD' heading and push again."
-            exit 1
-          fi
-
-  release:
-    needs: gate
-    if: needs.gate.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.gate.outputs.version }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # msitools supplies wixl for the optional MSI; Lua's source is vendored
-      # in the repo, so unlike a from-scratch build there is nothing to fetch.
+      # msitools supplies wixl for the MSI. Lua's source is vendored in the
+      # repo, so unlike a from-scratch build there is nothing to fetch.
       - name: Install mingw-w64 and msitools
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64 msitools
 
+      # Before the bump, so a broken tree costs ten seconds rather than a
+      # rewritten changelog and a half-built release.
       - name: Host-side unit tests
         run: make test
 
+      # The previous VERSION comes from main's prior commit rather than from
+      # the tags: it answers "did this push change it", which is the actual
+      # question, and it keeps working on a repo whose tags were never pushed.
+      - name: Decide the version
+        id: version
+        run: |
+          cur=$(make -s print-version)
+          prev=$(git show HEAD~1:Makefile 2>/dev/null \
+                 | sed -nE 's/^VERSION[[:space:]]*=[[:space:]]*([0-9.]+).*/\1/p' | head -n1)
+
+          if [ -n "$prev" ] && [ "$cur" = "$prev" ]; then
+            new="${cur%.*}.$(( ${cur##*.} + 1 ))"
+            echo "VERSION is unchanged at $cur — bumping the patch to $new."
+          else
+            new="$cur"
+            echo "This push set VERSION to $cur — releasing that, not bumping past it."
+          fi
+
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Apply the version
+        env:
+          NEW: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i -E "s/^(VERSION[[:space:]]*=[[:space:]]*).*/\1$NEW/" Makefile
+
+          # A sed that silently matched nothing would ship the old number in
+          # the binary under the new name on the zip. Ask make, not the file.
+          got=$(make -s print-version)
+          test "$got" = "$NEW" || {
+            echo "::error file=Makefile::VERSION is '$got' after the rewrite, expected '$NEW'"
+            exit 1
+          }
+
+      # Only used when nobody wrote an Unreleased entry. Deliberately plain.
+      - name: Collect fallback notes
+        run: |
+          prev=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
+          git log --no-merges --reverse --pretty=format:'- %s' -n 50 "$range" \
+            > "$RUNNER_TEMP/fallback.md"
+          test -s "$RUNNER_TEMP/fallback.md" || echo "- Maintenance release." > "$RUNNER_TEMP/fallback.md"
+
+      # Promotes '## Unreleased' to '## <version> — <date>' and writes that
+      # section out as the release body. Falls back to the commit subjects
+      # above only when the section is empty.
+      - name: Roll the changelog
+        env:
+          NEW: ${{ steps.version.outputs.version }}
+        run: |
+          python3 .github/scripts/roll-changelog.py \
+            --version "$NEW" \
+            --date "$(date -u +%Y-%m-%d)" \
+            --fallback "$RUNNER_TEMP/fallback.md" \
+            --notes-out "$RUNNER_TEMP/notes.md"
+          echo "--- release notes ---"
+          cat "$RUNNER_TEMP/notes.md"
+
       # One invocation so every object is compiled under the same flags, and
-      # -Werror so a release is never built to a laxer standard than CI. The
-      # checkout is clean, so the version stamp has nothing stale to catch —
-      # but the binary and the zip still get their version from the same place.
+      # -Werror so a release is never built to a laxer standard than CI. This
+      # runs after the bump, so the binary bakes in the version being released.
       - name: Build and package
         run: make CFLAGS_EXTRA=-Werror dist msi
 
       # `make msi` prints SKIP and succeeds when wixl is missing, which is the
-      # right behaviour for a local build and the wrong one here: an apt failure
-      # would otherwise ship a release quietly missing an artifact.
+      # right behaviour for a local build and the wrong one here: an apt
+      # failure would otherwise ship a release quietly missing an artifact.
       - name: Check both artifacts exist
+        env:
+          NEW: ${{ steps.version.outputs.version }}
         run: |
-          zip="dist/mshell-$VERSION-win64.zip"
-          msi="dist/mshell-$VERSION.msi"
-          for f in "$zip" "$msi"; do
+          for f in "dist/mshell-$NEW-win64.zip" "dist/mshell-$NEW.msi"; do
             test -s "$f" || { echo "::error::$f was not produced"; exit 1; }
           done
-          ls -l "$zip" "$msi"
+          ls -l "dist/mshell-$NEW-win64.zip" "dist/mshell-$NEW.msi"
 
-      # Pull this version's section out of the changelog verbatim. Matching is
-      # by exact heading prefix, so "## 0.13.3" cannot pick up "## 0.13.30".
-      - name: Extract the release notes
+      # Pushed before the release is created, so a rejected push (main moved,
+      # branch protection) means no tag and no release rather than a tag with
+      # no commit behind it.
+      - name: Commit the bump back to main
+        id: commit
+        env:
+          NEW: ${{ steps.version.outputs.version }}
         run: |
-          awk -v v="$VERSION" '
-            BEGIN { head = "## " v }
-            !found && index($0, head) == 1 {
-              c = substr($0, length(head) + 1, 1)
-              if (c == "" || c == " ") { found = 1; next }
-            }
-            found && index($0, "## ") == 1 { exit }
-            found { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Makefile CHANGELOG.md
+          git commit -m "release: $NEW [skip ci]"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-          # Trim the blank lines left by cutting between headings.
-          sed -i -e '/./,$!d' "$RUNNER_TEMP/notes.md"
-          test -s "$RUNNER_TEMP/notes.md" || {
-            echo "::error::the '## $VERSION' section in CHANGELOG.md is empty"; exit 1; }
-          cat "$RUNNER_TEMP/notes.md"
-
-      # `gh release create` makes the tag itself, pointed at this commit, so the
-      # tag and the release cannot disagree about what was built. Published, not
-      # drafted, and not a prerelease: src/update.c polls /releases/latest, and
-      # that endpoint ignores both.
+      # gh creates the tag itself at the release commit. Published, not
+      # drafted, and not a prerelease: src/update.c polls /releases/latest,
+      # and that endpoint ignores both.
       - name: Publish
+        env:
+          NEW: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "v$VERSION" \
-            --target "$GITHUB_SHA" \
-            --title "mshell $VERSION" \
+          gh release create "v$NEW" \
+            --target "${{ steps.commit.outputs.sha }}" \
+            --title "mshell $NEW" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            "dist/mshell-$VERSION-win64.zip" \
-            "dist/mshell-$VERSION.msi"
+            "dist/mshell-$NEW-win64.zip" \
+            "dist/mshell-$NEW.msi"
