@@ -591,9 +591,17 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_MSHELL_UPDATE: {
-        /* The update thread owns the string until we take it. */
+        /* The update thread owns the string until we take it. wParam packs the
+         * toast's kind and how long it stays up: the update action reports
+         * progress and failures through here, and those do not deserve equal
+         * time on screen. */
         wchar_t *msg = (wchar_t *)lp;
-        if (msg) { notify_show(msg, NOTIFY_INFO, 15000); free(msg); }
+        if (msg) {
+            NotifyKind kind = (NotifyKind)LOWORD(wp);
+            int        ms   = (int)HIWORD(wp);
+            notify_show(msg, kind, ms > 0 ? ms : 15000);
+            free(msg);
+        }
         return 0;
     }
 
