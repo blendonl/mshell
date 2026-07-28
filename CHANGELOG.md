@@ -5,6 +5,37 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **An `update` action, on `Win+Shift+u`** (and `Win` `x` `u` in
+  `init.full.lua`): fetch the latest GitHub release and install it. It
+  downloads the release zip, hashes it against the SHA-256 the release
+  published, unpacks it and runs the `install.bat` inside — which is the
+  upgrade path already, renaming the running image rather than overwriting it
+  and restarting mshell itself. Progress and every failure arrive as
+  notifications. `mshell.exe --msg update` works too.
+
+  This is deliberately the opposite of `set_update_check`, which only ever
+  *tells* you a release exists and stays that way. An updater that swapped out
+  the **shell** unattended would turn a bad release into a black screen at
+  sign-in with no desktop left to fix it from — but a key you pressed, sitting
+  in front of the machine, is a different proposition, not a smaller helping of
+  the same one.
+
+  It declines in two cases. It will not run twice at once, so holding the key
+  down cannot race two downloads into one directory. And it will not install
+  when the running mshell is **not the registered shell** — from a portable
+  copy or `--test`, `install.bat` would not be upgrading anything, it would be
+  taking over your shell for the first time. There it stops after unpacking and
+  names the folder so you can run `install.bat` yourself.
+
+### Fixed
+
+- **The update check asked GitHub about a repository that does not exist.** It
+  polled `/repos/mshell/mshell/releases/latest` — an owner that is not ours —
+  so every check 404'd and `set_update_check(true)` had never once reported an
+  available release.
+
 ## 0.13.4 — 2026-07-28
 
 ### Added

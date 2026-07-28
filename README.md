@@ -191,6 +191,7 @@ so none of the numbered desktops has to exist in advance.
 | `Win+Shift+c` · `Win+Shift+x` | Close · kill |
 | `Win+Shift+Return` | Terminal |
 | `Win+Shift+r` · `Win+Shift+q` | Reload config · quit |
+| `Win+Shift+u` | Install the latest GitHub release (mshell restarts) |
 
 ### What `init.full.lua` adds
 
@@ -229,7 +230,7 @@ nothing needs three keys held at once:
 | Keys | Action |
 |------|--------|
 | **Tap `Win`** then `u` | **media** submap (persisting; `k`/`j` volume, `m` mute, `Space` play, `h`/`l` track, `s` stop) |
-| **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `x` panic, `i` notify current state) |
+| **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `u` update, `x` panic, `i` notify current state) |
 | **Tap `Win`** then `x p` | **power** submap (one-shot; `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `d` shut down) |
 | **Tap `Win`** then `c` | **capture** submap (one-shot; `s` whole screen, `w` focused window) |
 | **Tap `Win`** then `b` | **bsp** submap (persisting; `b` manual layout, `h`/`v` splits, `t`/`s` tabbed/stacked, `n`/`p` cycle, `=`/`-` resize) |
@@ -345,6 +346,24 @@ misbehaving does not need Task Manager to escape. It deliberately does not quit 
 exiting as the shell ends the session, which is the thing you were avoiding. Any
 reload undoes it (`mshell.exe --msg reload`, or saving `init.lua`); no keybinding
 can, because not binding keys is the point.
+
+**Updating from a keybinding.** The `update` action — `Win+Shift+u`, and `Win`
+`x` `u` in `init.full.lua` — fetches the latest GitHub release, checks the
+download against the SHA-256 the release published, unpacks it and runs the
+`install.bat` inside it. That script is the upgrade path either way: it renames
+the running image rather than overwriting it and restarts mshell itself, so the
+screen blinks and you come back on the new build. Progress, and every way it can
+fail, arrives as a notification.
+
+This is the deliberate opposite of `set_update_check`, which only ever *tells*
+you a release exists. An updater that swapped out the shell unattended would
+turn a bad release into a black screen at sign-in with no desktop left to fix it
+from; a key you pressed, while sitting in front of the machine, is a different
+proposition. Two things it will not do: run twice at once, and install when the
+running mshell is not the registered shell — from a portable copy or `--test`,
+`install.bat` would not be upgrading anything, it would be taking over your
+shell for the first time. In that case it unpacks and tells you where, and you
+run `install.bat` yourself. `mshell.exe --msg update` works too.
 
 **Safe mode.** Three starts inside a minute means the previous two did not
 survive one, so the next run skips `init.lua` entirely and comes up on the
