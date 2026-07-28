@@ -1286,7 +1286,8 @@ static int lua_mshell_set_dim(lua_State *L) {
 
 /* ===========================================================================
  * mshell.set_mouse(enabled)  |  mshell.set_mouse{ drag_swap=, follow=,
- *                                                 mod_drag= }
+ *                                                 mod_drag=, speed=, accel=,
+ *                                                 swap_buttons= }
  *
  * follow (focus-follows-mouse) is polled on a timer, not hooked — a
  * WH_MOUSE_LL hook fires on every pixel of movement, on the thread that has to
@@ -1295,6 +1296,16 @@ static int lua_mshell_set_dim(lua_State *L) {
  * mod_drag is the one part that genuinely needs that hook, because it has to
  * swallow the button-down. Hence opt-in, and hence the hook existing only while
  * it is on.
+ *
+ * speed / accel / swap_buttons are the last three, and they are a different
+ * kind of setting: they are WINDOWS', not mshell's, so every application on the
+ * machine sees them. They live here because replacing Explorer takes away the
+ * Settings page that used to reach them, and because "my mouse" is one idea
+ * rather than two. Omitting a field leaves the machine's own value alone;
+ * setting one borrows it for the session and hands it back at exit, which is
+ * what mouse.c is for. Ranges match the Windows UI: speed is the 1..20 slider
+ * with 10 as the middle notch, and accel is the "enhance pointer precision"
+ * checkbox.
  * =========================================================================== */
 static int lua_mshell_set_mouse_tbl(lua_State *L) {
     reject_at_runtime(L, "set_mouse");
@@ -1315,6 +1326,20 @@ static int lua_mshell_set_mouse_tbl(lua_State *L) {
 
     lua_getfield(L, 1, "mod_drag");
     if (!lua_isnil(L, -1)) g.mouse_mod_drag = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    /* --- Windows' own pointer settings; see the note above --- */
+    lua_getfield(L, 1, "speed");
+    if (lua_isnumber(L, -1))
+        g.mouse_speed = clamp_i((int)lua_tointeger(L, -1), 1, 20);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "accel");
+    if (!lua_isnil(L, -1)) g.mouse_accel = lua_toboolean(L, -1) ? 1 : 0;
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "swap_buttons");
+    if (!lua_isnil(L, -1)) g.mouse_swap = lua_toboolean(L, -1) ? 1 : 0;
     lua_pop(L, 1);
     return 0;
 }

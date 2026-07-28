@@ -30,6 +30,12 @@ static void config_apply_defaults(void) {
     g.mouse_enabled    = true;
     g.mouse_follow     = false;
     g.mouse_mod_drag   = false;
+    /* Not booleans: these three are Windows' settings, and "the config does not
+     * mention it" has to mean LEAVE THE MACHINE ALONE rather than "set it to
+     * whatever mshell thinks the default is". */
+    g.mouse_speed      = 0;
+    g.mouse_accel      = -1;
+    g.mouse_swap       = -1;
     g.bar_enabled      = true;
     g.bar_mode         = DEFAULT_BAR_MODE;
     g.bar_bottom       = false;
@@ -863,6 +869,8 @@ void config_reload(void) {
     bar_reconfigure();
     monitors_apply_rules();  /* the config's per-display overrides changed */
     mouse_sync_hook();       /* Mod+drag may have been turned on or off */
+    mouse_sync_pointer();    /* and speed/accel/swap may have changed — or
+                              * been dropped, which hands them back now */
     events_sync_urgency();   /* the setting may have flipped either way */
     desktop_reapply();
 }

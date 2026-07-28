@@ -5,6 +5,38 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **`default = "always"` — the config decides where you start, every time.**
+  Naming a start desktop only ever settled a *first* run: the session file
+  remembers the desktop you were last on and that beat the config on every
+  subsequent start, so a config that said "I begin on `term`" was silently
+  ignored from the second boot onwards. `default = true` keeps that behaviour
+  (a restart leaves you where you are); `default = "always"` outranks the
+  session and lands you on the named desktop every start. The session is still
+  written either way, so going back to `default = true` returns you to wherever
+  you actually were.
+
+- **Pointer speed, acceleration and the left/right button swap** are now
+  configurable — `set_mouse{ speed = 6, accel = false, swap_buttons = false }`,
+  alongside the gesture settings already on that call. Ranges match the Windows
+  UI: `speed` is the 1..20 slider with 10 as the middle notch, and `accel` is
+  the "enhance pointer precision" checkbox. This is another of the things
+  replacing Explorer takes away: they were reachable only from the Settings page
+  that a machine running mshell no longer has, and turning acceleration off is
+  not a niche request.
+
+  They are **borrowed rather than set**, on the same terms as the foreground
+  lock timeout: these are per-user Windows settings that every application on
+  the machine sees, so mshell snapshots what was there before its first write,
+  applies without `SPIF_UPDATEINIFILE` so nothing is written into your user
+  profile, and puts the originals back at exit — including from the crash
+  handler, since a config with `swap_buttons` on would otherwise leave a machine
+  whose shell just died with its buttons the wrong way round and nothing left to
+  change them from. Ownership is tracked per field, so deleting one line and
+  saving hands that setting back on the reload and leaves the other two alone. A
+  field the config never mentions is never touched.
+
 ### Changed
 
 - **The start desktop is a desktop rule now: `default = true`.** Where you begin
@@ -22,18 +54,6 @@ All notable changes to mshell are documented here. This project adheres to
   **`mshell.set_start_desktop` is gone.** Calling it now fails the config load
   with a message naming the replacement, rather than the "attempt to call a nil
   value" a removed function would otherwise give you.
-
-### Added
-
-- **`default = "always"` — the config decides where you start, every time.**
-  Naming a start desktop only ever settled a *first* run: the session file
-  remembers the desktop you were last on and that beat the config on every
-  subsequent start, so a config that said "I begin on `term`" was silently
-  ignored from the second boot onwards. `default = true` keeps that behaviour
-  (a restart leaves you where you are); `default = "always"` outranks the
-  session and lands you on the named desktop every start. The session is still
-  written either way, so going back to `default = true` returns you to wherever
-  you actually were.
 
 ## 0.13.3 — 2026-07-27
 

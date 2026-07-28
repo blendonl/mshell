@@ -449,6 +449,39 @@ and whether it is still readable.
   **deleted**, not set to a default.
 - `--tweaks reg input` prints a .reg file equivalent to what `apply` does.
 
+## Pointer settings (speed, acceleration, button swap)
+
+These are Windows' settings rather than mshell's, so the whole point of the
+tests is what is left behind. Note what Settings › Bluetooth & devices › Mouse
+says **before** you start — the checks below are all against that.
+
+- `mshell.set_mouse{ speed = 4 }` and save. The pointer slows down immediately,
+  and the Settings slider shows 4 if you open it.
+- Delete that line and save again. The pointer goes back to the speed you
+  started with — *not* to Windows' middle notch, and not to 4.
+- `mshell.set_mouse{ speed = 4, accel = false }`, save, then delete only the
+  `accel` line and save. Acceleration comes back on; the speed stays at 4.
+  (Per-field ownership: giving one back must not give the others back.)
+- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer returns to
+  its original speed.
+- With `speed = 4` applied, sign out and back in **without** quitting cleanly.
+  The pointer is at its original speed: mshell never wrote the change into the
+  user profile, so nothing survives the session.
+- `accel = false`: "Enhance pointer precision" unticks in Settings, and a
+  slow-then-fast drag of the same physical distance moves the pointer the same
+  distance both times.
+- `swap_buttons = true`: the right button becomes primary. Set it back to
+  `false` (rather than deleting the line) and it reverts.
+- A config that mentions **none** of the three: open Settings and confirm speed,
+  precision and button order are all untouched after a full mshell run and quit.
+- Crash restore covers an **unhandled exception** (the crash handler in main.c
+  restores the pointer alongside the hidden windows). It cannot be exercised
+  from Task Manager: `End task` is `TerminateProcess`, which bypasses every
+  handler in the process, so nothing runs and nothing is restored. What covers
+  that case instead is the setting never having been persisted — kill mshell
+  with `swap_buttons = true` applied and the buttons stay swapped until you sign
+  out, at which point Windows loads the profile value and they are normal again.
+
 ## Floating windows stay on top
 
 Open one tiled window and one floating one (`Win+f`), overlapping.
