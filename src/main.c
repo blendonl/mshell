@@ -63,6 +63,12 @@ static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
     window_restore_all_visibility();
     session_save();
 
+    /* And give the pointer back. A config with swap_buttons on would otherwise
+     * leave a machine whose shell has just died with its mouse buttons the
+     * wrong way round and nothing left to change them from. Three
+     * SystemParametersInfo calls: no allocation, no locks, no Lua. */
+    mouse_restore_pointer();
+
     log_shutdown();
     return EXCEPTION_CONTINUE_SEARCH;   /* let it crash properly / be reported */
 }
@@ -1038,6 +1044,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* --- manage windows that already exist --- */
     events_sync_urgency();   /* honours whatever the config just set */
     mouse_sync_hook();       /* ditto for Mod+drag's WH_MOUSE_LL hook */
+    mouse_sync_pointer();    /* and for the pointer settings it borrows */
     update_check_async();    /* opt-in, at most once a day, notify-only */
 
     window_manage_existing();
@@ -1110,6 +1117,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
                           (PVOID)(UINT_PTR)g_prev_fg_lock_timeout,
                           SPIF_SENDCHANGE);
+
+    /* Same argument, for the same reason: pointer speed, acceleration and the
+     * button swap are the machine's, and mshell only borrowed them. */
+    mouse_restore_pointer();
 
     /* destroy message window */
     if (g.message_window) {

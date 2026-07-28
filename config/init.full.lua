@@ -233,6 +233,45 @@ mshell.set_whichkey({
 -- mshell.set_auto_reload(false)    -- reload only on Win+Shift+R
 
 ----------------------------------------------------------------------
+-- Mouse
+----------------------------------------------------------------------
+-- The first three are mshell's own gestures:
+--
+--   drag_swap  drag a TILED window onto another and the two swap. A tiled
+--              window can't really be moved — the layout owns its geometry —
+--              so the drag is interpreted rather than obeyed. On by default.
+--   follow     focus follows the pointer. Polled every 120ms rather than
+--              hooked, because a mouse hook fires on every pixel of movement
+--              on the same thread that has to answer the keyboard hook.
+--   mod_drag   Win+drag moves a FLOATING window, Win+right-drag resizes it.
+--              Off by default: it is the one part that does need that hook,
+--              and it earns its keep on the borderless windows a
+--              `decorate = false` rule produces, which have no title bar.
+--
+-- The last three are WINDOWS' settings, not mshell's, and they are here
+-- because replacing Explorer takes away the Settings page that reached them.
+-- Every app on the machine sees them, so mshell BORROWS rather than sets: it
+-- notes what you had, never writes the change into your user profile, and
+-- puts the originals back when it exits. Delete a line and save and that one
+-- setting is handed back on the reload; the others stay. A setting you never
+-- mention is never touched at all.
+--
+--   speed         the pointer-speed slider, 1..20. 10 is Windows' middle
+--                 notch, which is where an untouched machine sits.
+--   accel         "enhance pointer precision". Usually what you want OFF if
+--                 you play anything, and the reason this knob is here.
+--   swap_buttons  left/right primary button.
+--
+-- mshell.set_mouse({
+--     drag_swap    = true,
+--     follow       = false,
+--     mod_drag     = true,
+--     speed        = 10,
+--     accel        = false,
+--     swap_buttons = false,
+-- })
+
+----------------------------------------------------------------------
 -- Tiling policy
 ----------------------------------------------------------------------
 mshell.set_layout("tiling")         -- default layout: tiling|monocle|grid|spiral|centered|bstack|columns
