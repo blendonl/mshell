@@ -191,6 +191,30 @@ The three modes are distinct and each key is its own toggle:
   ~250 ms later. The log must NOT show `config: file changed on disk` after a
   `Win+Space`; it must show it after actually saving `init.lua`.)
 
+## The start desktop (`default`)
+
+- With no rule claiming `default`, a first run (no `session.txt` beside
+  `init.lua`) lands on `"1"`.
+- `mshell.desktop_rule("term", { default = true })`, delete `session.txt`,
+  restart: you land on `term`. The startup log line reads
+  `starting on desktop 'term'`.
+- Now switch to another desktop, restart mshell: you come back to that desktop,
+  **not** `term` — `default = true` decides a first run only, and the session
+  remembers where you were.
+- Change it to `default = "always"` and repeat: every restart lands on `term`
+  no matter where you were. Switch back to `default = true` and restart once
+  more: you are returned to wherever you actually were, since the session was
+  being written the whole time.
+- Two rules claiming `default` (`"web"` then `"term"`): the **last** one wins.
+- These fail the config load with a message that names the problem, and the
+  previous config keeps running:
+  - `mshell.desktop_rule("game-*", { default = true })` — a pattern, not a name.
+  - `mshell.desktop_rule("term", { default = "sometimes" })` — unknown policy.
+  - `mshell.set_start_desktop("term")` — removed; the error names the rule to
+    write instead.
+- Editing `default` and saving reloads the config without moving you: it decides
+  where you *start*, and takes effect at the next launch.
+
 ## Logging
 
 - `%LOCALAPPDATA%\mshell\mshell.log` is created on first run, and the directory

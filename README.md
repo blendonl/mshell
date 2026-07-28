@@ -251,7 +251,7 @@ mshell.set_gaps(6, 6)              -- inner gap, outer gap
 mshell.set_smart_gaps(true)       -- no gaps when a monitor has one window
 mshell.set_border(2, 0xffffff)    -- focus ring: width, 0xRRGGBB
 mshell.set_background(0x000000)   -- desktop backdrop
-mshell.set_start_desktop("1")     -- the desktop you land on (the only one at boot)
+mshell.desktop_rule("1", { default = true })          -- the desktop you land on
 mshell.desktop_rule("web", { app = "firefox.exe" })   -- open it when empty
 mshell.desktop_rule("game", { float = true, app = "steam.exe" })
 mshell.desktop_rule("chat", { layout = "monocle", monitor = 1 })
@@ -300,7 +300,7 @@ API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 `set_gaps`,
 `set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
-`set_start_desktop`, `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
+`desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
 `set_float_policy`, `set_fullscreen_policy`, `set_float_placement`,
 `set_hide_policy`, `set_attach`, `set_mouse`,
 `set_manage_owned`, `set_float_on_top`,
@@ -438,12 +438,31 @@ with no windows on it **destroys** it. At startup exactly one desktop exists, th
 one you land on:
 
 ```lua
-mshell.set_start_desktop("term")   -- default "1"
+mshell.desktop_rule("term", { default = true })   -- start here; "1" if nothing claims it
 
 mshell.bind({mod}, "w", "switch_desktop",  "web")   -- creates "web" on demand
 mshell.bind({mod, shft}, "w", "move_to_desktop", "web")
 mshell.bind({mod}, "3", "switch_desktop",  "3")     -- "3" is a name, not an index
 ```
+
+`default` is a desktop rule like any other, so where you begin sits beside that
+desktop's app, layout and monitor instead of in a setter somewhere else. It needs
+a literal name rather than a pattern — mshell has to create exactly one desktop
+at startup — and if two rules claim it, the **last** one wins.
+
+By default it only decides a **first** run. mshell remembers the desktop you were
+last on (`session.txt`, beside your `init.lua`) and returns you there on a
+restart, which is what restarting your shell should feel like. `"always"` changes
+who wins:
+
+```lua
+mshell.desktop_rule("term", { default = true })       -- back where you left off
+mshell.desktop_rule("term", { default = "always" })   -- every start lands on "term"
+```
+
+The session is written either way, so going back to `default = true` picks up
+where you actually were; deleting `session.txt` has the same effect as
+`"always"`, once.
 
 Names are case-insensitive (the first spelling to create the desktop is the one
 displayed), can't contain whitespace, and are capped at 63 characters. Because a
