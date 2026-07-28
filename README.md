@@ -81,6 +81,11 @@ tiled, driven entirely from the keyboard and configured in Lua.
   keyboard without dedicated media keys would otherwise have no route to volume
   at all; and screenshots to `Pictures\Screenshots` and the clipboard. The
   worked config reaches all of them through submaps, so none needs a chord.
+  **Pointer speed, acceleration and the left/right button swap** come from the
+  same place — `set_mouse{speed=, accel=, swap_buttons=}` is the Settings page
+  you no longer have. They are *borrowed*, not set: mshell notes what the
+  machine had, never writes the change into your user profile, and hands the
+  originals back when it exits. A field you don't mention is left alone.
 - **Session persistence**: per-desktop layout, master ratio and master count
   survive a restart, and you come back to the desktop you left.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
