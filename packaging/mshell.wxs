@@ -9,8 +9,10 @@
   can leave you staring at a black screen if anything is wrong. An installer that
   did both would make "try mshell" and "replace my desktop" the same click.
 
-  So the MSI lays down C:\Program Files\mshell and stops. `mshell.exe --test`
-  runs it alongside Explorer; install.bat is what commits.
+  So the MSI lays down C:\Program Files\mshell and stops. `mshell.exe -t` runs
+  it alongside Explorer; install.bat is what commits. (That is the short form
+  of the test flag, spelled with one hyphen because an XML comment may not
+  contain two in a row — which is what kept this file from parsing at all.)
 
   UNSIGNED — there is no code-signing certificate, so SmartScreen will warn on
   first run. The release zip remains the primary artifact.
