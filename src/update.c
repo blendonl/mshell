@@ -375,12 +375,26 @@ static bool running_as_installed_shell(void) {
         RegCloseKey(k);
         if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
             continue;
-        shell[ARRAYSIZE(shell) - 1] = L'\0';
+
+        /* Registry strings are not required to be stored NUL-terminated, so
+         * terminate at the length that was actually returned rather than
+         * trusting the data. */
+        DWORD chars = sz / sizeof(wchar_t);
+        if (chars >= ARRAYSIZE(shell)) chars = ARRAYSIZE(shell) - 1;
+        shell[chars] = L'\0';
 
         /* The value is "<path>\mshell.exe --shell": take the exe, and allow it
-         * to have been written quoted. */
+         * to have been written quoted. REG_EXPAND_SZ is expanded rather than
+         * compared literally — install.bat writes REG_SZ, but a value someone
+         * set by hand as "%LOCALAPPDATA%\..." would otherwise never match and
+         * silently turn every update into a refusal. */
         wchar_t path[MAX_PATH * 2];
-        _snwprintf(path, ARRAYSIZE(path) - 1, L"%ls", shell);
+        if (type == REG_EXPAND_SZ) {
+            if (!ExpandEnvironmentStringsW(shell, path, ARRAYSIZE(path)))
+                continue;
+        } else {
+            _snwprintf(path, ARRAYSIZE(path) - 1, L"%ls", shell);
+        }
         path[ARRAYSIZE(path) - 1] = L'\0';
 
         wchar_t *p = path, *endq;
