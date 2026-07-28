@@ -37,6 +37,16 @@ All notable changes to mshell are documented here. This project adheres to
   saving hands that setting back on the reload and leaves the other two alone. A
   field the config never mentions is never touched.
 
+- **A `kovaaks` desktop in the worked config**, on `k` in both desktop submaps:
+  leader `g k` takes you there, leader `m k` sends the focused window. It
+  auto-launches KovaaK's through Steam rather than by path —
+  `steam://rungameid/824270`, which `ShellExecuteW` opens exactly like a `.lnk`,
+  so it finds the game in whichever library folder it is installed in and keeps
+  working when that moves. Floats like the `game` desktop does, and is separate
+  from it on purpose: aim training happens *next to* a session, so having both
+  open shouldn't mean closing one. Its window needs no rule of its own — the
+  `*\steamapps\common\*` rule already covers every Steam game.
+
 ### Changed
 
 - **The start desktop is a desktop rule now: `default = true`.** Where you begin
