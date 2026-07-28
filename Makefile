@@ -42,8 +42,10 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
 # powrprof: SetSuspendState (sleep/hibernate actions in system.c).
 # windowscodecs: WIC, which encodes screenshots to PNG. Not GDI+, whose headers
 # are C++-only under mingw-w64.
+# bcrypt: SHA-256, which update.c hashes a downloaded release with before it
+# unpacks it (update.c).
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lm
+           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lbcrypt -lm
 
 # --- Paths ---
 SRC_DIR  = src
@@ -78,6 +80,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/layout_tree.c \
               $(SRC_DIR)/anim.c \
               $(SRC_DIR)/tweaks.c \
+              $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/update.c
 
 # --- Lua sources (amalgamated or individual) ---
@@ -161,7 +164,7 @@ DIST_FILES = install.bat uninstall.bat \
 HOST_CC   = cc
 TEST_DIR  = test
 TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
-            $(TEST_DIR)/test_whichkey_math
+            $(TEST_DIR)/test_whichkey_math $(TEST_DIR)/test_update_parse
 
 # --- Rules ---
 .PHONY: all clean check-lua dist test regs msi print-version
@@ -322,6 +325,10 @@ $(TEST_DIR)/test_layout_math: $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_m
 $(TEST_DIR)/test_whichkey_math: $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c $(SRC_DIR)/whichkey_math.h
 	@echo "  HOSTCC $@"
 	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c
+
+$(TEST_DIR)/test_update_parse: $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c $(SRC_DIR)/update_parse.h
+	@echo "  HOSTCC $@"
+	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c
 
 test: $(TEST_BINS)
 	@echo "  TEST"

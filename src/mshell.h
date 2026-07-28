@@ -111,7 +111,9 @@
 #define WM_MSHELL_CAPTURE_KEY     (WM_APP + 6)
 
 /* Posted by the update thread with an owned wide string to show. Raised on the
- * main thread because every overlay is. */
+ * main thread because every overlay is. wParam is MAKEWPARAM(NotifyKind, ms):
+ * the update action reports progress, warnings and failures through this one
+ * message, so the kind and the dwell time have to travel with the text. */
 #define WM_MSHELL_UPDATE          (WM_APP + 7)
 
 /* ---------------------------------------------------------------------------
@@ -353,6 +355,11 @@ typedef enum {
     /* meta */
     ACTION_RELOAD,
     ACTION_QUIT,
+
+    /* Fetch the latest GitHub release and hand it to its own install.bat.
+     * Unlike the daily check this one applies — see update.c for why a
+     * keystroke is the thing that makes that difference. */
+    ACTION_UPDATE,
 
     /* Last resort: start Explorer alongside us and stop swallowing keys, so a
      * machine whose shell is misbehaving stays usable without Task Manager.
@@ -1608,6 +1615,11 @@ void     tweaks_emit_reg(const wchar_t *group, bool undo);
  * Prototypes — update.c
  * --------------------------------------------------------------------------- */
 void     update_check_async(void);
+
+/* The `update` action: check GitHub, download and verify the release zip,
+ * unpack it and run the install.bat inside it. Returns immediately — the work
+ * is on its own thread, and reports by notification. */
+void     update_install_async(void);
 
 void     ipc_start(void);   /* begin serving the per-session named pipe */
 void     ipc_stop(void);

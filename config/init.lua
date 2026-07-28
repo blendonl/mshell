@@ -142,6 +142,10 @@ mshell.bind({mod, shft}, "Return", "spawn", TERMINAL)
 mshell.bind({mod, shft}, "r", "reload")
 mshell.bind({mod, shft}, "q", "quit")   -- as the shell, this logs you out
 
+-- Install the latest GitHub release: downloads it, checks it against the hash
+-- GitHub published, and runs the install.bat inside it — which restarts mshell.
+mshell.bind({mod, shft}, "u", "update")
+
 ----------------------------------------------------------------------
 -- Leader mode — tap Win on its own, then press bare keys
 ----------------------------------------------------------------------
