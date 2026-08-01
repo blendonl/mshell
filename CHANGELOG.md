@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.13.6 — 2026-08-01
+
 ### Fixed
 
 - **Elevated windows no longer appear on every desktop.** Task Manager, regedit
