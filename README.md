@@ -89,10 +89,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **Session persistence**: per-desktop layout, master ratio and master count
   survive a restart, and you come back to the desktop you left.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
-  still tile windows owned by elevated processes — without your `init.lua` ever
-  becoming administrator-level code. No config, no Lua, no scripting: it moves
-  windows and nothing else. Installed by `install.bat`; started by
-  `install.bat /helper` from an administrator prompt.
+  still tile, hide and close windows owned by elevated processes — without your
+  `init.lua` ever becoming administrator-level code. No config, no Lua, no
+  scripting: it moves, cloaks and closes windows, and nothing else. Installed by
+  `install.bat`; started by `install.bat /helper` from an administrator prompt.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 
@@ -410,16 +410,20 @@ mshell.rule({ dialog = true }, "float")                     -- every picker/prom
 mshell.rule({ process = "code.exe", dialog = true }, "manage")  -- except this app's
 ```
 
-It is also the only match that pulls in *owned* windows, which mshell otherwise
-leaves untouched entirely. Untouched sounds like floating and mostly behaves
-like it, but such a window is invisible to the WM: it stays on screen when you
-switch desktops and no binding reaches it. Matched by a `dialog` rule it becomes
-a real floating window — hidden with its desktop, focusable, closable. The
-shipped config uses that one-liner plus named rules for `consent.exe` (UAC, only
-visible if the secure desktop is disabled) and `CredentialUIBroker.exe` (the
-"Windows Security" PIN/password box), which are separate processes rather than
-dialogs of the app that triggered them. `dialog = false` is the inverse, for a
-rule that should skip dialogs.
+Owned windows are the one kind a `dialog` rule *fully* manages that mshell
+otherwise only tracks. Every window is adopted in one of two tiers: *full*
+(tiled, decorated, ringed) or *tracked* — desktop membership and nothing else.
+An unmatched owned window lands in the tracked tier: it hides and shows with
+the desktop it opened on, is focusable, closable and movable between desktops,
+but keeps its own chrome and is never tiled. Matched by a `dialog` rule it
+becomes a real floating window, and `Win+f` on any tracked window promotes it
+to full management the same way. The shipped config uses the one-liner above
+plus named rules for `consent.exe` (UAC, only visible if the secure desktop is
+disabled) and `CredentialUIBroker.exe` (the "Windows Security" PIN/password
+box), which are separate processes rather than dialogs of the app that
+triggered them. `dialog = false` is the inverse, for a rule that should skip
+dialogs. An `ignore` rule is the way to leave a window on every desktop at
+once — it stays completely untouched.
 
 Naming a window in a rule also rescues it from the "caption-less popup =
 menu/tooltip" filter — the exact style a borderless-fullscreen game uses — so
@@ -430,10 +434,11 @@ windowed/borderless in their options), the frame and the fullscreen geometry are
 re-asserted whenever the window moves, not just once when it opens.
 
 **Force every window to tile.** Set `mshell.set_float_policy("never")`: any
-`"float"` rule is downgraded to `"manage"` and `Win+f` becomes a no-op, so
-nothing is ever stacked on top of a tiled window. (Owned/modal dialogs are
-still left alone unless you also set `set_manage_owned(true)`, which is
-aggressive — many dialogs are fixed-size and tile poorly.)
+`"float"` rule is downgraded to `"manage"` and `Win+f` becomes a no-op on
+managed windows, so nothing is ever stacked on top of a tiled window. (Tracked
+windows — owned/modal dialogs and the like — are still only desktop-bound,
+not tiled, unless you also set `set_manage_owned(true)`, which is aggressive:
+many dialogs are fixed-size and tile poorly.)
 
 **A float is an overlay.** Floating windows stay above the tiled grid — that is
 the default, and it holds across focus changes: focusing a tiled window, with a
@@ -692,7 +697,7 @@ destroyed behind you for being empty — it is simply re-created.
 |------|----------------|
 | `main.c` | bootstrap, elevation check, message loop, session window |
 | `keyboard.c` | low-level keyboard hook, submap state machine, action dispatch |
-| `window.c` | manageability filter, manage/unmanage, decoration stripping, rules |
+| `window.c` | adoption tiers (tracked/full), manage/unmanage, decoration stripping, rules |
 | `tiling.c` | 7 layout algorithms, per-monitor tiling, batched/frame-accurate placement |
 | `desktop.c` | virtual desktops (show/hide), reconfigure, reapply |
 | `events.c` | WinEvent hooks for window lifecycle tracking |
@@ -734,8 +739,9 @@ it moves the focus there.
 - **Layout is per-desktop, not per-monitor.** All monitors on a desktop share
   the same layout / `nmaster` / master-ratio; there is no independent per-monitor
   layout state yet.
-- **Owned/modal dialogs stay floating** unless `set_manage_owned(true)`. This is
-  deliberate: forcing fixed-size dialogs into a tile can make them unusable.
+- **Owned/modal dialogs are tracked, not tiled**, unless `set_manage_owned(true)`.
+  This is deliberate: forcing fixed-size dialogs into a tile can make them
+  unusable. They still hide and show with their desktop like any other window.
 - Directional focus/move uses window-rect centers; unusual custom layouts may
   not always match intuition (it falls back to cycling).
 

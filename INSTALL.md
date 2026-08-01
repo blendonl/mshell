@@ -142,13 +142,17 @@ elevated. In order of preference:
 
 `mshelld.exe` ships alongside mshell and exists to make elevating mshell
 unnecessary. It is elevated; mshell is not. It has **no config file, no Lua, no
-scripting, no window rules and no keyboard hook** — it accepts one request, "put
-this window at this rectangle", and performs it. Every decision stays in the
-unelevated shell.
+scripting, no window rules and no keyboard hook** — it accepts three requests:
+"put this window at this rectangle", "cloak or uncloak this window" and "post
+this window a WM_CLOSE". Every decision stays in the unelevated shell.
 
 With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
-and your `init.lua` is never administrator-level code.
+and, just as importantly, *hides* them when you switch desktops: cloaking a
+window is blocked by the same integrity check as moving it, so without the
+helper an elevated window is visible on every desktop at once. The close
+keybind reaches them too. And your `init.lua` is never administrator-level
+code.
 
 `install.bat` always installs `mshelld.exe` next to `mshell.exe` in `C:\mshell`,
 and always replaces it in step with the shell — the two shake hands on a
@@ -177,9 +181,9 @@ schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
 ```
 
 mshell finds it automatically; nothing needs configuring. If it is not running,
-mshell behaves exactly as it always has — those windows float — so this is
-entirely opt-in. `%TEMP%\mshelld.log` is the helper's own log if you need to see
-whether it started.
+mshell behaves exactly as it always has — those windows float and stay visible
+on every desktop — so this is entirely opt-in. `%TEMP%\mshelld.log` is the
+helper's own log if you need to see whether it started.
 
 **What it does not do:** keybinds still stop responding while an elevated window
 has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
@@ -188,9 +192,10 @@ state machine (submaps, leader, exit keys) inside the elevated process as
 config-derived data, which is a far larger surface than a list of rectangles and
 defeats the point of keeping the privileged half dumb. See `src/proto.h`.
 
-So: if you want elevated windows *tiled*, install the helper. If you additionally
-want keybinds to work while an elevated window has focus, that is the one
-remaining reason to elevate mshell itself — and the trade-off below applies.
+So: if you want elevated windows *tiled and desktop-bound*, install the helper.
+If you additionally want keybinds to work while an elevated window has focus,
+that is the one remaining reason to elevate mshell itself — and the trade-off
+below applies.
 
 ### What elevation does to `init.lua`
 
@@ -212,9 +217,9 @@ Two things follow:
 - **If you elevate, restrict the folder.** Keep `%APPDATA%\mshell\` from being
   writable by anything you would not trust with admin.
 
-The recommended option above — leave UAC on, let elevated windows float — avoids
-all of this. A future release moves the privileged work into a small helper with
-no config and no scripting, which removes the trade-off entirely.
+The recommended option above — leave UAC on, let the helper do the privileged
+work — avoids all of this: the elevated half is a small binary with no config
+and no scripting, and `init.lua` stays unprivileged.
 
 ## 5. Turn off the rest of Windows (optional, recommended)
 

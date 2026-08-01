@@ -5,6 +5,48 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **Elevated windows no longer appear on every desktop.** Task Manager, regedit
+  or an admin terminal could be *tiled* through the privileged helper, but a
+  desktop switch could never *hide* them: cloaking a window crosses the same
+  integrity boundary (UIPI) as moving it, and the helper forwarded only
+  `SetWindowPos` — so an elevated window sat on screen no matter which desktop
+  you were on. The helper protocol is now v2 and also forwards cloak/uncloak
+  and `WM_CLOSE`, with the shell keeping its "try locally first, ask only on
+  refusal" shape. Elevated windows hide and show with their desktop like any
+  other, and the close keybind reaches them. Upgrading replaces `mshelld.exe`
+  in step and restarts it; a v1/v2 mismatch is refused loudly rather than
+  silently half-working.
+
+- **Windows that escaped management no longer float across every desktop.** A
+  window that failed the manageability test at the instant it appeared was
+  never adopted at all, and nothing ever retried — so it belonged to no
+  desktop and stayed visible on all of them forever. That is how Steam (whose
+  updater holds its main window *disabled* at the moment it first shows) ended
+  up everywhere. Every window is now adopted at one of two tiers: *full*
+  (tiled, decorated, ringed — what "managed" always meant) or *tracked*
+  (desktop membership only). The tracked tier is what an owned dialog nobody
+  opted into, a modal-disabled window, or a too-small window gets: it hides
+  and shows with its desktop, is focusable, closable and movable between
+  desktops, and is otherwise untouched. `toggle_float` promotes a tracked
+  window to full management — landing it in the grid, which is also the new
+  way to tile something mshell deliberately left alone.
+
+- **Apps that open minimized are adopted.** A window that was already
+  minimized when mshell first saw it used to be rejected and never recovered;
+  it now joins its desktop and tiles when restored.
+
+### Changed
+
+- **Owned windows (dialogs, pop-ups) are always desktop-bound now.** They used
+  to sit over whichever desktop you switched to unless `set_manage_owned` or a
+  `dialog` rule claimed them. They now hide and show with the desktop they
+  opened on; `set_manage_owned(true)` and `dialog` rules keep their meaning as
+  the opt-in to *fully* manage (tile/float/decorate) them, and an `ignore`
+  rule keeps its meaning as the way to leave a window on every desktop at
+  once.
+
 ## 0.13.5 — 2026-07-28
 
 ### Added
