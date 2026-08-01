@@ -77,7 +77,10 @@ static int collect_clients(Desktop *dt, int mon, Client *out) {
     int n = 0;
     for (int i = 0; i < dt->count; i++) {
         ManagedWindow *mw = window_find(dt->windows[i]);
-        if (!mw || mw->is_floating) continue;
+        /* tracked_only implies is_floating; it is checked anyway, because
+         * "the layout never sees a tracked window" is the invariant the
+         * whole tier rests on. */
+        if (!mw || mw->is_floating || mw->tracked_only) continue;
         /* The app hid this one itself (minimise-to-tray). It keeps its place in
          * the desktop's window order — so it lands back where it was when the
          * app shows it again — but it gets no tile, and in particular is kept
