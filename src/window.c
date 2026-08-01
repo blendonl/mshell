@@ -471,10 +471,23 @@ void window_restore_all_decorations(void) {
 
 /* Ask DWM to stop compositing this window (or to resume). Cross-process, like
  * every other DwmSetWindowAttribute call here. Fails on a window whose process
- * has gone, which is why the result is checked rather than assumed. */
-static bool dwm_set_cloaked(HWND hwnd, bool on) {
+ * has gone, which is why the result is checked rather than assumed.
+ *
+ * The raw HRESULT is returned, not a bool: E_ACCESSDENIED means the window
+ * belongs to a higher-integrity process, which is the one failure the
+ * privileged helper can still do something about — every other failure (DWM
+ * off in a VM or a remote session) is what the SW_HIDE fallback is for. */
+static HRESULT dwm_set_cloaked(HWND hwnd, bool on) {
     BOOL v = on ? TRUE : FALSE;
-    return SUCCEEDED(DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &v, sizeof(v)));
+    return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &v, sizeof(v));
+}
+
+/* Cloak (or uncloak) with the helper as the second try. Returns true when the
+ * window ended up in the requested state by either route. */
+static bool window_set_cloaked(HWND hwnd, bool on) {
+    HRESULT hr = dwm_set_cloaked(hwnd, on);
+    if (hr == E_ACCESSDENIED && helper_set_cloak(hwnd, on)) hr = S_OK;
+    return SUCCEEDED(hr);
 }
 
 bool window_on_screen(const ManagedWindow *mw) {
@@ -504,16 +517,16 @@ void window_hide(ManagedWindow *mw) {
     mw->cloaked   = false;
 
     if (g.hide_policy == HIDE_CLOAK) {
-        mw->cloaked = true;
-        if (!dwm_set_cloaked(mw->hwnd, true)) {
-            /* DWM refused — composition off, which is possible in a VM or over
-             * some remote sessions. Fall back so desktops keep working.
+        mw->cloaked = window_set_cloaked(mw->hwnd, true);
+        if (!mw->cloaked) {
+            /* DWM refused and so did the helper — composition off, which is
+             * possible in a VM or over some remote sessions. Fall back so
+             * desktops keep working.
              *
              * Said once and loudly: a silent downgrade to the mechanism that
              * leaves the visible bit cleared changes how the hide is detected
              * and how the window comes back, and the log is the only place it
              * would ever show. */
-            mw->cloaked = false;
             static bool warned;
             if (!warned) {
                 warned = true;
@@ -548,7 +561,9 @@ void window_show(ManagedWindow *mw) {
      * two can drift apart if the policy changed under a hidden window, and a
      * window left cloaked is invisible with no way back. */
     if (mw->cloaked) {
-        dwm_set_cloaked(mw->hwnd, false);
+        if (!window_set_cloaked(mw->hwnd, false))
+            log_msg(LOG_WARN, L"show: could not uncloak %p — the window stays "
+                              L"invisible", (void *)mw->hwnd);
         mw->cloaked = false;
     }
 
@@ -645,8 +660,10 @@ void window_restore_all_visibility(void) {
 
         /* Unconditional, not `if (mw->cloaked)`: this is the last chance any
          * of these windows get, and a bad flag here costs the user a window
-         * they cannot see and cannot reach. */
-        dwm_set_cloaked(mw->hwnd, false);
+         * they cannot see and cannot reach. Goes through the helper too when
+         * the window belongs to a higher-integrity process — leaving an
+         * elevated window cloaked on the way out is the same lost window. */
+        window_set_cloaked(mw->hwnd, false);
         mw->cloaked   = false;
         mw->wm_hidden = false;
 
@@ -1541,7 +1558,13 @@ void window_focus_none(void) {
  * Close a window gracefully (WM_CLOSE)
  * =========================================================================== */
 void window_close(HWND hwnd) {
-    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    if (PostMessageW(hwnd, WM_CLOSE, 0, 0)) return;
+
+    /* UIPI refuses to carry even WM_CLOSE into a higher-integrity process —
+     * the helper runs on the other side of that boundary. */
+    if (GetLastError() == ERROR_ACCESS_DENIED) helper_close_window(hwnd);
+    else log_w(L"close: PostMessage(WM_CLOSE) on %p failed: %lu",
+               (void *)hwnd, GetLastError());
 }
 
 /* ===========================================================================
@@ -1594,7 +1617,7 @@ static BOOL CALLBACK uncloak_stray_proc(HWND hwnd, LPARAM lp) {
         return TRUE;
     if (cloaked != DWM_CLOAKED_SHELL) return TRUE;
 
-    if (dwm_set_cloaked(hwnd, false)) (*n)++;
+    if (window_set_cloaked(hwnd, false)) (*n)++;
     return TRUE;
 }
 

@@ -1481,15 +1481,18 @@ void     background_update(void);         /* resize/repaint on display change   
 /* ===========================================================================
  * Prototypes — helper.c (the privileged helper, mshelld.exe)
  *
- * Optional and absent by default. mshell attempts every placement itself and
- * only forwards the ones Windows refuses because the target belongs to a
- * higher-integrity process (UIPI) — so with no helper running, behaviour is
- * exactly what it was: such windows float instead of tiling.
+ * Optional and absent by default. mshell attempts every window operation
+ * itself and only forwards the ones Windows refuses because the target
+ * belongs to a higher-integrity process (UIPI) — so with no helper running,
+ * behaviour is exactly what it was: such windows float instead of tiling and
+ * cannot be taken off the screen by a desktop switch.
  * =========================================================================== */
 void     helper_init(void);
 void     helper_shutdown(void);
 bool     helper_available(void);
 bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
+bool     helper_set_cloak(HWND hwnd, bool on);
+bool     helper_close_window(HWND hwnd);
 
 /* SetWindowPos that falls back to the helper when the local call is refused.
  * Use this for placement; the raw API is still right for our own overlays. */

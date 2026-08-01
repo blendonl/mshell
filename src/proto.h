@@ -14,8 +14,15 @@
  *
  * mshelld.exe is the narrow way out. It is elevated, and it is deliberately
  * stupid: no Lua, no config file, no scripting, no window policy of its own. It
- * accepts one request — "put this window at this rectangle" — and performs it.
- * All the decisions stay in the unelevated shell.
+ * accepts three requests — "put this window at this rectangle", "cloak or
+ * uncloak this window", "post this window a WM_CLOSE" — and performs them. All
+ * the decisions stay in the unelevated shell.
+ *
+ * Moving is what tiling needs; cloaking is what desktop switching needs,
+ * because taking a window off the screen is blocked by exactly the same UIPI
+ * check as moving it (without this, an elevated window is tiled onto one
+ * desktop and then stares at you from all of them); and WM_CLOSE is how the
+ * close keybind reaches an elevated window at all.
  *
  * WHAT IS DELIBERATELY *NOT* HERE
  *
@@ -48,12 +55,14 @@
 
 #include <stdint.h>
 
-#define MSHELLD_PROTO_VERSION  1u
+#define MSHELLD_PROTO_VERSION  2u
 #define MSHELLD_PIPE_PREFIX    L"\\\\.\\pipe\\mshelld-"
 
 typedef enum {
     PROTO_HELLO = 1,   /* shell -> helper: version handshake            */
     PROTO_SETPOS,      /* shell -> helper: privileged SetWindowPos      */
+    PROTO_CLOAK,       /* shell -> helper: privileged cloak/uncloak     */
+    PROTO_CLOSE,       /* shell -> helper: privileged WM_CLOSE          */
     PROTO_OK,          /* helper -> shell: performed                    */
     PROTO_FAIL,        /* helper -> shell: refused or failed            */
 } ProtoType;
@@ -62,10 +71,13 @@ typedef struct {
     uint32_t type;
     uint32_t version;
 
-    /* PROTO_SETPOS. The HWND travels as a 64-bit integer because it is only
-     * ever a handle value here — the helper does not interpret it, it passes it
-     * to SetWindowPos and reports what happened. */
+    /* PROTO_SETPOS / PROTO_CLOAK / PROTO_CLOSE. The HWND travels as a 64-bit
+     * integer because it is only ever a handle value here — the helper does
+     * not interpret it, it passes it to the Win32 call and reports what
+     * happened. */
     uint64_t hwnd;
     int32_t  x, y, w, h;
+    /* PROTO_SETPOS: SWP_* flags (masked to the move-only set by the helper).
+     * PROTO_CLOAK: bit 0 set = cloak, clear = uncloak. */
     uint32_t flags;
 } ProtoMsg;

@@ -140,7 +140,7 @@ HELPER        = mshelld.exe
 # in particular not on the MShell global — precisely so it can link here.
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
-HELPER_LDLIBS = -luser32 -ladvapi32
+HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
 
 # --- Release packaging ---
 DISTNAME = mshell-$(VERSION)-win64

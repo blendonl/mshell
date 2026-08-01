@@ -1,21 +1,23 @@
 /*
  * mshelld.c — mshell's privileged helper.
  *
- * A separate, elevated process whose entire job is to move windows that the
- * unelevated shell is not allowed to move (UIPI). See proto.h for why this
- * exists and, just as importantly, for what was deliberately left out of it.
+ * A separate, elevated process whose entire job is to touch windows that the
+ * unelevated shell is not allowed to touch (UIPI): move them, cloak/uncloak
+ * them, ask them to close. See proto.h for why this exists and, just as
+ * importantly, for what was deliberately left out of it.
  *
  * The design rule this file exists to honour: THIS PROCESS MUST STAY STUPID.
  * It has no config file, no Lua, no window rules, no layout, no keyboard hook
  * and no state beyond the pipe. It cannot be extended from a config, because it
- * never reads one. Every decision about which window goes where is made in the
- * unelevated shell, and arrives here as a rectangle.
+ * never reads one. Every decision about which window gets what is made in the
+ * unelevated shell, and arrives here as a rectangle, a cloak flag or a close.
  *
  * That matters because the helper is, unavoidably, a small privilege boundary
- * of its own: anything that can talk to its pipe can move any window on the
- * desktop. The DACL restricts that to the interactive user, which is the same
- * user who could already move their own windows — so the granted capability is
- * "reposition windows of your own elevated processes", not "become admin".
+ * of its own: anything that can talk to its pipe can move, hide or close any
+ * window on the desktop. The DACL restricts that to the interactive user,
+ * which is the same user who could already do those things to their own
+ * windows — so the granted capability is "manage windows of your own elevated
+ * processes", not "become admin".
  *
  * Build: produced by the same `make` as mshell.exe. Run elevated, e.g. from a
  * logon scheduled task with "Run with highest privileges" — see INSTALL.md.
@@ -31,11 +33,18 @@
 
 #include <windows.h>
 #include <sddl.h>
+#include <dwmapi.h>
 #include <stdio.h>
 #include <stdbool.h>
 
 #include "proto.h"
 #include "log.h"
+
+/* Cloaking postdates the mingw-w64 headers, same as in window.c: the id is
+ * passed as a DWORD, so the raw value is all that is needed. */
+#ifndef DWMWA_CLOAK
+#define DWMWA_CLOAK 13
+#endif
 
 /* ---------------------------------------------------------------------------
  * Logging — mshelld.log, deliberately its own file. The helper may run as a
@@ -75,7 +84,8 @@ static PSECURITY_DESCRIPTOR build_sd(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * The one privileged operation.
+ * The privileged operations. All three stay inside the same authority the DACL
+ * already grants: the interactive user driving windows of their own session.
  * --------------------------------------------------------------------------- */
 static bool do_setpos(const ProtoMsg *m) {
     HWND h = (HWND)(uintptr_t)m->hwnd;
@@ -91,6 +101,27 @@ static bool do_setpos(const ProtoMsg *m) {
     flags |= SWP_NOACTIVATE | SWP_NOZORDER;
 
     return SetWindowPos(h, NULL, m->x, m->y, m->w, m->h, flags) != 0;
+}
+
+/* Take a window off the screen (or put it back) the way mshell does for its
+ * own windows: DWM cloaking. A hidden window is just a moved one nobody can
+ * see — the same UIPI boundary, so it belongs on the same side of it. */
+static bool do_cloak(const ProtoMsg *m) {
+    HWND h = (HWND)(uintptr_t)m->hwnd;
+    if (!h || !IsWindow(h)) return false;
+
+    BOOL v = (m->flags & 1u) ? TRUE : FALSE;
+    return SUCCEEDED(DwmSetWindowAttribute(h, DWMWA_CLOAK, &v, sizeof(v)));
+}
+
+/* Ask a window to close itself. A posted WM_CLOSE is the polite close — the
+ * app still gets to veto or clean up — and posting it crosses the same
+ * integrity boundary moving does. */
+static bool do_close(const ProtoMsg *m) {
+    HWND h = (HWND)(uintptr_t)m->hwnd;
+    if (!h || !IsWindow(h)) return false;
+
+    return PostMessageW(h, WM_CLOSE, 0, 0) != 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -123,9 +154,19 @@ static void serve(HANDLE pipe) {
 
         case PROTO_SETPOS:
             /* HELLO first, so a client that has not agreed the protocol cannot
-             * reach the privileged operation at all. */
+             * reach the privileged operations at all. */
             if (!greeted)                 out.type = PROTO_FAIL;
             else if (!do_setpos(&in))     out.type = PROTO_FAIL;
+            break;
+
+        case PROTO_CLOAK:
+            if (!greeted)                 out.type = PROTO_FAIL;
+            else if (!do_cloak(&in))      out.type = PROTO_FAIL;
+            break;
+
+        case PROTO_CLOSE:
+            if (!greeted)                 out.type = PROTO_FAIL;
+            else if (!do_close(&in))      out.type = PROTO_FAIL;
             break;
 
         default:

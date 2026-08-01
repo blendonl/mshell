@@ -22,7 +22,6 @@
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 static bool   g_tried;      /* we have attempted a connection at least once */
-static bool   g_warned;     /* the "no helper" note is logged once, not per call */
 
 static void helper_pipe_name(wchar_t *out, size_t cap) {
     DWORD sid = 0;
@@ -69,7 +68,7 @@ static bool helper_connect(void) {
 
     g_pipe = p;
     log_err(L"helper: connected to mshelld.exe — windows owned by elevated "
-            L"processes can now be tiled");
+            L"processes can now be tiled, hidden and closed");
     return true;
 }
 
@@ -77,8 +76,9 @@ void helper_init(void) {
     g_tried = true;
     if (!helper_connect())
         log_w(L"helper: mshelld.exe is not running; windows owned by elevated "
-              L"processes will float instead of tiling (this is the default "
-              L"and is fine unless you want them tiled)");
+              L"processes will float instead of tiling and will stay on every "
+              L"desktop (this is the default and is fine unless you want them "
+              L"tiled and desktop-bound)");
 }
 
 void helper_shutdown(void) {
@@ -92,21 +92,46 @@ bool helper_available(void) {
 /* ===========================================================================
  * The fallback itself.
  *
- * Called ONLY after a local SetWindowPos has already failed. Returns true if
- * the helper performed it.
+ * Called ONLY after the local attempt has already failed. Returns true if the
+ * helper performed it.
  * =========================================================================== */
-bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
-    if (!g_tried) helper_init();
 
-    if (!helper_connect()) {
-        if (!g_warned) {
-            g_warned = true;
-            log_err(L"helper: a window could not be placed (it belongs to a "
-                    L"higher-integrity process) and no mshelld.exe is running "
-                    L"to do it — see INSTALL.md. This is logged once.");
-        }
+/* The request/response round trip, for a caller that holds the connection.
+ * A failed conversation drops the handle so the next call reconnects rather
+ * than failing forever on a dead pipe. */
+static bool helper_exchange(ProtoMsg *req) {
+    ProtoMsg reply = {0};
+    DWORD    n     = 0;
+
+    if (!WriteFile(g_pipe, req, sizeof *req, &n, NULL) ||
+        !ReadFile(g_pipe, &reply, sizeof reply, &n, NULL) ||
+        n != sizeof reply) {
+        helper_disconnect();
         return false;
     }
+    return reply.type == PROTO_OK;
+}
+
+/* Connect, or explain once (per call site) why the operation is not going to
+ * happen. `warned` is the caller's static, so each operation gets its own
+ * one-shot message naming what was refused. */
+static bool helper_ready(const wchar_t *op, bool *warned) {
+    if (!g_tried) helper_init();
+
+    if (helper_connect()) return true;
+
+    if (!*warned) {
+        *warned = true;
+        log_err(L"helper: %ls (the window belongs to a higher-integrity "
+                L"process) and no mshelld.exe is running to do it — see "
+                L"INSTALL.md. This is logged once.", op);
+    }
+    return false;
+}
+
+bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
+    static bool warned;
+    if (!helper_ready(L"a window could not be placed", &warned)) return false;
 
     ProtoMsg req = {
         .type    = PROTO_SETPOS,
@@ -115,17 +140,30 @@ bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
         .x = x, .y = y, .w = w, .h = h,
         .flags   = flags,
     };
-    ProtoMsg reply = {0};
-    DWORD    n     = 0;
+    return helper_exchange(&req);
+}
 
-    if (!WriteFile(g_pipe, &req, sizeof req, &n, NULL) ||
-        !ReadFile(g_pipe, &reply, sizeof reply, &n, NULL) ||
-        n != sizeof reply) {
-        /* The helper went away mid-conversation. Drop the handle so the next
-         * call reconnects rather than failing forever on a dead pipe. */
-        helper_disconnect();
-        return false;
-    }
+bool helper_set_cloak(HWND hwnd, bool on) {
+    static bool warned;
+    if (!helper_ready(L"a window could not be hidden", &warned)) return false;
 
-    return reply.type == PROTO_OK;
+    ProtoMsg req = {
+        .type    = PROTO_CLOAK,
+        .version = MSHELLD_PROTO_VERSION,
+        .hwnd    = (uint64_t)(uintptr_t)hwnd,
+        .flags   = on ? 1u : 0u,
+    };
+    return helper_exchange(&req);
+}
+
+bool helper_close_window(HWND hwnd) {
+    static bool warned;
+    if (!helper_ready(L"a window could not be closed", &warned)) return false;
+
+    ProtoMsg req = {
+        .type    = PROTO_CLOSE,
+        .version = MSHELLD_PROTO_VERSION,
+        .hwnd    = (uint64_t)(uintptr_t)hwnd,
+    };
+    return helper_exchange(&req);
 }
