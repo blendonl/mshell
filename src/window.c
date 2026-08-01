@@ -129,7 +129,27 @@ static bool any_dialog_rule(void) {
 }
 
 /* ===========================================================================
- * is_manageable — filter out windows we should never touch
+ * window_adopt_tier — how much control a window gets
+ *
+ * Every window that shows up is adopted at one of three tiers:
+ *
+ *   ADOPT_NO     left completely alone: invisible or child windows, the
+ *                shell's own UI, menus and tooltips, cloaked windows, and
+ *                anything an "ignore" rule names. These must stay out of the
+ *                desktop machinery — and "ignore" stays the way to claim a
+ *                window for every desktop at once (overlays).
+ *   ADOPT_TRACK  desktop membership only. The window is hidden and shown with
+ *                its desktop, focusable, closable and movable between
+ *                desktops — but it keeps its own chrome and geometry and is
+ *                never tiled. This is the tier for windows full management
+ *                would only fight: an owned dialog nobody opted into, a window
+ *                disabled by its own modal (Steam's updater holding its main
+ *                window), or one too small to tile. Crucially it is adopted
+ *                ALL THE SAME — a window rejected here is the window that ends
+ *                up visible on every desktop, which is the bug this tier
+ *                exists to kill. toggle_float promotes one to full.
+ *   ADOPT_FULL   the layout owns it: tiled (or rule-floated), decorations
+ *                stripped, focus ring.
  *
  * `rule_out` reports the matched rule (or NULL) so the caller does not have to
  * look it up a second time. window_rule_lookup() opens the owning process and
@@ -139,47 +159,56 @@ static bool any_dialog_rule(void) {
  * Within this function the lookup is likewise done at most once, memoised in
  * `rule` / `looked_up`.
  * =========================================================================== */
-static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
+typedef enum {
+    ADOPT_NO = 0,
+    ADOPT_TRACK,
+    ADOPT_FULL,
+} AdoptTier;
+
+static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
     const WindowRule *rule      = NULL;
     bool              looked_up = false;
 
     if (rule_out) *rule_out = NULL;
 
-    if (!IsWindowVisible(hwnd))   return false;
-    if (!IsWindowEnabled(hwnd))   return false;
-    if (IsIconic(hwnd))           return false;  /* minimized */
+    if (!IsWindowVisible(hwnd))   return ADOPT_NO;
+
+    /* A window disabled by its own modal dialog cannot be tiled sensibly, but
+     * it still belongs to the desktop it opened on. */
+    if (!IsWindowEnabled(hwnd))   return ADOPT_TRACK;
 
     /* Must be a root window */
-    if (GetAncestor(hwnd, GA_ROOT) != hwnd) return false;
+    if (GetAncestor(hwnd, GA_ROOT) != hwnd) return ADOPT_NO;
 
-    /* Owned windows are dialogs/pop-ups that normally float. Managing them is
-     * opt-in (mshell.set_manage_owned(true)) because modal/fixed-size dialogs
-     * tile poorly.
+    /* Owned windows are dialogs/pop-ups that normally float. FULLY managing
+     * them is opt-in (mshell.set_manage_owned(true)) because modal/fixed-size
+     * dialogs tile poorly — but tracking them is not: an owned window belongs
+     * to the desktop it opened on like any other.
      *
      * A `dialog` rule is the second, narrower opt-in: it says "manage these,
      * but floating", which is the whole difference between a file picker mshell
-     * has never heard of — untouched, and therefore still sitting over whatever
-     * desktop you switch to next — and one it hides, focuses and closes like
-     * any other window. Only a rule that explicitly asked about dialogs may
-     * rescue an owned window: a broad path rule (the game-library ones) must
-     * not start pulling in every splash screen and error box a game owns. */
+     * merely hides and shows with its desktop and one it also floats, focuses
+     * and decorates like any other window. Only a rule that explicitly asked
+     * about dialogs may rescue an owned window: a broad path rule (the
+     * game-library ones) must not start pulling in every splash screen and
+     * error box a game owns. */
     if (!g.manage_owned && GetWindow(hwnd, GW_OWNER) != NULL) {
-        if (!any_dialog_rule()) return false;
+        if (!any_dialog_rule()) return ADOPT_TRACK;
         rule = window_rule_lookup(hwnd);
         looked_up = true;
-        if (!rule || !rule->set_dialog || !rule->dialog ||
-            rule->action == RULE_IGNORE)
-            return false;
+        if (rule && rule->action == RULE_IGNORE) return ADOPT_NO;
+        if (!rule || !rule->set_dialog || !rule->dialog)
+            return ADOPT_TRACK;
     }
 
     LONG_PTR style   = GetWindowLongPtrW(hwnd, GWL_STYLE);
     LONG_PTR exstyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 
     /* Tool windows are popups; ignore */
-    if (exstyle & WS_EX_TOOLWINDOW) return false;
+    if (exstyle & WS_EX_TOOLWINDOW) return ADOPT_NO;
 
     /* Must be an overlapped or popup window (not a child) */
-    if (!(style & WS_OVERLAPPEDWINDOW) && !(style & WS_POPUP)) return false;
+    if (!(style & WS_OVERLAPPEDWINDOW) && !(style & WS_POPUP)) return ADOPT_NO;
 
     /* Ignore the desktop window and explorer's shell UI. The shell classes
      * matter in --test mode (explorer is running); harmless otherwise.
@@ -211,22 +240,27 @@ static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
         NULL
     };
     for (const wchar_t **p = ignore_classes; *p; p++) {
-        if (_wcsicmp(cls, *p) == 0) return false;
+        if (_wcsicmp(cls, *p) == 0) return ADOPT_NO;
     }
 
-    /* Minimum size (configurable) */
-    RECT r;
-    if (!GetWindowRect(hwnd, &r)) return false;
-    int w = r.right  - r.left;
-    int h = r.bottom - r.top;
-    if (w < g.min_win_w || h < g.min_win_h) return false;
+    /* Minimum size (configurable). Skipped while the window is minimized: an
+     * iconic window reports a near-zero rect, and its real size comes back
+     * with the restore — rejecting one here used to strand apps that open
+     * minimized outside management for good. */
+    if (!IsIconic(hwnd)) {
+        RECT r;
+        if (!GetWindowRect(hwnd, &r)) return ADOPT_TRACK;
+        int w = r.right  - r.left;
+        int h = r.bottom - r.top;
+        if (w < g.min_win_w || h < g.min_win_h) return ADOPT_TRACK;
+    }
 
     /* Cloaked windows (Windows 8+ DWM feature). Last of the cheap rejections
      * because it is the only one that leaves the process. */
     int cloaked = 0;
     if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
                                         &cloaked, sizeof(cloaked))) && cloaked)
-        return false;
+        return ADOPT_NO;
 
     /* Rules have the last word, and they are consulted *before* the caption-less
      * popup heuristic below — a rule that names a window is the user telling us
@@ -239,17 +273,17 @@ static bool is_manageable(HWND hwnd, const WindowRule **rule_out) {
      * broad path rule still carves exceptions out of it. */
     if (!looked_up) rule = window_rule_lookup(hwnd);
     if (rule_out) *rule_out = rule;
-    if (rule) return rule->action != RULE_IGNORE;
+    if (rule) return rule->action != RULE_IGNORE ? ADOPT_FULL : ADOPT_NO;
 
     /* Ignore invisible/system popups */
     if ((style & WS_POPUP) && !(style & WS_CAPTION) && !(style & WS_SIZEBOX))
-        return false;  /* likely a menu / tooltip */
+        return ADOPT_NO;  /* likely a menu / tooltip */
 
-    return true;
+    return ADOPT_FULL;
 }
 
 bool window_is_manageable(HWND hwnd) {
-    return is_manageable(hwnd, NULL);
+    return window_adopt_tier(hwnd, NULL) == ADOPT_FULL;
 }
 
 /* ===========================================================================
@@ -684,20 +718,71 @@ void window_restore_all_visibility(void) {
 }
 
 /* ===========================================================================
+ * window_grant_full — the full-management half of adoption
+ *
+ * Everything the layout, the ring and the rules engine need, decided from the
+ * matched rule (or NULL). Shared by window_manage(), adopting a window that
+ * just appeared, and window_promote(), upgrading a tracked one — the callers
+ * own placement, which is the only thing that differs between them.
+ * =========================================================================== */
+static void window_grant_full(ManagedWindow *mw, const WindowRule *rule) {
+    HWND hwnd = mw->hwnd;
+
+    mw->no_ring    = rule ? rule->no_ring    : false;
+    mw->no_decor   = rule ? rule->no_decor   : false;
+    mw->fullscreen = rule ? rule->fullscreen : false;
+    /* Resolved once, here, rather than read from the globals at each placement:
+     * the rule is already in hand, and pinning the answer to the window means a
+     * later reload cannot change where a window that is already open jumps to
+     * the next time it floats. */
+    mw->center_float = (rule && rule->set_center)
+                       ? rule->center
+                       : (g.float_placement == FLOAT_PLACE_CENTER);
+
+    /* Square corners + no open/close animation, for tiled and floating alike. */
+    window_apply_flat(hwnd);
+
+    /* Two ways to end up floating: the window's own rule says so, or the
+     * desktop it opened on floats everything (desktop_rule float = true). The
+     * desktop's answer is deliberately checked AFTER FLOAT_NEVER's veto of the
+     * window rule, because it is the more specific statement of intent: a
+     * config that tiles aggressively and then carves out one floating desktop
+     * means it. toggle_float still works there either way — `float` sets what
+     * new windows START as, it doesn't pin them. */
+    Desktop *dt = desktop_by_id(mw->desktop_id);
+    mw->is_floating =
+        (rule && rule->action == RULE_FLOAT && g.float_policy != FLOAT_NEVER)
+        || (dt && dt->float_all);
+
+    if (mw->is_floating) {
+        /* Floating normally means "hands off the frame": the window keeps
+         * whatever chrome it came with. `decorate = false` opts out of that —
+         * float for the geometry, borderless for the looks. */
+        if (mw->no_decor) window_strip_decorations(hwnd);
+    } else {
+        window_strip_decorations(hwnd);
+    }
+
+    /* Recorded before anything places the window, because it is one of the
+     * answers to "who owns this rect": a window that starts fullscreen is
+     * claiming the whole monitor, and neither the centring nor the tile pass
+     * should put it somewhere else first. */
+    if (rule && rule->start_fullscreen) mw->fs_mode = FS_WINDOW;
+}
+
+/* ===========================================================================
  * Manage a window — bring it under WM control
  * =========================================================================== */
 void window_manage(HWND hwnd) {
-    /* Already managed? */
+    /* Already adopted? */
     if (window_index_of(hwnd) >= 0) return;
 
-    /* One lookup for both questions — is_manageable already resolved the rule
+    /* One lookup for both questions — the tier test already resolved the rule
      * (opening the owning process to do it), so asking again here would double
      * the cost of every window that appears anywhere on the system. */
     const WindowRule *rule = NULL;
-    if (!is_manageable(hwnd, &rule)) return;
-
-    RuleAction action = rule ? rule->action : RULE_MANAGE;
-    if (action == RULE_IGNORE) return;
+    AdoptTier tier = window_adopt_tier(hwnd, &rule);
+    if (tier == ADOPT_NO) return;
 
     /* Grow managed array if needed */
     if (g.managed_count >= MAX_MANAGED_WINDOWS) return;
@@ -721,75 +806,56 @@ void window_manage(HWND hwnd) {
     memset(mw, 0, sizeof(*mw));
     mw->hwnd       = hwnd;
     mw->desktop_id = dt->id;
-    /* Tile it where it opened — unless the desktop is pinned to a display, in
-     * which case that is where the desktop's windows go. */
-    {
-        /* A desktop pinned to a display wins: it moves ALL its windows there,
-         * so honouring a per-window pin against it would just be undone on the
-         * next reload. Otherwise the rule's pin, then wherever it opened. */
-        int mon = monitor_of_window(hwnd);
-        if (rule && rule->set_monitor) mon = rule->monitor;
-        if (dt->monitor >= 0 && dt->monitor < g.monitor_count) mon = dt->monitor;
-        window_set_monitor(mw, mon);
-    }
     mw->cfact      = 1.0f;
-    mw->no_ring    = rule ? rule->no_ring    : false;
-    mw->no_decor   = rule ? rule->no_decor   : false;
-    mw->fullscreen = rule ? rule->fullscreen : false;
-    /* Resolved once, here, rather than read from the globals at each placement:
-     * the rule is already in hand, and pinning the answer to the window means a
-     * later reload cannot change where a window that is already open jumps to
-     * the next time it floats. */
-    mw->center_float = (rule && rule->set_center)
-                       ? rule->center
-                       : (g.float_placement == FLOAT_PLACE_CENTER);
 
-    /* Square corners + no open/close animation, for tiled and floating alike. */
-    window_apply_flat(hwnd);
-
-    /* Two ways to end up floating: the window's own rule says so, or the
-     * desktop it opened on floats everything (desktop_rule float = true). The
-     * desktop's answer is deliberately checked AFTER FLOAT_NEVER's veto of the
-     * window rule, because it is the more specific statement of intent: a
-     * config that tiles aggressively and then carves out one floating desktop
-     * means it. toggle_float still works there either way — `float` sets what
-     * new windows START as, it doesn't pin them. */
-    bool floating = (action == RULE_FLOAT && g.float_policy != FLOAT_NEVER)
-                    || dt->float_all;
-
-    if (floating) {
-        mw->is_floating = true;
-        /* Floating normally means "hands off the frame": the window keeps
-         * whatever chrome it came with. `decorate = false` opts out of that —
-         * float for the geometry, borderless for the looks. */
-        if (mw->no_decor) window_strip_decorations(hwnd);
+    if (tier == ADOPT_TRACK) {
+        /* Desktop membership and window control, nothing else: the window
+         * keeps its chrome and the rect it opened with. Floating by
+         * construction, so the layout never offers it a tile, and no ring —
+         * it would claim the window for a layout it is not in. */
+        mw->tracked_only = true;
+        mw->is_floating  = true;
+        mw->no_ring      = true;
+        /* Record where it opened (window_set_monitor only records; it does
+         * not move anything). */
+        window_set_monitor(mw, monitor_of_window(hwnd));
     } else {
-        window_strip_decorations(hwnd);
-    }
+        window_grant_full(mw, rule);
 
-    /* Recorded before anything below places the window, because it is one of
-     * the answers to "who owns this rect": a window that starts fullscreen is
-     * claiming the whole monitor, and neither the centring nor the tile pass
-     * should put it somewhere else first. */
-    if (rule && rule->start_fullscreen) mw->fs_mode = FS_WINDOW;
+        /* Tile it where it opened — unless the desktop is pinned to a display,
+         * in which case that is where the desktop's windows go. */
+        {
+            /* A desktop pinned to a display wins: it moves ALL its windows
+             * there, so honouring a per-window pin against it would just be
+             * undone on the next reload. Otherwise the rule's pin, then
+             * wherever it opened. */
+            int mon = monitor_of_window(hwnd);
+            if (rule && rule->set_monitor) mon = rule->monitor;
+            if (dt->monitor >= 0 && dt->monitor < g.monitor_count)
+                mon = dt->monitor;
+            window_set_monitor(mw, mon);
+        }
 
-    /* A fixed rect only means anything for a window the layout is not going to
-     * place. Applied before the tile pass so the first frame is already right,
-     * and recorded as applied so the drift detector reads it as ours. */
-    if (mw->is_floating && rule && rule->set_geometry) {
-        RECT want = { rule->x, rule->y, rule->x + rule->w, rule->y + rule->h };
-        RECT adj  = window_adjust_for_frame(hwnd, want);
-        window_set_pos(hwnd, adj.left, adj.top,
-                       adj.right - adj.left, adj.bottom - adj.top,
-                       SWP_NOZORDER | SWP_NOACTIVATE);
-        mw->applied_rect = want;
-        mw->has_applied  = true;
-    } else if (mw->is_floating) {
-        /* Nothing more specific asked for a rect, so the placement policy gets
-         * it. Also before the tile pass, for the same reason: the first frame
-         * the user sees should already be in the right place, not a frame in
-         * the corner followed by a jump to the middle. */
-        window_center_float(hwnd);
+        /* A fixed rect only means anything for a window the layout is not
+         * going to place. Applied before the tile pass so the first frame is
+         * already right, and recorded as applied so the drift detector reads
+         * it as ours. */
+        if (mw->is_floating && rule && rule->set_geometry) {
+            RECT want = { rule->x, rule->y, rule->x + rule->w,
+                          rule->y + rule->h };
+            RECT adj  = window_adjust_for_frame(hwnd, want);
+            window_set_pos(hwnd, adj.left, adj.top,
+                           adj.right - adj.left, adj.bottom - adj.top,
+                           SWP_NOZORDER | SWP_NOACTIVATE);
+            mw->applied_rect = want;
+            mw->has_applied  = true;
+        } else if (mw->is_floating) {
+            /* Nothing more specific asked for a rect, so the placement policy
+             * gets it. Also before the tile pass, for the same reason: the
+             * first frame the user sees should already be in the right place,
+             * not a frame in the corner followed by a jump to the middle. */
+            window_center_float(hwnd);
+        }
     }
 
     desktop_add_window(hwnd, slot);
@@ -805,16 +871,47 @@ void window_manage(HWND hwnd) {
     tile_current();
 
     /* The tiler never places floating windows, so a fullscreen rule does it
-     * here. No-op for tiled windows — the layout already owns their geometry. */
+     * here. No-op for tiled windows — the layout already owns their geometry —
+     * and for tracked ones, which carry no fullscreen flag. */
     window_apply_fullscreen(hwnd);
 
-    log_w(L"Managed: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
+    log_w(L"%ls: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
+          tier == ADOPT_TRACK ? L"Tracking" : L"Managed",
           (void *)hwnd, dt->name, mw->is_floating, mw->no_decor,
           mw->fullscreen);
 
     /* Last, once the window is fully set up, so a handler sees its final
      * state (desktop, floating, monitor) rather than a half-built record. */
     lua_fire(LUA_EVENT_WINDOW_OPEN, hwnd, NULL);
+}
+
+/* ===========================================================================
+ * Promote a tracked window to full management.
+ *
+ * The window is already adopted — this flips the tier, re-resolving the rule
+ * so no_decor/no_ring/floating land the way they would have had the window
+ * been fully manageable when it arrived (Steam's main window, adopted while
+ * its updater held it disabled, is the case this exists for). Placement is
+ * deliberately NOT re-run: the window keeps the desktop, monitor and rect it
+ * already has — promoting must not teleport a window you are looking at.
+ * =========================================================================== */
+void window_promote(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || !mw->tracked_only) return;
+
+    mw->tracked_only = false;
+    window_grant_full(mw, window_rule_lookup(hwnd));
+
+    /* It may join the grid now — forget the rect bookkeeping the tracked tier
+     * never maintained, so the next pass actually places it. */
+    mw->has_applied = false;
+
+    /* Same tail as window_manage: the tiler never places floating windows, so
+     * a fullscreen rule is applied here. A no-op without one. */
+    window_apply_fullscreen(hwnd);
+
+    log_w(L"promoted to full management: %p (float=%d)", (void *)hwnd,
+          mw->is_floating);
 }
 
 /* ===========================================================================

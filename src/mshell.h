@@ -599,7 +599,17 @@ struct KeyMap {
 };
 
 /* ---------------------------------------------------------------------------
- * ManagedWindow — our record for every window we manage
+ * ManagedWindow — our record for every window we control
+ *
+ * Control comes in two tiers (tracked_only):
+ *   - FULL    the layout owns it: tiled (or rule-floated), decorations
+ *             stripped, focus ring, geometry managed.
+ *   - TRACKED desktop membership and nothing else: it is hidden and shown
+ *             with its desktop, focusable, closable and movable between
+ *             desktops, but it keeps its own chrome and geometry and is
+ *             never tiled. toggle_float promotes a tracked window to full.
+ * Every adopted window is at least tracked — a window mshell does nothing to
+ * is a window that escapes onto every desktop.
  * --------------------------------------------------------------------------- */
 typedef struct {
     HWND      hwnd;
@@ -610,6 +620,9 @@ typedef struct {
      * window back where it was rather than wherever the index now points. */
     wchar_t   monitor_device[CCHDEVICENAME];
     bool      is_floating;           /* exempt from tiling                  */
+    bool      tracked_only;          /* desktop-bound but otherwise untouched
+                                      * (see the tier note above). Implies
+                                      * is_floating and no_ring.             */
     bool      no_ring;               /* suppress the focus ring (games)     */
     bool      no_decor;              /* strip the frame even while floating,
                                       * and never add the thin WS_BORDER    */
@@ -1307,6 +1320,10 @@ void     window_show(ManagedWindow *mw);
  * every window on every desktop. */
 bool     window_on_screen(const ManagedWindow *mw);
 void     window_set_floating(HWND hwnd, bool floating);
+/* Upgrade a tracked-only window to full management (see the tier note on
+ * ManagedWindow): the layout, decoration and ring rules all start applying.
+ * A no-op on a window that is already fully managed. */
+void     window_promote(HWND hwnd);
 void     window_center_float(HWND hwnd);  /* no-op unless it should be centred */
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 /* The float half of the pass on its own — every focus change re-asserts it,

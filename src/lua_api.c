@@ -971,7 +971,9 @@ static int lua_mshell_set_attach(lua_State *L) {
     return 0;
 }
 
-/* mshell.set_manage_owned(enabled) — also tile owned/dialog windows (risky) */
+/* mshell.set_manage_owned(enabled) — FULLY manage owned/dialog windows (risky).
+ * Owned windows are always adopted either way: they hide and show with their
+ * desktop regardless. This only decides whether the layout also tiles them. */
 static int lua_mshell_set_manage_owned(lua_State *L) {
     g.manage_owned = lua_toboolean(L, 1);
     return 0;

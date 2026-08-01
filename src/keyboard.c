@@ -1324,10 +1324,17 @@ void execute_action(Action action, int arg, const wchar_t *command,
 
     /* -- float --------------------------------------------------------- */
     case ACTION_TOGGLE_FLOAT: {
-        /* FLOAT_NEVER means every window stays tiled — ignore the toggle. */
-        if (g.float_policy == FLOAT_NEVER) break;
         ManagedWindow *mw = window_find(focus);
-        if (mw) {
+        if (!mw) break;
+        if (mw->tracked_only) {
+            /* A tracked window is floating by construction, so the toggle's
+             * first job is promotion into full management — which lands it in
+             * the grid unless a rule or the desktop floats it. Not gated on
+             * FLOAT_NEVER: promoting is not floating. */
+            window_promote(focus);
+            tile_current();
+        } else if (g.float_policy != FLOAT_NEVER) {
+            /* FLOAT_NEVER means every window stays tiled — ignore the toggle. */
             window_set_floating(focus, !mw->is_floating);
             tile_current();
         }
