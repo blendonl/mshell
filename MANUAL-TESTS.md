@@ -105,12 +105,47 @@ From a normal terminal, with mshell running:
 
 - Without `mshelld.exe` running: open Task Manager. It floats; the log notes
   once that a window could not be placed. Everything else tiles normally.
+  Switch desktops: Task Manager stays visible — the helper is what lets an
+  unelevated shell hide an elevated window at all, and without it this is the
+  documented limitation.
 - Start `mshelld.exe` elevated, then reload: Task Manager now tiles.
 - `%TEMP%\mshelld.log` records the connection.
 - Kill `mshelld.exe` while mshell runs: mshell keeps working, and elevated
   windows go back to floating rather than mshell hanging or crashing.
 - Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
   each other with a logged protocol-version message.
+
+### Hiding and closing elevated windows (protocol v2)
+
+With `mshelld.exe` running:
+
+- Open Task Manager on desktop `1`, switch to `2`: it is gone. Switch back: it
+  is back, drawn correctly (not black). Before v2 it stayed on every desktop.
+- With Task Manager hidden on a background desktop, quit mshell
+  (`Win+Shift+Q`): it is visible afterwards — an elevated window must not be
+  stranded cloaked on exit.
+- Focus Task Manager and press the close binding (`Win+Shift+c`): it closes.
+- Same three with an *admin* terminal or regedit, and with an app run
+  explicitly as administrator (right-click → Run as administrator).
+
+## Tracked windows — desktop-bound without tiling
+
+Every window is adopted now: anything mshell does not fully manage still
+belongs to a desktop instead of sitting on all of them.
+
+- Open an app's Open/Save dialog (no `dialog` rule in the config), then switch
+  desktops: the dialog goes with the desktop you opened it on and comes back
+  with it. Before, it stayed on screen everywhere.
+- The dialog gets no focus ring and no tile. Focus it and press `Win+f`: it is
+  promoted — ring, decorations stripped, in the grid. `Win+f` again floats it,
+  exactly like any managed window.
+- Open Steam fresh (so its "Updating/Connecting" modal is up while the main
+  window appears): the main window stays on the desktop it opened on instead
+  of appearing on all of them, and `Win+f` tiles it once the modal is gone.
+- Launch an app that starts minimized (e.g. `start /min notepad`): it is
+  adopted rather than invisible to the WM, and tiles when restored.
+- An `ignore` rule still leaves a window completely alone: on screen across
+  every desktop switch, no bindings reaching it.
 
 ### Installing it
 
