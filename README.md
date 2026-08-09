@@ -69,6 +69,18 @@ tiled, driven entirely from the keyboard and configured in Lua.
   also match **what a window is** rather than what it's called: `dialog = true`
   catches every file picker, message box and permission prompt, whichever app
   raised it, so the default config floats them all in one line.
+- **The display itself, from the config**: a `monitor_rule` can state a
+  `resolution`, a `refresh` rate and whether `hdr` is on, alongside that
+  display's tiling habits — because Settings → System → Display is an
+  Explorer-hosted page and there is no Start menu to reach it from. Applied at
+  startup, on reload and to a monitor you plug in, but never on top of a change
+  you made yourself in Windows; validated first, so a resolution the panel
+  cannot show costs a line in the log rather than a black screen. Mode changes
+  are session-only and Windows' own stored configuration is left alone, so
+  booting *without* mshell gives you your normal display back.
+  `mshell.exe --displays` lists every attached display, its device name, its
+  HDR support and every mode it will accept; `toggle_hdr` and `cycle_refresh`
+  are bindable, for HDR only while a game is up or 60Hz on battery.
 - **Control it from a script**: `mshell.exe --msg "switch_desktop web"` runs any
   action in the running shell, and `mshell.exe --query` prints its state as JSON
   (desktops, monitors, focused window). The pipe is per-session and its DACL

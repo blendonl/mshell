@@ -859,6 +859,12 @@ void config_reload(void) {
         log_w(L"Config reload FAILED — previous config kept");
         return;
     }
+    /* The physical displays first: a reload is the config saying so, so every
+     * display is re-asserted rather than only newly attached ones — and a
+     * resolution it changes moves every monitor rect that everything below is
+     * about to measure itself against. */
+    displays_apply_rules(true);
+
     /* Re-assert visibility/layout for the (preserved) windows and repaint the
      * backdrop in case colors changed. */
     background_update();

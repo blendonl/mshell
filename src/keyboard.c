@@ -236,6 +236,8 @@ static const ActionNameEntry action_names[] = {
     {"jump_urgent",      ACTION_JUMP_URGENT},
     {"launcher",         ACTION_LAUNCHER},
     {"toggle_bar",       ACTION_TOGGLE_BAR},
+    {"toggle_hdr",       ACTION_TOGGLE_HDR},
+    {"cycle_refresh",    ACTION_CYCLE_REFRESH},
     {"split_h",          ACTION_SPLIT_H},
     {"split_v",          ACTION_SPLIT_V},
     {"rotate_split",     ACTION_ROTATE_SPLIT},
@@ -1461,6 +1463,16 @@ void execute_action(Action action, int arg, const wchar_t *command,
 
     case ACTION_TOGGLE_BAR:
         bar_toggle();
+        break;
+
+    /* The focused monitor, not the primary: on a two-monitor desk the display
+     * you want HDR on is the one you are looking at. */
+    case ACTION_TOGGLE_HDR:
+        display_toggle_hdr(g.focused_monitor);
+        break;
+
+    case ACTION_CYCLE_REFRESH:
+        display_cycle_refresh(g.focused_monitor, arg >= 0 ? +1 : -1);
         break;
 
     /* -- manual (BSP) tiling ------------------------------------------- */

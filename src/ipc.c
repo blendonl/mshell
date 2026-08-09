@@ -143,14 +143,29 @@ static void ipc_build_state(char *out, size_t cap) {
     o += (size_t)snprintf(out + o, cap - o, "\"monitors\":[");
     for (int i = 0; i < g.monitor_count && o < cap; i++) {
         const Monitor *m = &g.monitors[i];
+
+        /* The device name is what a monitor rule is written against, and the
+         * mode is what one asks for — so a script (or a person) can read both
+         * here instead of guessing. `refresh` and `hdr` come from the display
+         * itself rather than from anything cached, so they stay right when the
+         * user changes them outside mshell. */
+        json_escape(m->device, esc, sizeof esc);
+        DisplayMode mode = {0};
+        display_current_mode(m->device, &mode);
+        int hdr = display_hdr_state(m->device);
+
         o += (size_t)snprintf(out + o, cap - o,
-                 "%s{\"index\":%d,\"x\":%ld,\"y\":%ld,\"width\":%ld,"
-                 "\"height\":%ld,\"dpi\":%u,\"focused\":%s}",
-                 i ? "," : "", i,
+                 "%s{\"index\":%d,\"device\":\"%s\",\"x\":%ld,\"y\":%ld,"
+                 "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
+                 "\"hdr\":%s,\"focused\":%s}",
+                 i ? "," : "", i, esc,
                  (long)m->full.left, (long)m->full.top,
                  (long)(m->full.right - m->full.left),
                  (long)(m->full.bottom - m->full.top),
-                 monitor_dpi(i), i == g.focused_monitor ? "true" : "false");
+                 monitor_dpi(i), mode.refresh,
+                 hdr == HDR_UNSUPPORTED ? "null" : hdr == HDR_ON ? "true"
+                                                                 : "false",
+                 i == g.focused_monitor ? "true" : "false");
     }
     o += (size_t)snprintf(out + o, cap - o, "],");
 

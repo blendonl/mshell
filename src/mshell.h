@@ -338,6 +338,14 @@ typedef enum {
      * the way for a moment is the normal case. */
     ACTION_TOGGLE_BAR,
 
+    /* The physical display, on the focused monitor. Bindable because these are
+     * the two display settings people change per task rather than once — HDR
+     * only while a game is up, a lower refresh rate on battery — and with no
+     * Explorer there is no Settings page a keystroke away. `cycle_refresh`
+     * takes +1 / -1 like the other steppers. */
+    ACTION_TOGGLE_HDR,
+    ACTION_CYCLE_REFRESH,
+
     /* Manual (BSP) tiling. split_h / split_v state where the NEXT window goes
      * rather than acting immediately — there is nothing to split until one
      * arrives. */
@@ -836,9 +844,33 @@ typedef struct {
     Layout   layout;         /* LAYOUT_COUNT = inherit */
 } Monitor;
 
+/* ---------------------------------------------------------------------------
+ * DisplayMode — one width/height/refresh triple.
+ *
+ * A field left at 0 means "leave this one alone", which is what lets a rule ask
+ * for 165Hz without also having to restate the resolution it is happy with.
+ * The colour depth is deliberately absent: every mode mshell sets keeps the
+ * one the display is already using, because 16-bit colour is not a thing
+ * anybody wants in 2026 and offering it is offering a way to break the desktop.
+ * --------------------------------------------------------------------------- */
+typedef struct {
+    int width, height;
+    int refresh;          /* Hz */
+} DisplayMode;
+
+/* display_hdr_state(). "Unsupported" covers a panel that cannot do HDR and a
+ * Windows too old to be asked, which the caller treats identically. */
+enum { HDR_UNSUPPORTED = -1, HDR_OFF = 0, HDR_ON = 1 };
+
 /* One monitor's configured overrides, matched by device name. Kept separate
  * from Monitor because a config is loaded before the displays it names are
- * necessarily attached, and has to survive them coming and going. */
+ * necessarily attached, and has to survive them coming and going.
+ *
+ * The first four are tiling overrides, resolved into Monitor on every
+ * enumeration by monitors_apply_rules(). The last three describe the PHYSICAL
+ * display and are applied by displays_apply_rules() instead — a different
+ * function on a different schedule, because re-asserting a display mode as
+ * often as a gap would fight the user and flicker the screen doing it. */
 typedef struct {
     wchar_t device[CCHDEVICENAME];   /* wildcard pattern, or "" for index form */
     int     index;                   /* -1 when matched by name instead        */
@@ -846,6 +878,10 @@ typedef struct {
     bool    set_nmaster; int   n_master;
     bool    set_ratio;   float master_ratio;
     bool    set_layout;  Layout layout;
+
+    bool    set_resolution; int width, height;
+    bool    set_refresh;    int refresh;
+    bool    set_hdr;        bool hdr;
 } MonitorRule;
 
 /* ---------------------------------------------------------------------------
@@ -1201,6 +1237,33 @@ int      monitor_of_window(HWND hwnd);    /* index into g.monitors, or 0      */
  * aware, so coordinates are physical pixels and anything drawn at a fixed size
  * must scale itself — MulDiv(px, monitor_dpi(m), 96). */
 UINT     monitor_dpi(int mon);
+
+/* ===========================================================================
+ * Prototypes — display.c (the physical display: resolution, refresh, HDR)
+ * =========================================================================== */
+bool     display_current_mode(const wchar_t *device, DisplayMode *out);
+/* Every distinct mode the display accepts at its current colour depth. Returns
+ * how many were written, which stops at `max`. */
+int      display_modes(const wchar_t *device, DisplayMode *out, int max);
+/* Set the mode, keeping any field of `want` that is 0. Validates with CDS_TEST
+ * first, so a resolution the panel cannot show costs a log line rather than a
+ * black screen on a machine whose shell this is. Session-only: Windows' stored
+ * display configuration is not written. */
+bool     display_set_mode(const wchar_t *device, const DisplayMode *want);
+
+int      display_hdr_state(const wchar_t *device);  /* HDR_UNSUPPORTED/OFF/ON */
+bool     display_hdr_set(const wchar_t *device, bool on);
+
+/* Apply the monitor rules' resolution/refresh/hdr to the attached displays.
+ * force = the config just said so (startup, reload): every display is
+ * re-asserted. Otherwise only displays not seen before are touched, which is
+ * the one that was just plugged in — see the comment in display.c for why the
+ * rest are deliberately left alone. */
+void     displays_apply_rules(bool force);
+
+void     display_toggle_hdr(int mon);
+void     display_cycle_refresh(int mon, int dir);   /* dir < 0 = the other way */
+void     display_list(void);                        /* mshell.exe --displays  */
 
 /* ===========================================================================
  * Prototypes — keyboard.c

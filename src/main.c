@@ -561,6 +561,15 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DISPLAYCHANGE:
         update_work_area();
+        /* A display may have just been PLUGGED IN, and its rule's resolution /
+         * refresh / HDR has never been applied to it. After update_work_area,
+         * because a display that is not in g.monitors yet cannot be matched
+         * against a rule. Not `force`: this message also arrives when the user
+         * changes a mode themselves, and re-asserting the config on top of that
+         * would be a fight. A mode changed here raises another
+         * WM_DISPLAYCHANGE, which re-measures — and finds nothing left to do,
+         * since the display has now been seen. */
+        displays_apply_rules(false);
         /* A display may have come or gone — a desktop pinned to one that is no
          * longer there has to stop being pinned to it. */
         desktop_monitors_changed();
@@ -741,6 +750,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Init the keymap lock before ANY config load. The hook thread that shares
      * it is created later (kb_init), but config_init() runs first. */
     kb_locks_init();
+
+    /* --- --displays: what is attached, and what modes it will do ---
+     * The discovery half of the monitor rules: they are keyed on a device name
+     * nothing on screen ever shows you, and ask for a resolution and refresh
+     * rate the panel has to actually support. Like --tweaks this is a
+     * command-line tool that happens to live in the same binary, so it runs
+     * before the log and the mutex and works whether or not mshell is running. */
+    if (has_flag(lpCmdLine, "--displays")) {
+        display_list();
+        return 0;
+    }
 
     /* --- --tweaks: apply, revert or list the registry tweaks ---
      * Before the log and the mutex, like --check: it is a command-line tool
@@ -1005,6 +1025,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                 g.config_path);
 
     config_init();
+
+    /* --- the physical displays ---
+     * Before the first desktop and before the bar, because changing a
+     * resolution changes every monitor rect the tiler and the bar are about to
+     * be laid out against. update_work_area() further down re-measures once
+     * the modes have settled. */
+    displays_apply_rules(true);
 
     /* --- the first desktop ---
      * Nothing exists until now: desktops are created on demand, so this brings

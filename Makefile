@@ -7,7 +7,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 
 # --- Version (single source of truth; baked into the binary and the zip) ---
-VERSION  = 0.13.6
+VERSION  = 0.14.0
 
 # VERSIONINFO needs the parts as separate numbers, so split them out here
 # rather than making anyone maintain the version in two shapes.
@@ -80,6 +80,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/layout_tree.c \
               $(SRC_DIR)/anim.c \
               $(SRC_DIR)/tweaks.c \
+              $(SRC_DIR)/display.c \
               $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/update.c
 
