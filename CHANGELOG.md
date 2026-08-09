@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.0 — 2026-08-09
+
 ### Added
 
 - **The display itself is now part of the config.** `mshell.monitor_rule` takes
