@@ -474,6 +474,46 @@ and whether it is still readable.
   primary. Plug it back in — they RETURN. This is the case an index cannot
   survive.
 
+## Display settings (resolution, refresh, HDR)
+
+Needs real hardware — a panel that offers more than one refresh rate for the
+first half, an HDR-capable one for the second. Everything here changes the
+physical display, so run it on a machine you can still reach a keyboard on.
+
+- `mshell.exe --displays` lists each attached display: device name, current
+  mode, HDR state, the monitor's own name, and the modes it accepts. Runs with
+  mshell **not** running at all, and while it is your shell.
+- Take a `WIDTHxHEIGHT@HZ` straight out of that listing, put it in
+  `monitor_rule("*DISPLAY1", { resolution = "...", refresh = ... })`, save.
+  The display changes on reload; the tiling reflows to the new size; the bar
+  re-measures. `--displays` now reports the new mode.
+- **Now ask for a mode that does not exist** (`resolution = "9999x9999"`).
+  The display is UNCHANGED, and the log says the panel will not do it and
+  points at `--displays`. This is the important one: the failure mode being
+  guarded against is a black screen on a machine with no Explorer.
+- Change the mode yourself in Windows' display settings while mshell runs.
+  mshell does **not** put it back. Then `Win+Shift+R`: it does — a reload is
+  the config saying so.
+- **Session-only**: with a resolution rule in force, quit mshell and reboot to
+  Explorer. The display comes back at the mode WINDOWS is configured with, not
+  the one in `init.lua`. (Windows' own display settings were never written.)
+- **Hotplug**: with a rule for a secondary display, unplug and replug it. The
+  rule is applied to it when it returns; the primary is not re-asserted.
+- `hdr = true` on an HDR-capable display turns advanced colour on (the desktop
+  visibly shifts). On a display that cannot do HDR, the log says so once and
+  nothing else happens. Unlike the mode, this one persists — it is a Windows
+  setting.
+- Bind `toggle_hdr` and press it: HDR flips on the display you are LOOKING at,
+  with a notification saying which way. Press it on a monitor that cannot do
+  HDR: a warning toast, no change.
+- Bind `cycle_refresh` with `1` and `-1`: steps through that display's rates at
+  the current resolution and wraps, with the new rate in a toast. The
+  RESOLUTION must not change. On a 60Hz-only panel: a warning toast instead.
+- `mshell.exe --query` and `mshell.get_monitors()` both report `device`,
+  `refresh` and `hdr` per monitor; `hdr` is `null`/`nil` (not `false`) on a
+  display that cannot do it. Change the rate outside mshell and query again —
+  the new value is reported, not a cached one.
+
 ## Tweaks
 
 - `mshell.exe --tweaks list` prints each tweak, its group and why it exists.

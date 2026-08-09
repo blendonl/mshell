@@ -362,6 +362,57 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- mshell.set_fullscreen_policy("monitor")
 
 ----------------------------------------------------------------------
+-- Monitors
+----------------------------------------------------------------------
+-- mshell.monitor_rule(which, opts) says two different kinds of thing about one
+-- display: how mshell TILES it, and what the display itself is DOING.
+--
+--   which          a device-name pattern ("*DISPLAY2") or a 0-based index.
+--                  Prefer the name: unplug a monitor and the rest renumber, so
+--                  an index rule quietly starts describing a different screen.
+--
+--   -- how mshell tiles it
+--   gaps           6, or {inner, outer}
+--   nmaster        master-area window count
+--   master_ratio   0.2 .. 0.9
+--   layout         "tiling" | "monocle" | "grid" | ... , as set_layout
+--
+--   -- what the display is doing (this is the monitor, not the window manager)
+--   resolution     {2560, 1440} or "2560x1440"
+--   refresh        165           -- Hz
+--   hdr            true | false  -- HDR / advanced colour
+--
+-- RUN `mshell.exe --displays` FIRST. It prints each attached display's device
+-- name, its current mode, whether it can do HDR, and every mode it will
+-- actually accept — which is what these three fields have to be written
+-- against. A mode the panel cannot show is refused with a line in the log and
+-- the display is left alone; it never blanks your screen.
+--
+-- Resolution and refresh are applied at startup, on every reload, and to a
+-- monitor you plug in mid-session — but NOT when you change the mode yourself
+-- from Windows' display settings, which mshell deliberately leaves standing.
+-- They are also session-only: Windows' own stored display configuration is
+-- never written, so booting without mshell gives you your normal mode back.
+-- HDR is the exception — it is a persistent system setting and there is no
+-- transient form of it.
+--
+-- mshell.monitor_rule("*DISPLAY1", {
+--     resolution = "2560x1440",
+--     refresh    = 165,
+--     hdr        = true,
+--     master_ratio = 0.62,      -- and its tiling habits, in the same rule
+-- })
+--
+-- A vertical secondary that always wants columns and nothing else changed:
+-- mshell.monitor_rule("*DISPLAY2", { layout = "columns" })
+--
+-- Rules layer like desktop rules: every one that matches applies, in order,
+-- each overwriting only the fields it names.
+--
+-- The two bindable display actions are down in the keybinds section:
+-- `toggle_hdr` and `cycle_refresh`, both acting on the FOCUSED monitor.
+
+----------------------------------------------------------------------
 -- Desktops (dynamic, addressed by name)
 ----------------------------------------------------------------------
 -- There is nothing to declare. A desktop is a NAME, it comes into existence the
@@ -810,6 +861,17 @@ mshell.bind({mod}, ",", "focus_monitor_prev")
 mshell.bind({mod}, ".", "focus_monitor_next")
 mshell.bind({mod, shft}, ",", "move_to_monitor_prev")
 mshell.bind({mod, shft}, ".", "move_to_monitor_next")
+
+-- --- the focused monitor's display settings ---
+-- Commented out because they change the physical display, which is not
+-- something to hand a stray keystroke by default. `toggle_hdr` flips HDR on the
+-- monitor you are looking at; `cycle_refresh` steps through the refresh rates
+-- that display offers AT ITS CURRENT RESOLUTION (1 forwards, -1 back, wrapping)
+-- — useful for dropping to 60Hz on battery, or for an app that dislikes the
+-- high one. Both say what they did in a notification.
+-- mshell.bind({mod, alt}, "h", "toggle_hdr")
+-- mshell.bind({mod, alt}, "r", "cycle_refresh", 1)
+-- mshell.bind({mod, alt, shft}, "r", "cycle_refresh", -1)
 
 -- --- layout ---
 mshell.bind({mod}, "t", "layout_tiling")
