@@ -1351,7 +1351,9 @@ static int lua_mshell_set_mouse_tbl(lua_State *L) {
  *
  *   which — a device-name pattern ("\\\\.\\DISPLAY2", "*DISPLAY2") or a
  *           0-based index.
- *   opts  — gaps, nmaster, master_ratio, layout.
+ *   opts  — how mshell tiles this display: gaps, nmaster, master_ratio,
+ *           layout; and what the display itself is doing: resolution, refresh,
+ *           hdr.
  *
  * Prefer the name form. An index is easier to write and is also what changes
  * when a display is unplugged: the rest renumber, and "monitor 1 uses columns"
@@ -1425,6 +1427,69 @@ static int lua_mshell_monitor_rule(lua_State *L) {
         }
         r->set_layout = true;
         r->layout     = lay;
+    }
+    lua_pop(L, 1);
+
+    /* --- the physical display -------------------------------------------
+     *
+     * Unlike everything above, these change the MONITOR rather than how mshell
+     * arranges windows on it, and they are applied on their own schedule (see
+     * displays_apply_rules). A resolution the panel cannot show is validated
+     * and refused there rather than here: what is valid depends on the display
+     * that happens to be attached, which a config being parsed cannot know.
+     * `mshell.exe --displays` prints the device names and the modes each one
+     * will accept. */
+    lua_getfield(L, 2, "resolution");
+    if (lua_istable(L, -1)) {
+        int t = lua_absindex(L, -1);
+        lua_rawgeti(L, t, 1);
+        lua_rawgeti(L, t, 2);
+        int w = lua_isnumber(L, -2) ? (int)lua_tointeger(L, -2) : 0;
+        int h = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : 0;
+        lua_pop(L, 2);
+        if (w <= 0 || h <= 0) {
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: resolution needs a positive "
+                                 "width and height, e.g. { 2560, 1440 }");
+        }
+        r->set_resolution = true;
+        r->width = w; r->height = h;
+    } else if (lua_isstring(L, -1)) {
+        /* "2560x1440" — the shape the mode is written in everywhere else,
+         * including in --displays' own output, so it can be copied across. */
+        int w = 0, h = 0;
+        if (sscanf(lua_tostring(L, -1), "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0) {
+            const char *s = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: cannot read the resolution "
+                                 "'%s' — expected \"2560x1440\" or "
+                                 "{ 2560, 1440 }", s);
+        }
+        r->set_resolution = true;
+        r->width = w; r->height = h;
+    } else if (!lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return luaL_error(L, "monitor_rule: resolution must be a table or a "
+                             "string");
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "refresh");
+    if (lua_isnumber(L, -1)) {
+        int hz = (int)lua_tointeger(L, -1);
+        if (hz <= 0) {
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: refresh must be positive Hz");
+        }
+        r->set_refresh = true;
+        r->refresh     = hz;
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "hdr");
+    if (lua_isboolean(L, -1)) {
+        r->set_hdr = true;
+        r->hdr     = (bool)lua_toboolean(L, -1);
     }
     lua_pop(L, 1);
 
@@ -1579,7 +1644,7 @@ static int lua_mshell_get_monitors(lua_State *L) {
         const Monitor *m   = &g.monitors[i];
         UINT           dpi = monitor_dpi(i);
 
-        lua_createtable(L, 0, 12);
+        lua_createtable(L, 0, 16);
         set_int (L, "x",           m->full.left);
         set_int (L, "y",           m->full.top);
         set_int (L, "width",       m->full.right  - m->full.left);
@@ -1592,6 +1657,19 @@ static int lua_mshell_get_monitors(lua_State *L) {
         lua_pushnumber(L, (lua_Number)dpi / 96.0); lua_setfield(L, -2, "scale");
         set_bool(L, "primary",     i == g.primary_monitor);
         set_bool(L, "focused",     i == g.focused_monitor);
+
+        /* The device name is what monitor_rule matches on, so a config that
+         * wants to decide something per display can read it here rather than
+         * hard-coding "\\\\.\\DISPLAY2". `refresh` and `hdr` are read from the
+         * display itself, not from anything cached, so they stay true when the
+         * mode is changed outside mshell. hdr is nil when the panel cannot do
+         * it — which is a different answer from false, and worth keeping so. */
+        set_str(L, "device", m->device);
+        DisplayMode mode = {0};
+        if (display_current_mode(m->device, &mode))
+            set_int(L, "refresh", mode.refresh);
+        int hdr = display_hdr_state(m->device);
+        if (hdr != HDR_UNSUPPORTED) set_bool(L, "hdr", hdr == HDR_ON);
 
         lua_rawseti(L, -2, i + 1);   /* Lua arrays are 1-based */
     }

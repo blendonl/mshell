@@ -5,6 +5,55 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **The display itself is now part of the config.** `mshell.monitor_rule` takes
+  `resolution`, `refresh` and `hdr` alongside the tiling overrides it already
+  had, so a display's mode is stated in `init.lua` next to that display's gaps
+  and layout. Replacing Explorer takes Settings → System → Display with it —
+  the page still opens by URI, but reaching it from a shell with no Start menu
+  means spawning it and driving it with the mouse, for something a rule can
+  state once and mshell can re-assert on every start.
+
+  ```lua
+  mshell.monitor_rule("*DISPLAY1", {
+      resolution = "2560x1440",   -- or { 2560, 1440 }
+      refresh    = 165,
+      hdr        = true,
+      layout     = "columns",     -- and its tiling habits, same rule
+  })
+  ```
+
+  Rules are applied at startup, on every reload, and to a monitor plugged in
+  mid-session — but deliberately **not** on top of a mode you changed yourself
+  in Windows' display settings, which would otherwise be stamped back a second
+  later. Every mode is validated with `CDS_TEST` before it is applied, so a
+  resolution the panel cannot show costs a line in the log and leaves the
+  display alone rather than blanking the screen of a machine whose shell this
+  is. Changes are session-only — Windows' own stored display configuration is
+  never written, so booting *without* mshell (the recovery path in INSTALL.md)
+  hands back the display Windows was configured with. HDR is the exception and
+  cannot be otherwise: advanced colour is a persistent system setting.
+
+- **`mshell.exe --displays`** — the discovery half of the above. Prints every
+  attached display's device name (what a rule matches on), its current mode,
+  whether it supports HDR and whether HDR is on, and every mode it will
+  actually accept. Runs standalone, like `--tweaks`: it does not need mshell to
+  be running, or to be your shell.
+
+- **Two bindable display actions**, both acting on the *focused* monitor:
+  `toggle_hdr`, and `cycle_refresh` (`1` / `-1` steps through the rates that
+  display offers at its current resolution, wrapping — the resolution is held
+  deliberately). Both report what they did in a notification. These are the two
+  display settings people change per task rather than once: HDR only while a
+  game is up, a lower refresh rate on battery.
+
+- **`--query` and `mshell.get_monitors()` report the display**, not just its
+  geometry: each monitor now carries its `device` name, its `refresh` rate and
+  its `hdr` state (`null`/`nil` when the panel cannot do HDR — a different
+  answer from "off"). Both are read live rather than cached, so they stay right
+  when the mode is changed outside mshell.
+
 ## 0.13.6 — 2026-08-01
 
 ### Fixed
