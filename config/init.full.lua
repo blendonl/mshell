@@ -884,7 +884,8 @@ mshell.bind({mod, shft}, ".", "move_to_monitor_next")
 mshell.bind({mod}, "t", "layout_tiling")
 mshell.bind({mod}, "m", "layout_monocle")
 mshell.bind({mod}, "g", "layout_grid")
-mshell.bind({mod}, "Space", "cycle_layout")   -- cycle through all layouts
+mshell.bind({mod}, "Space", "cycle_layout")   -- cycle the seven dynamic layouts
+                                              -- (bsp is manual: `b b`, above)
 mshell.bind({mod}, "f", "toggle_float")
 
 -- --- fullscreen (all three flavours; each key is its own toggle) ---

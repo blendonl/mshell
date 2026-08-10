@@ -331,7 +331,9 @@ API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 split wherever you were, `split_h`/`split_v` decide the direction the next one
 takes, and any split can become a **tabbed** or **stacked** container showing one
 window at a time. The tree does not replace the window list — it is an index
-over it — so a desktop moves between `bsp` and the dynamic layouts freely.
+over it — so a desktop moves between `bsp` and the dynamic layouts freely. Each
+display gets its own tree, and `Win+Space` deliberately does not cycle into
+`bsp`: a layout you build by hand is one you ask for, with `layout_bsp`.
 
 **A launcher.** The `launcher` action opens a filter over your Start-menu
 shortcuts; anything that matches nothing is run as typed, so it is a Run box too.

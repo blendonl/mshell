@@ -395,7 +395,12 @@ typedef enum {
     LAYOUT_CENTERED,     /* centered master, stack split left+right          */
     LAYOUT_BSTACK,       /* bottom-stack (master top, stack row below)       */
     LAYOUT_COLUMNS,      /* equal vertical columns                           */
-    LAYOUT_BSP,          /* manual splits + containers — see layout_tree.c   */
+    /* Manual splits + containers — see layout_tree.c. LAST before
+     * LAYOUT_COUNT, and that is load-bearing: cycle_layout wraps on
+     * LAYOUT_BSP, which is what keeps a layout you build by hand out of a
+     * cycle through the ones that are pure functions of the window list. A new
+     * dynamic layout goes ABOVE this line. */
+    LAYOUT_BSP,
     LAYOUT_COUNT
 } Layout;
 
@@ -1457,7 +1462,12 @@ void     tile_desktop(int slot);   /* slot, not id — see desktop.c prototypes 
  * store and the tree is an index synchronised to it on every pass. See the
  * file header for why.
  * --------------------------------------------------------------------------- */
-void     layout_tree_run(Desktop *dt, RECT area, TreeEmitFn emit, void *ctx);
+/* Lay out ONE monitor's slice of a desktop from that monitor's tree. False when
+ * there is no tree to lay out with — the pool is exhausted, or nothing on this
+ * display belongs to it — and the caller should place those windows some other
+ * way rather than leave them where they are. */
+bool     layout_tree_run(Desktop *dt, int monitor, RECT area,
+                         TreeEmitFn emit, void *ctx);
 void     layout_tree_set_split(SplitMode mode);
 void     layout_tree_rotate(void);
 void     layout_tree_set_container(SplitMode mode);
