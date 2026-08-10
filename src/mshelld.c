@@ -2,9 +2,10 @@
  * mshelld.c — mshell's privileged helper.
  *
  * A separate, elevated process whose entire job is to touch windows that the
- * unelevated shell is not allowed to touch (UIPI): move them, cloak/uncloak
- * them, ask them to close. See proto.h for why this exists and, just as
- * importantly, for what was deliberately left out of it.
+ * unelevated shell is not allowed to touch (UIPI): move them, put them in or
+ * out of the always-on-top band, cloak/uncloak them, ask them to close. See
+ * proto.h for why this exists and, just as importantly, for what was
+ * deliberately left out of it.
  *
  * The design rule this file exists to honour: THIS PROCESS MUST STAY STUPID.
  * It has no config file, no Lua, no window rules, no layout, no keyboard hook
@@ -103,6 +104,30 @@ static bool do_setpos(const ProtoMsg *m) {
     return SetWindowPos(h, NULL, m->x, m->y, m->w, m->h, flags) != 0;
 }
 
+/* Put a window into the always-on-top band, or take it back out.
+ *
+ * do_setpos above refuses every z-order change, and that is still right for a
+ * placement: tiling has no business restacking anything. This is the one
+ * z-order question the shell genuinely cannot answer for itself — float_on_top
+ * keeps floating windows above the grid by parking them in the topmost band,
+ * and for an elevated window that SetWindowPos is refused like any other, so
+ * Task Manager was the one float a click could still bury.
+ *
+ * Narrow on purpose, and narrower than do_setpos: the band is a boolean, the
+ * geometry is untouched (SWP_NOMOVE | SWP_NOSIZE) and the window cannot be
+ * activated. What is deliberately NOT offered is an arbitrary hWndInsertAfter
+ * — "put this window above that one" is the power to order the whole desktop,
+ * and no caller here needs it. Floats are ordered among themselves by the
+ * shell, which can place the ones it is allowed to place. */
+static bool do_zorder(const ProtoMsg *m) {
+    HWND h = (HWND)(uintptr_t)m->hwnd;
+    if (!h || !IsWindow(h)) return false;
+
+    HWND band = (m->flags & 1u) ? HWND_TOPMOST : HWND_NOTOPMOST;
+    return SetWindowPos(h, band, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) != 0;
+}
+
 /* Take a window off the screen (or put it back) the way mshell does for its
  * own windows: DWM cloaking. A hidden window is just a moved one nobody can
  * see — the same UIPI boundary, so it belongs on the same side of it. */
@@ -157,6 +182,11 @@ static void serve(HANDLE pipe) {
              * reach the privileged operations at all. */
             if (!greeted)                 out.type = PROTO_FAIL;
             else if (!do_setpos(&in))     out.type = PROTO_FAIL;
+            break;
+
+        case PROTO_ZORDER:
+            if (!greeted)                 out.type = PROTO_FAIL;
+            else if (!do_zorder(&in))     out.type = PROTO_FAIL;
             break;
 
         case PROTO_CLOAK:

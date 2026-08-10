@@ -5,6 +5,47 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **An elevated window can be kept on top too — with the helper.** 0.14.1 put
+  floating windows in Windows' always-on-top band, which fixed every ordinary
+  window and left exactly one behind: Task Manager, regedit, an admin terminal.
+  Changing a window's z-order is blocked by the same integrity check (UIPI) as
+  moving it, so an unelevated mshell's `SetWindowPos` was refused and the float
+  stayed buriable. The privileged helper is the way across that boundary and
+  already existed — but its protocol deliberately masked every z-order bit out
+  of a placement, so it could not do this either.
+
+  `mshelld` speaks **protocol v3** and takes one more request: put this window
+  in, or out of, the always-on-top band. Deliberately a band and not an
+  arbitrary "above that window" — the shell orders floats among themselves with
+  the windows it is allowed to place, and the pipe never gains the power to
+  restack the desktop. mshell tries locally first and only forwards on the
+  refusal that means UIPI, the same shape the tiling path already had.
+
+  This needs the helper: without `mshelld.exe` running, an elevated float is
+  still buriable and there is nothing an unelevated shell can do about it —
+  install it with `install.bat /helper` from an administrator prompt (see
+  INSTALL.md). Upgrading replaces both binaries in step; a v2/v3 mismatch is
+  refused loudly rather than half-working.
+
+- **`update` now actually leaves you on the build it installed.** The action
+  spawned `install.bat` in a console and returned, letting the script kill
+  mshell and start the new binary. Both halves could fail silently — the kill
+  needs rights a child process may not have, and the console can be closed
+  before it gets there — and nothing checked, so the toast said "mshell will
+  restart" and the log said the install had happened while the **old build kept
+  running**. Every symptom of that is the symptom of a release that did not
+  work.
+
+  mshell now runs `install.bat /norestart` to completion, checks its exit code,
+  and restarts *itself* — exiting is the one hand-over that cannot be refused
+  for want of rights, and Winlogon brings the Shell value back up. A machine
+  with `AutoRestartShell` off is told to sign out instead of being logged out.
+  The script's output goes to `%LOCALAPPDATA%\mshell\install.log` rather than a
+  console that has scrolled away, and the failure paths now say which file to
+  read. The staged `mshell.exe.old` is deleted by the instance that comes up.
+
 ## 0.14.1 — 2026-08-10
 
 ### Fixed

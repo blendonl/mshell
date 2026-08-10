@@ -14,15 +14,20 @@
  *
  * mshelld.exe is the narrow way out. It is elevated, and it is deliberately
  * stupid: no Lua, no config file, no scripting, no window policy of its own. It
- * accepts three requests — "put this window at this rectangle", "cloak or
- * uncloak this window", "post this window a WM_CLOSE" — and performs them. All
- * the decisions stay in the unelevated shell.
+ * accepts four requests — "put this window at this rectangle", "put it in or
+ * out of the always-on-top band", "cloak or uncloak this window", "post this
+ * window a WM_CLOSE" — and performs them. All the decisions stay in the
+ * unelevated shell.
  *
- * Moving is what tiling needs; cloaking is what desktop switching needs,
- * because taking a window off the screen is blocked by exactly the same UIPI
- * check as moving it (without this, an elevated window is tiled onto one
- * desktop and then stares at you from all of them); and WM_CLOSE is how the
- * close keybind reaches an elevated window at all.
+ * Moving is what tiling needs; the band is what a floating window needs,
+ * because float_on_top keeps floats above the grid by putting them in the
+ * topmost band and that SetWindowPos meets the same UIPI check as any other
+ * (without this, an elevated float — Task Manager is the one everybody hits —
+ * is the one window a click can still bury); cloaking is what desktop
+ * switching needs, because taking a window off the screen is blocked by the
+ * same check again (without it, an elevated window is tiled onto one desktop
+ * and then stares at you from all of them); and WM_CLOSE is how the close
+ * keybind reaches an elevated window at all.
  *
  * WHAT IS DELIBERATELY *NOT* HERE
  *
@@ -55,12 +60,13 @@
 
 #include <stdint.h>
 
-#define MSHELLD_PROTO_VERSION  2u
+#define MSHELLD_PROTO_VERSION  3u
 #define MSHELLD_PIPE_PREFIX    L"\\\\.\\pipe\\mshelld-"
 
 typedef enum {
     PROTO_HELLO = 1,   /* shell -> helper: version handshake            */
     PROTO_SETPOS,      /* shell -> helper: privileged SetWindowPos      */
+    PROTO_ZORDER,      /* shell -> helper: privileged topmost/notopmost */
     PROTO_CLOAK,       /* shell -> helper: privileged cloak/uncloak     */
     PROTO_CLOSE,       /* shell -> helper: privileged WM_CLOSE          */
     PROTO_OK,          /* helper -> shell: performed                    */
@@ -78,6 +84,11 @@ typedef struct {
     uint64_t hwnd;
     int32_t  x, y, w, h;
     /* PROTO_SETPOS: SWP_* flags (masked to the move-only set by the helper).
-     * PROTO_CLOAK: bit 0 set = cloak, clear = uncloak. */
+     * PROTO_ZORDER: bit 0 set = into the topmost band, clear = out of it.
+     *               Deliberately a band and not an arbitrary hWndInsertAfter:
+     *               "be always-on-top" is the whole of what the shell needs
+     *               here, while "sit directly above that other window" would
+     *               hand the pipe the power to order the desktop.
+     * PROTO_CLOAK:  bit 0 set = cloak, clear = uncloak. */
     uint32_t flags;
 } ProtoMsg;

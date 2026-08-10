@@ -584,6 +584,16 @@ Open one tiled window and one floating one (`Win+f`), overlapping.
   window back out of the band immediately, without waiting for a re-tile.
 - A float minimized and restored is still on top; one moved to another desktop
   does not raise itself over the desktop you are looking at.
+- **Elevated float, helper running**: open Task Manager (high integrity),
+  `Win+f` it, then click a tiled window — it stays on top like any other float.
+  This is the case that needs `mshelld.exe`: stop the helper
+  (`schtasks /end /tn mshelld`) and the same click buries it again, with one
+  line in mshell.log saying a floating window could not be kept on top. That
+  degradation is the expected behaviour, not a regression — UIPI leaves an
+  unelevated shell no way to restack a higher-integrity window.
+- Quit mshell with a float still on top: the window is handed the ordinary band
+  back rather than staying pinned over everything after the shell is gone. With
+  an elevated float, that hand-back goes through the helper too.
 
 ## Hiding a desktop (cloak vs hide)
 
@@ -630,8 +640,8 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 
 `make test` covers the version comparison and the release-JSON reading
 (`test_update_parse`). What it cannot cover is the network, the unpack, and the
-hand-off to `install.bat` — which restarts the shell, so the last two rows need
-a real install rather than `--test`.
+hand-off to `install.bat` — after which mshell restarts itself, so the
+shell-mode rows below need a real install rather than `--test`.
 
 Bind it if your config has not: `mshell.bind({mod, shft}, "u", "update")`.
 
@@ -647,12 +657,23 @@ Bind it if your config has not: `mshell.bind({mod, shft}, "u", "update")`.
 
 **Shell-mode only** (needs a real install, Task Manager ready):
 
-- Run #5 as the installed shell. `install.bat`'s console appears, mshell is
-  killed and comes back on the new build; the version in the log banner is the
-  new one. Windows open beforehand are all still there and visible.
-- Do the same with `AutoRestartShell` set to `0`. install.bat says it is not
-  restarting and why; mshell keeps running on the old build, and the new one is
-  installed for the next sign-in.
+- Run #5 as the installed shell. mshell waits for the install, then exits and
+  Winlogon brings the new build back up. **The check that matters is the log
+  banner**: `=== mshell vX.Y.Z starting ===` naming the version just installed.
+  That line is the only proof the restart happened — an update that copies the
+  exe and leaves the old process running looks identical from the desktop, and
+  is the bug this path was rewritten to make impossible. `C:\mshell\
+  mshell.exe.old` should be gone afterwards, deleted by the new instance.
+  Windows open beforehand are all still there and visible.
+- Read `%LOCALAPPDATA%\mshell\install.log` after it: the whole of install.bat's
+  output is there, ending in "The caller asked to restart mshell itself".
+- Make the install fail (make `C:\mshell` read-only, or delete `harden.reg`
+  from the unpacked folder before the copy) and run it. The toast names the
+  exit code and the log file, and mshell keeps running on the old build — no
+  restart into a half-installed tree.
+- Do the same with `AutoRestartShell` set to `0`. mshell installs, then says so
+  and does **not** exit — quitting would log the session out. The new build is
+  there for the next sign-in.
 
 ## Shell-mode only
 

@@ -56,6 +56,11 @@ void window_process_path(HWND hwnd, wchar_t *out, size_t out_len) {
     get_process_path(hwnd, out, out_len);
 }
 
+/* Defined with the rest of the z-order pass, declared here because handing the
+ * topmost band back happens on paths that come long before it — unmanaging a
+ * window, and shutting down. */
+static bool window_set_band(HWND hwnd, HWND after, bool topmost);
+
 /* The file name inside a path, or the whole string when there is no separator. */
 static const wchar_t *path_basename(const wchar_t *path) {
     const wchar_t *back = wcsrchr(path, L'\\');
@@ -482,13 +487,14 @@ void window_restore_all_decorations(void) {
         window_restore_flat(mw->hwnd);
         window_restore_decorations(mw->hwnd);
 
-        /* Also hand back the topmost band to any window we parked there for
-         * fullscreen: mshell is going away, and a window left pinned above
-         * everything else outlives us with no way to fix it from the keyboard. */
+        /* Also hand back the topmost band to any window we parked there —
+         * fullscreen, pinned, or floating: mshell is going away, and a window
+         * left pinned above everything else outlives us with no way to fix it
+         * from the keyboard. Through window_set_band, so an elevated one goes
+         * back down too rather than staying over the desktop for good. */
         if (mw->made_topmost && IsWindow(mw->hwnd)) {
             mw->made_topmost = false;
-            SetWindowPos(mw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            window_set_band(mw->hwnd, HWND_NOTOPMOST, false);
         }
     }
 }
@@ -940,13 +946,12 @@ void window_unmanage(HWND hwnd) {
     window_restore_flat(hwnd);
     window_restore_decorations(hwnd);
 
-    /* Hand back the topmost band if we took it for fullscreen. A window we stop
-     * managing while it is still alive would otherwise stay pinned above
-     * everything with nothing left to ever put it back. */
+    /* Hand back the topmost band if we took it — for fullscreen, for a pin, or
+     * for a float. A window we stop managing while it is still alive would
+     * otherwise stay pinned above everything with nothing left to put it back. */
     if (g.managed[idx].made_topmost && IsWindow(hwnd)) {
         g.managed[idx].made_topmost = false;
-        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        window_set_band(hwnd, HWND_NOTOPMOST, false);
     }
 
     desktop_remove_window(hwnd);
@@ -1320,6 +1325,32 @@ static bool zorder_wants_topmost(const ManagedWindow *mw) {
            (g.float_on_top && mw->is_floating);
 }
 
+/* Move a window between the ordinary and the topmost band.
+ *
+ * `after` is what the local call wants: HWND_TOPMOST / HWND_NOTOPMOST, or
+ * another window to sit directly beneath when the floats are being chained in
+ * order. `topmost` says which band that amounts to, because the helper fallback
+ * cannot be told about the chain — it takes a band and nothing else (see
+ * proto.h).
+ *
+ * Same shape as window_set_pos: try locally, and forward to mshelld only on the
+ * refusal that means UIPI. Without this an elevated window — Task Manager is
+ * the one everybody meets — was the single float that stayed buriable, because
+ * every SetWindowPos we aimed at it failed silently. With no helper running,
+ * that is still the outcome; helper_set_topmost says so once. */
+static bool window_set_band(HWND hwnd, HWND after, bool topmost) {
+    if (SetWindowPos(hwnd, after, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+        return true;
+
+    DWORD err = GetLastError();
+    if (err != ERROR_ACCESS_DENIED) {
+        log_w(L"SetWindowPos(%p, z-order) failed: %lu", (void *)hwnd, err);
+        return false;
+    }
+    return helper_set_topmost(hwnd, topmost);
+}
+
 /* Record that WE promoted this window, so the demotion pass knows it may take
  * the band back. A window already topmost on its own account is left flagged
  * false — demoting that one would break its app's own choice. */
@@ -1345,8 +1376,7 @@ static void zorder_raise_over_floats(void) {
         if (!window_on_screen(mw)) continue;
 
         zorder_mark_promoted(mw);
-        SetWindowPos(mw->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        window_set_band(mw->hwnd, HWND_TOPMOST, true);
     }
 }
 
@@ -1415,8 +1445,13 @@ void window_raise_floats(void) {
     for (int i = 0; i < n; i++) {
         ManagedWindow *mw = window_find(floats[i]);
         if (mw) zorder_mark_promoted(mw);
-        SetWindowPos(floats[i], after, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        /* An elevated float goes up through the helper, which knows only the
+         * band, so it lands at the top of it rather than under its predecessor
+         * — the chain's order is approximate for those. That is a nicety;
+         * being coverable at all was the bug. A float that could not be moved
+         * (no helper) is skipped as the anchor: chaining the next one under a
+         * window that never went up would drag it down with it. */
+        if (!window_set_band(floats[i], after, true)) continue;
         after = floats[i];
     }
 
@@ -1462,8 +1497,7 @@ void window_enforce_zorder(void) {
         if (!mw->made_topmost) continue;
 
         mw->made_topmost = false;
-        SetWindowPos(mw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        window_set_band(mw->hwnd, HWND_NOTOPMOST, false);
     }
 }
 
@@ -1517,8 +1551,7 @@ void window_set_floating(HWND hwnd, bool floating) {
         if (mw->made_topmost && !window_is_screen_fullscreen(mw) &&
             !mw->always_on_top) {
             mw->made_topmost = false;
-            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            window_set_band(hwnd, HWND_NOTOPMOST, false);
         }
     }
 }
