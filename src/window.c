@@ -5,6 +5,7 @@
 
 #include "mshell.h"
 #include "layout_math.h"   /* center_axis() — where a floating window sits */
+#include "overlay.h"       /* overlay_raise_all() — our own surfaces stay up */
 
 /* ---------------------------------------------------------------------------
  * DWM attribute ids that postdate the mingw-w64 headers we build against.
@@ -1311,8 +1312,46 @@ void window_reassert_rule(HWND hwnd) {
     window_apply_fullscreen(hwnd);
 }
 
+/* Does this window belong in the topmost band, and if so why? Three
+ * independent reasons, and the demotion pass has to wait for all of them to
+ * lapse. Floats are here only while float_on_top asks for it. */
+static bool zorder_wants_topmost(const ManagedWindow *mw) {
+    return window_is_screen_fullscreen(mw) || mw->always_on_top ||
+           (g.float_on_top && mw->is_floating);
+}
+
+/* Record that WE promoted this window, so the demotion pass knows it may take
+ * the band back. A window already topmost on its own account is left flagged
+ * false — demoting that one would break its app's own choice. */
+static void zorder_mark_promoted(ManagedWindow *mw) {
+    if (!mw->made_topmost &&
+        !(GetWindowLongPtrW(mw->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        mw->made_topmost = true;
+}
+
+/* The two kinds of window that outrank a float inside the topmost band:
+ * one covering its whole monitor (an overlay stranded in the middle of a
+ * fullscreen video is exactly what fullscreen is meant to end), and one the
+ * user explicitly pinned. Raised after the floats, so they end up above them.
+ * Fullscreen beats mshell's own surfaces too — the bar included — which is why
+ * this runs after overlay_raise_all(). */
+static void zorder_raise_over_floats(void) {
+    Desktop *dt = desktop_current();
+
+    for (int i = 0; i < dt->count; i++) {
+        ManagedWindow *mw = window_find(dt->windows[i]);
+        if (!mw || !IsWindow(mw->hwnd)) continue;
+        if (!window_is_screen_fullscreen(mw) && !mw->always_on_top) continue;
+        if (!window_on_screen(mw)) continue;
+
+        zorder_mark_promoted(mw);
+        SetWindowPos(mw->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 /* ===========================================================================
- * Raise the floating windows of the current desktop above the tiled grid, so
+ * Raise the floating windows of the current desktop above everything else, so
  * they read as overlays instead of sinking behind a tiled window.
  *
  * Its own entry point rather than part of window_enforce_zorder() because a
@@ -1321,13 +1360,21 @@ void window_reassert_rule(HWND hwnd) {
  * keybind or by click, drops every float behind it with no tiling pass in
  * sight. Every focus change therefore has to re-assert this.
  *
- * Windows already in the topmost band are skipped: they are above the tiled
- * grid by definition, and threading one into the chain below would drag the
- * rest of the floats up there with it — SetWindowPos promotes the window it
- * positions to topmost whenever hWndInsertAfter is itself topmost.
+ * The floats go into the TOPMOST band, not merely to the top of the ordinary
+ * one. HWND_TOP was the old answer and it cannot hold: Windows sorts every
+ * WS_EX_TOPMOST window above every non-topmost one, and — worse — a
+ * re-assertion only ever happens on an event we hear about. A window that
+ * raises itself after its activation event (apps do, on WM_ACTIVATE and when a
+ * child takes focus), or an unmanaged window activating (which the foreground
+ * handler filters out), buried the float with nothing left to fix it. Sitting
+ * in the topmost band is the only "on top no matter what" Windows offers: the
+ * OS keeps it there with no event of ours in the loop.
+ *
+ * Ranking inside that band is then ours to arrange, and the tail of this
+ * function does it: our own overlays above the floats, fullscreen above both.
  * =========================================================================== */
 void window_raise_floats(void) {
-    if (!g.float_on_top) return;
+    if (!g.float_on_top) { zorder_raise_over_floats(); return; }
 
     HWND floats[MAX_WINDOWS_PER_DESKTOP];
     int  n = 0;
@@ -1346,10 +1393,9 @@ void window_raise_floats(void) {
          * IsWindowVisible would hand it a place in the chain and leave an
          * invisible window sitting above real ones. */
         if (!window_on_screen(mw) || IsIconic(h)) continue;
-        if (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOPMOST) continue;
         floats[n++] = h;
     }
-    if (n == 0) return;
+    if (n == 0) { zorder_raise_over_floats(); return; }
 
     /* Among the floats, the focused one belongs on top — it is the window the
      * user just asked to look at. */
@@ -1361,23 +1407,34 @@ void window_raise_floats(void) {
         break;
     }
 
-    /* Chain them: the first goes to the top of the ordinary band, each of the
-     * rest directly under its predecessor. */
-    HWND after = HWND_TOP;
+    /* Chain them: the first goes to the top of the topmost band, each of the
+     * rest directly under its predecessor. Inserting after a topmost window
+     * makes the inserted window topmost too, so one HWND_TOPMOST at the head
+     * carries the whole chain up while keeping the order intact. */
+    HWND after = HWND_TOPMOST;
     for (int i = 0; i < n; i++) {
+        ManagedWindow *mw = window_find(floats[i]);
+        if (mw) zorder_mark_promoted(mw);
         SetWindowPos(floats[i], after, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         after = floats[i];
     }
+
+    /* The band is shared with mshell's own surfaces, which the chain above just
+     * jumped over: the status bar is furniture, not a window a float may bury.
+     * Then the windows that outrank a float go back over everything. */
+    overlay_raise_all();
+    zorder_raise_over_floats();
 }
 
 /* ===========================================================================
  * Enforce a sane z-order after a tiling pass:
  *   - the solid backdrop stays pinned to the very bottom so it can never rise
  *     up and black out the tiled windows;
- *   - optionally (float_on_top) floating windows are raised above the tiled
- *     grid;
- *   - fullscreen and always-on-top windows go into the topmost band.
+ *   - optionally (float_on_top) floating windows go into the topmost band,
+ *     under mshell's own surfaces;
+ *   - fullscreen and always-on-top windows go into the topmost band, over both;
+ *   - anything of ours left up there without a reason comes back down.
  * Tiled windows never overlap each other, so their relative order is moot.
  * =========================================================================== */
 void window_enforce_zorder(void) {
@@ -1387,43 +1444,26 @@ void window_enforce_zorder(void) {
 
     Desktop *dt = desktop_current();
 
+    /* Everything that goes UP happens in here: the floats, then our overlays,
+     * then the fullscreen and pinned windows over both. */
     window_raise_floats();
 
-    /* A window covering the whole monitor goes above everything else — raised
-     * last, so it beats the floating pass above too: an overlay stranded in the
-     * middle of a fullscreen video is exactly what fullscreen is meant to end.
+    /* What is left is giving the band back. A window we promoted and that has
+     * since run out of reasons to be up there — it stopped floating, left
+     * fullscreen, was unpinned, or went off-screen onto another desktop — is
+     * demoted here, and only here.
      *
-     * It goes into the TOPMOST band, not just to the top of the ordinary one.
-     * HWND_TOP cannot do this job: Windows sorts every WS_EX_TOPMOST window
-     * above every non-topmost one no matter how recently the latter was raised,
-     * so an always-on-top utility — or, in --test mode, explorer's taskbar —
-     * keeps a strip of itself over content that asked for the whole display.
-     * That reads both as "something is on top" and, when it is the taskbar
-     * along an edge, as the window not quite reaching that edge.
-     *
-     * The promotion is recorded per window so leaving fullscreen can undo
-     * exactly the ones we made, and a window that was already topmost on its
-     * own account is left flagged false — we must not demote it later. */
+     * made_topmost records whether WE promoted it, so a window that was topmost
+     * on its own account is never demoted out from under its app. */
     for (int i = 0; i < dt->count; i++) {
         ManagedWindow *mw = window_find(dt->windows[i]);
         if (!mw || !IsWindow(mw->hwnd)) continue;
+        if (zorder_wants_topmost(mw) && window_on_screen(mw)) continue;
+        if (!mw->made_topmost) continue;
 
-        /* Two independent reasons to be up there — covering the monitor, or the
-         * user having asked for it. made_topmost records only whether WE did
-         * it, so the demotion below has to wait for BOTH reasons to lapse. */
-        bool want_topmost = window_is_screen_fullscreen(mw) || mw->always_on_top;
-
-        if (want_topmost && window_on_screen(mw)) {
-            if (!mw->made_topmost &&
-                !(GetWindowLongPtrW(mw->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
-                mw->made_topmost = true;
-            SetWindowPos(mw->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        } else if (mw->made_topmost) {
-            mw->made_topmost = false;
-            SetWindowPos(mw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
+        mw->made_topmost = false;
+        SetWindowPos(mw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 
@@ -1468,6 +1508,18 @@ void window_set_floating(HWND hwnd, bool floating) {
         window_center_float(hwnd);
     } else {
         window_strip_decorations(hwnd);
+
+        /* Back into the grid, so out of the topmost band we put it in — right
+         * now, not at the next tiling pass. The window is about to be given a
+         * tile, and one frame of it hanging over its new neighbours is exactly
+         * the flicker the band is meant to avoid. Only if WE promoted it, and
+         * not while another reason (fullscreen, pinned) still holds. */
+        if (mw->made_topmost && !window_is_screen_fullscreen(mw) &&
+            !mw->always_on_top) {
+            mw->made_topmost = false;
+            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
     }
 }
 

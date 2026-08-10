@@ -5,6 +5,28 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **A floating window can no longer be buried by anything you click.** Keeping
+  floats over the tiled grid was done by re-raising them to the top of the
+  ordinary z-order band on every focus change mshell heard about — which is not
+  every focus change there is. An app that raises itself a moment *after* its
+  activation (Chrome opening a window, an Electron app moving focus into a
+  child), or a window mshell does not manage taking the foreground, left the
+  float behind it with nothing left in the loop to fix it. Floats now go into
+  Windows' always-on-top band instead, which the OS maintains with no event of
+  ours involved: no ordinary window can cover one, whatever it does and whether
+  or not we hear about it.
+
+  Ranking inside that band is still mshell's: the status bar, launcher,
+  which-key panel and toasts sit above the floats — the bar stays furniture you
+  cannot bury — and a window covering its whole monitor sits above both, so a
+  fullscreen video is not interrupted by an overlay stranded in the middle of
+  it. Two overlapping floats keep their relative order across a focus change,
+  as before, and `mshell.set_float_on_top(false)` still opts out entirely.
+  Un-floating a window (`Win+f`) takes it back out of the band at once instead
+  of at the next tiling pass.
+
 ## 0.14.0 — 2026-08-09
 
 ### Added
