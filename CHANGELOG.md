@@ -5,6 +5,36 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **An ordinary per-user install failed at the last step, and undid nothing it
+  had already done.** `install.bat` finished copying the binaries, pointed the
+  Winlogon Shell key at them — and then stopped dead on `reg import
+  harden.reg` with `ERROR: Error accessing the registry`, printing
+  **INSTALL FAILED** over an install that was, apart from two registry values,
+  complete. Everything after that line was skipped: the other nine hardening
+  tweaks, the helper's logon task under `/helper`, and the restart that puts you
+  on the build you just installed. Re-running it did the same thing again.
+
+  Two of harden.reg's values live under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\` — the blanket
+  Win-key hotkey policy, and Win+L. Windows ACLs that subtree **read-only for
+  the user who owns the hive**: SYSTEM and Administrators may write there, you
+  may not, which is the point of a policy. `reg import` is all-or-nothing and
+  stops at the first refusal, and that key happened to be the first in the file,
+  so an unelevated install applied *none* of the hardening and then failed —
+  including `LowLevelHooksTimeout`, the one that keeps Windows from dropping the
+  keyboard hook mid-chord.
+
+  `install.bat` now applies the same set through `mshell.exe --tweaks apply
+  input`, which is generated from the same table harden.reg is and applies it a
+  value at a time: it sets everything it is allowed to, skips what it is not,
+  and says so instead of failing. Run it from an administrator prompt (or merge
+  `harden.reg` by hand, accepting UAC) to pick up the last two. `uninstall.bat`
+  reverts through `--tweaks revert input` when there is a backup to revert to,
+  which restores the value *you* had rather than harden-undo.reg's Microsoft
+  default, and falls back to the file when there is not.
+
 ## 0.14.3 — 2026-08-10
 
 ### Fixed
