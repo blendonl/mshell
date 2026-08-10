@@ -408,6 +408,22 @@ below asks for two keys held at once, and any sequence can be abandoned with
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
+- `Win+Space` cycles the seven dynamic layouts and never lands in bsp; from bsp
+  it cycles OUT, to tiling. `layout_bsp` (`b b`) is the only way in.
+
+With **two monitors**, the desktop spanning both:
+
+- `layout_bsp`, windows on both displays: each display holds **its own** splits.
+  A window is placed once, on the display it lives on — nothing is placed twice
+  per pass, and neither screen's windows appear stacked on the other's.
+- Build a different structure per display (say tabbed on one, a three-way split
+  on the other); both survive a switch to `tiling` and back.
+- `rotate_split`, `split_grow` and `toggle_tabbed` act on the **focused
+  window's** display and leave the other one alone.
+- Drag or `move_to_monitor_next` a window across: it leaves one tree and splits
+  the focused leaf of the other. Nothing is left behind on the display it left.
+- Unplug the second display with bsp windows on it: they land on the primary and
+  join its tree. Plug it back in — they return.
 
 ## Which-key panel
 

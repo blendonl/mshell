@@ -36,7 +36,31 @@ All notable changes to mshell are documented here. This project adheres to
   window per frame. The detector now asks it, and the tiler hands a window that
   is already moving back to `anim_begin` instead of teleporting it.
 
+- **Manual tiling (bsp) placed every window on every display.** The tiler lays a
+  desktop out one monitor at a time — it groups the desktop's windows by the
+  display they live on and gives each group that display's work area — but there
+  was a single tree per desktop, holding all of them. So each monitor's pass fed
+  the *whole* desktop through that monitor's rectangle: every window placed
+  twice per tiling pass on two displays, ending up wherever the last pass put
+  it, with the other screen's windows piled on top. Splits built on one display
+  moved the other's windows.
+
+  Trees are now keyed by desktop **and** monitor. Each pass sees only the
+  windows on the display it is laying out; a window dragged across displays is
+  pruned from the tree it left and splits the focused leaf of the one it
+  arrived on; `rotate_split`, `split_grow` and the container bindings act on the
+  focused window's display and leave the other alone. Unplugging a display
+  releases its trees.
+
 ### Changed
+
+- **`cycle_layout` no longer cycles into bsp.** The cycle is the seven dynamic
+  layouts, each a pure function of the window list, where overshooting costs one
+  more press. bsp is not: its structure is the record of where you were as each
+  window opened, so arriving there by pressing `Win+Space` once too many put you
+  in a tree you did not build — and pressing again abandoned it. It keeps its own
+  binding (`layout_bsp`, the `b` submap). A desktop already in bsp still cycles
+  out, so the key is never a dead end.
 
 - Re-targeting a running animation continues from the frame **on screen** rather
   than from where the previous move started, so a layout change mid-motion no
