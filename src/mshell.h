@@ -476,10 +476,18 @@ typedef enum {
  *       mechanism Windows' own virtual desktops use, so applications are at
  *       least tested against it.
  *
- *       REQUIRES mshelld.exe. Cloaking another process's window is privileged:
- *       an unelevated shell is refused for every foreign window, ordinary ones
- *       included (0x80070005, or 0x80070006 when the owner is higher
- *       integrity). window_hide falls back to SW_HIDE and says so once, loudly,
+ *       NOT ALWAYS AVAILABLE, and mshell cannot make it be. Cloaking another
+ *       process's window is privileged: an unelevated shell is refused for
+ *       every foreign window, ordinary ones included (0x80070005, or
+ *       0x80070006 when the owner is higher integrity). The privileged helper
+ *       is the second try — and on at least one Windows 11 build it is refused
+ *       there too, with mshelld.exe connected and elevated, which says the
+ *       check is not about integrity at all: DWM cloaks windows for the process
+ *       that owns them and for its own virtual desktops, and this API is not a
+ *       way round that.
+ *
+ *       So treat HIDE_CLOAK as "cloak if this machine allows it". window_hide
+ *       falls back to SW_HIDE, and says which of the two refusals it hit,
  *       because the fallback is not a cosmetic downgrade — see below.
  *
  *   HIDE_SHOWWINDOW
