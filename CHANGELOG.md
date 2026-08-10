@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.4 — 2026-08-10
+
 ### Fixed
 
 - **An ordinary per-user install failed at the last step, and undid nothing it
