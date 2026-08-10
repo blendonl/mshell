@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.3 — 2026-08-10
+
 ### Fixed
 
 - **The browser that got smaller every time you came back to it.** Switch away
