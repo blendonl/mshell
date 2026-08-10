@@ -324,9 +324,14 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 --   "cloak" (default) asks DWM to stop compositing it. The window goes on
 --           rendering, so it is instantly and correctly there when it comes
 --           back. Same mechanism Windows' own virtual desktops use.
+--           NEEDS mshelld.exe: DWM refuses to cloak a window this process does
+--           not own, so an unelevated mshell without the helper cannot cloak
+--           ANY window and silently falls back to "hide" below. See INSTALL.md.
 --   "hide"  ShowWindow(SW_HIDE), what mshell did before 0.13.0. DWM throws the
 --           window's surface away and Chromium/Electron/WPF apps shut their
---           renderer down, so windows commonly came back BLACK.
+--           renderer down, so windows commonly came back BLACK — and a Chromium
+--           one comes back OFFSET, its page creeping further into the window on
+--           every desktop switch until you restart it.
 --
 -- Only worth changing if cloaking misbehaves for some app you use:
 -- mshell.set_hide_policy("hide")

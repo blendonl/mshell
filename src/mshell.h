@@ -471,9 +471,21 @@ typedef enum {
  *       mechanism Windows' own virtual desktops use, so applications are at
  *       least tested against it.
  *
+ *       REQUIRES mshelld.exe. Cloaking another process's window is privileged:
+ *       an unelevated shell is refused for every foreign window, ordinary ones
+ *       included (0x80070005, or 0x80070006 when the owner is higher
+ *       integrity). window_hide falls back to SW_HIDE and says so once, loudly,
+ *       because the fallback is not a cosmetic downgrade — see below.
+ *
  *   HIDE_SHOWWINDOW
  *       ShowWindow(SW_HIDE). Clearing WS_VISIBLE makes DWM tear the window's
- *       redirection surface down outright.
+ *       redirection surface down outright — and a Chromium-class app does not
+ *       rebuild its compositor where it left it. Measured with Chrome tiled
+ *       full-screen: its page content lands one client origin (gap + client
+ *       inset) further right on every hide/show round trip, with the frame's
+ *       own colour filling the gap, until the app is restarted. That is the
+ *       "grey border that keeps growing" report, and it is why cloaking is the
+ *       default and why the fallback to this is worth a toast.
  *
  * NEITHER is enough on its own, and assuming cloaking was is what shipped a
  * broken fix once already. An app that renders off the UI thread — anything
