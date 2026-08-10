@@ -5,6 +5,45 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **A refused cloak no longer means `SW_HIDE`, and browsers stop rotting.** The
+  hide policy is cloaking for a reason: `ShowWindow(SW_HIDE)` clears
+  `WS_VISIBLE`, DWM drops the window's redirection surface, and a Chromium-class
+  app (Chrome, Edge, Electron) rebuilds its compositor from that — blank until
+  something makes it draw, or with its page offset by one client origin, once per
+  hide/show round trip, until you restart the app. Measured on a full-screen
+  Chrome: **13 px further right per desktop switch**, the app's own frame colour
+  filling the gap, which reads as a grey border that keeps growing.
+
+  Cloaking, though, is not mshell's to have. `DwmSetWindowAttribute(DWMWA_CLOAK)`
+  on another process's window is refused for an unelevated shell — every foreign
+  window, not just elevated ones — and on this Windows 11 build it is refused for
+  the **elevated helper too**, with `mshelld.exe` connected. So the fallback was
+  not a rare degraded mode: it was what every desktop switch did.
+
+  There is now a third mechanism between them. When cloaking is refused the
+  window is **stashed**: moved clear of every display, keeping `WS_VISIBLE` and
+  its surface, still composited and still drawing. Nothing is torn down, so
+  there is nothing to rebuild wrongly — and the way back is a real
+  `SetWindowPos` from off-screen to where it was, rather than the no-op move an
+  app is free to ignore, which is the other half of why windows came back blank.
+  `set_hide_policy("hide")` still means literal `SW_HIDE`; asking for it is
+  asking for it.
+
+  A stashed window is still a window — the OS lists it in Alt+Tab, and a
+  capture-by-handle recorder still sees it — and one left behind by a crashed
+  shell would be off-screen with nothing to bring it back, so the startup sweep
+  that uncloaks strays now also pulls back any manageable window sitting
+  entirely off every display, and shutdown unstashes as it uncloaks.
+
+- **The cloak refusal says which refusal it was.** 0.14.3's message sent
+  everyone to `install.bat /helper`, which is the right answer only when the
+  helper is missing. It now logs the `HRESULT` and whether `mshelld.exe` was
+  listening: refused with no helper is an install away, refused with one means
+  DWM will not cloak a foreign window on this machine at all, and no amount of
+  installing changes that.
+
 ## 0.14.5 — 2026-08-10
 
 ### Fixed

@@ -577,6 +577,96 @@ bool window_on_screen(const ManagedWindow *mw) {
     return IsWindowVisible(mw->hwnd) != 0;
 }
 
+/* ===========================================================================
+ * STASHING — taking a window off the screen without taking it off the screen.
+ *
+ * The third mechanism, and the one a refused cloak falls back to. The window is
+ * MOVED clear of every display: still WS_VISIBLE, still composited, still
+ * drawing, simply nowhere you can look at it.
+ *
+ * Why this rather than SW_HIDE, which is what the fallback used to be: clearing
+ * WS_VISIBLE makes DWM drop the window's redirection surface, and a
+ * Chromium-class app rebuilds its compositor from that — blank until something
+ * makes it draw, or offset by its client origin, once per hide/show round trip
+ * until you restart the app. Nothing mshell can do on the way back reliably
+ * repairs it; window_show's nudge exists to try and does not always win. A
+ * window that was never torn down has nothing to rebuild.
+ *
+ * The way back is a real SetWindowPos from off-screen to where it was, which is
+ * the other half of the point: the old show path re-applied the rect a window
+ * already had, and an app is free to do nothing at all with a move that moves
+ * it nowhere.
+ *
+ * WHAT IT COSTS. A stashed window is still a window: Alt+Tab lists it (mshell
+ * eats Alt+Tab, but the OS still knows), a screen recorder that captures a
+ * window by handle still captures it, and it still costs whatever it costs to
+ * render. Against a browser that quietly corrupts itself on every desktop
+ * switch, that is a trade worth making.
+ *
+ * STRANDING. A window stashed when mshell dies is off-screen with nothing left
+ * to bring it back, so the startup sweep in window_uncloak_strays pulls those
+ * in too, and window_restore_all_visibility unstashes on the way out. An iconic window is never stashed: it has no surface to protect and
+ * moving one only edits the rect it will restore to.
+ * =========================================================================== */
+
+/* Clear of the rightmost display, and clear of a display appearing there while
+ * the window is away. Window coordinates are signed 16-bit at the boundary, so
+ * this stays well inside ±32767 even on a wide multi-monitor desktop. */
+#define STASH_GAP 4000
+
+static bool stash_position(int *x, int *y) {
+    int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    if (vw <= 0) return false;
+
+    *x = vx + vw + STASH_GAP;
+    *y = vy;                     /* same band, so the trip back is one axis */
+    return *x < 30000;           /* refuse rather than wrap into the desktop */
+}
+
+/* True when nothing of this rect is on any display — the test the startup
+ * sweep uses to recognise a window a dead mshell left stashed. */
+static bool rect_off_screen(RECT r) {
+    RECT vs = { GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0 };
+    vs.right  = vs.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    vs.bottom = vs.top  + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+    RECT hit;
+    return !IntersectRect(&hit, &r, &vs);
+}
+
+static bool window_stash(ManagedWindow *mw) {
+    if (IsIconic(mw->hwnd)) return false;   /* already gone, and un-moveable */
+
+    RECT r;
+    int  x, y;
+    if (!stash_position(&x, &y) || !GetWindowRect(mw->hwnd, &r)) return false;
+    if (rect_off_screen(r)) return false;   /* not ours to file away */
+
+    if (!window_set_pos(mw->hwnd, x, y, r.right - r.left, r.bottom - r.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE))
+        return false;
+
+    mw->stash_rect = r;
+    mw->stashed    = true;
+    return true;
+}
+
+static void window_unstash(ManagedWindow *mw) {
+    if (!mw->stashed) return;
+    mw->stashed = false;
+
+    RECT r = mw->stash_rect;
+    /* FRAMECHANGED | NOCOPYBITS for the same reason window_show's nudge carries
+     * them: whatever the app had cached for this position is stale, and the
+     * saved bits are the ones we do not want blitted forward. */
+    window_set_pos(mw->hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED |
+                   SWP_NOCOPYBITS);
+}
+
 void window_hide(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->wm_hidden) return;      /* already ours and already gone */
@@ -596,30 +686,23 @@ void window_hide(ManagedWindow *mw) {
      * is not one to lean on, and it costs nothing to make it hold outright. */
     mw->wm_hidden = true;
     mw->cloaked   = false;
+    mw->stashed   = false;
 
     if (g.hide_policy == HIDE_CLOAK) {
+        /* Cloak, then stash, then — only if the window cannot be moved either —
+         * SW_HIDE. The refusal itself is logged once, with its HRESULT, by
+         * window_set_cloaked; this is only about what to do instead.
+         *
+         * Stashing is preferred over SW_HIDE rather than the other way round
+         * because SW_HIDE is the mechanism that damages the window: WS_VISIBLE
+         * comes off, DWM drops the redirection surface, and a Chromium-class
+         * app rebuilds its compositor blank or offset on the way back, every
+         * round trip, until it is restarted. */
         mw->cloaked = window_set_cloaked(mw->hwnd, true);
-        if (!mw->cloaked) {
-            /* Cloaking was refused — window_set_cloaked has already said so,
-             * with the HRESULT and whether the helper was listening, which is
-             * the part worth reading. Fall back so desktops keep working, and
-             * put ONE toast on the screen, because the log is not where anyone
-             * will connect a browser that comes back blank to a hide mechanism
-             * they never chose.
-             *
-             * SW_HIDE clears WS_VISIBLE, DWM drops the window's redirection
-             * surface, and a Chromium-class app (Chrome, Edge, Electron)
-             * rebuilds its compositor on the way back — sometimes blank until
-             * something makes it draw, sometimes offset by its client origin,
-             * once per round trip, until the app is restarted. window_show
-             * nudges for exactly this reason and does not always win. */
-            static bool warned;
-            if (!warned) {
-                warned = true;
-                notify_show(L"cloaking refused — desktops hide with SW_HIDE; "
-                            L"Chromium windows may come back blank (see the log)",
-                            NOTIFY_ERROR, 6000);
-            }
+        if (!mw->cloaked && !window_stash(mw)) {
+            /* Neither: an iconic window (nothing to protect, and moving one
+             * only edits the rect it will restore to), or no room left in the
+             * coordinate space to stash it in. */
             ShowWindow(mw->hwnd, SW_HIDE);
         }
     } else {
@@ -627,7 +710,7 @@ void window_hide(ManagedWindow *mw) {
     }
 
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
-            mw->cloaked ? L"cloaked" : L"SW_HIDE");
+            mw->cloaked ? L"cloaked" : mw->stashed ? L"stashed" : L"SW_HIDE");
 }
 
 void window_show(ManagedWindow *mw) {
@@ -640,18 +723,22 @@ void window_show(ManagedWindow *mw) {
      * IsWindowVisible would call fine. Getting this wrong is what shipped:
      * the repaint below sat inside an `if (!IsWindowVisible)` and therefore
      * never ran for a cloaked window at all. */
-    bool was_off_screen = mw->wm_hidden || mw->cloaked;
+    bool was_off_screen = mw->wm_hidden || mw->cloaked || mw->stashed;
     bool was_cloaked    = mw->cloaked;
+    bool was_stashed    = mw->stashed;
 
     /* Uncloak whenever we cloaked it, even if wm_hidden is already clear: the
      * two can drift apart if the policy changed under a hidden window, and a
-     * window left cloaked is invisible with no way back. */
+     * window left cloaked is invisible with no way back. Unstashing is the same
+     * promise for the other mechanism, and unconditional for the same reason:
+     * the flag is the only record of where the window belongs. */
     if (mw->cloaked) {
         if (!window_set_cloaked(mw->hwnd, false))
             log_msg(LOG_WARN, L"show: could not uncloak %p — the window stays "
                               L"invisible", (void *)mw->hwnd);
         mw->cloaked = false;
     }
+    window_unstash(mw);
 
     if (!IsWindowVisible(mw->hwnd)) {
         /* SW_SHOWNOACTIVATE restores a minimized window, which would quietly
@@ -689,8 +776,12 @@ void window_show(ManagedWindow *mw) {
         /* The tiler is what consumes needs_repaint, and the tiler never places
          * a floating window — so for those, nobody would. Re-apply the rect it
          * already has: a no-op move, but it carries SWP_FRAMECHANGED and
-         * SWP_NOCOPYBITS, which is the whole point. */
-        if (mw->is_floating) {
+         * SWP_NOCOPYBITS, which is the whole point.
+         *
+         * Skipped for a window that was stashed: the unstash above WAS the move,
+         * with the same flags and a real distance behind it, which is strictly
+         * the better version of this. */
+        if (mw->is_floating && !was_stashed) {
             RECT r;
             if (GetWindowRect(mw->hwnd, &r))
                 window_set_pos(mw->hwnd, r.left, r.top,
@@ -698,10 +789,12 @@ void window_show(ManagedWindow *mw) {
                                SWP_NOZORDER | SWP_NOACTIVATE |
                                SWP_FRAMECHANGED | SWP_NOCOPYBITS);
             mw->needs_repaint = false;
+        } else if (mw->is_floating) {
+            mw->needs_repaint = false;
         }
 
         log_msg(LOG_DEBUG, L"show: %p (was %ls)", (void *)mw->hwnd,
-                was_cloaked ? L"cloaked" : L"hidden");
+                was_cloaked ? L"cloaked" : was_stashed ? L"stashed" : L"hidden");
     }
 
     mw->wm_hidden = false;
@@ -742,7 +835,7 @@ void window_restore_all_visibility(void) {
          * because the user closed it there should stay there. */
         if (mw->app_hidden) continue;
 
-        if (mw->cloaked || !IsWindowVisible(mw->hwnd)) shown++;
+        if (mw->cloaked || mw->stashed || !IsWindowVisible(mw->hwnd)) shown++;
 
         /* Unconditional, not `if (mw->cloaked)`: this is the last chance any
          * of these windows get, and a bad flag here costs the user a window
@@ -751,6 +844,12 @@ void window_restore_all_visibility(void) {
          * elevated window cloaked on the way out is the same lost window. */
         window_set_cloaked(mw->hwnd, false);
         mw->cloaked   = false;
+
+        /* And the same for the other mechanism: a stashed window is off every
+         * display, and once this process is gone nothing else knows where it
+         * came from. This is the only thing that does. */
+        window_unstash(mw);
+
         mw->wm_hidden = false;
 
         if (IsWindowVisible(mw->hwnd)) continue;
@@ -1838,6 +1937,34 @@ static BOOL CALLBACK uncloak_stray_proc(HWND hwnd, LPARAM lp) {
      * system, and DwmGetWindowAttribute is an RPC into dwm.exe. */
     if (!IsWindowVisible(hwnd)) return TRUE;
 
+    /* A window a dead mshell left STASHED is the same lost window as a cloaked
+     * one, and worse to find: it is visible, so nothing about it looks wrong
+     * except that it is nowhere. Pull anything sitting entirely off every
+     * display back onto the primary work area, and let the tiling pass that
+     * follows adoption put it where it belongs.
+     *
+     * Gated on window_is_manageable so this only ever touches windows mshell
+     * would have stashed in the first place: an app is perfectly entitled to
+     * keep a visible window off-screen (that IS how some of them hide things),
+     * and one that mshell would never manage is none of our business. */
+    RECT r;
+    if (window_is_manageable(hwnd) && !IsIconic(hwnd) &&
+        GetWindowRect(hwnd, &r) && rect_off_screen(r)) {
+        RECT area = g.work_area;
+        int  w    = r.right - r.left, h = r.bottom - r.top;
+        int  aw   = (int)(area.right - area.left);
+        int  ah   = (int)(area.bottom - area.top);
+        if (aw > 0 && ah > 0 && w > 0 && h > 0) {
+            if (w > aw) w = aw;
+            if (h > ah) h = ah;
+            window_set_pos(hwnd, center_axis(area.left, aw, w),
+                           center_axis(area.top, ah, h), w, h,
+                           SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            (*n)++;
+            return TRUE;
+        }
+    }
+
     int cloaked = 0;
     if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
                                      &cloaked, sizeof(cloaked))))
@@ -1853,8 +1980,8 @@ void window_uncloak_strays(void) {
 
     int n = 0;
     EnumWindows(uncloak_stray_proc, (LPARAM)&n);
-    if (n) log_err(L"startup: uncloaked %d window(s) a previous mshell left "
-                   L"hidden", n);
+    if (n) log_err(L"startup: recovered %d window(s) a previous mshell left "
+                   L"hidden — cloaked, or stashed off every display", n);
 }
 
 /* ===========================================================================
