@@ -5,6 +5,43 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **Changing layout froze the whole machine.** `Win+Space`, or any of the
+  `layout_*` bindings, and everything stopped answering — mshell, the bar, and
+  every window on the desktop — for as long as it took to kill the shell.
+
+  Two loops, both of them the same shape: a tiling pass produces window moves,
+  window moves produce `EVENT_OBJECT_LOCATIONCHANGE`, and the drift detector
+  answers a location change with another tiling pass. The suppression counter
+  does not break the cycle, because the hooks are `WINEVENT_OUTOFCONTEXT`: the
+  system queues those events and delivers them on the next pump, long after the
+  pass that caused them called `events_suppress_end()`. Changing layout is the
+  one action that resizes *every* window at once, which is why it is where this
+  bites.
+
+  The first loop is a window that **cannot take the rect it is given** — an app
+  with a minimum size larger than its new cell (Discord, Steam, Spotify at three
+  columns), one that re-centres itself, one whose DWM frame does not round-trip
+  across monitors of different DPI. It never lands inside the 4 px tolerance, so
+  every snap-back earns another location change and another full pass, forever.
+  The snap-back is now capped: three attempts inside a second, then the window is
+  left where it insists on being and the log says which window and why.
+
+  The second is **animation**. `anim_tick` moves each window every 16 ms, and
+  every one of those frames arrived at the drift detector looking like escape,
+  because an in-flight window is by definition not at the rect the layout
+  assigned. `anim_is_animating()` existed for exactly this and nothing called
+  it — the tiler fought the animation frame for frame, one whole tiling pass per
+  window per frame. The detector now asks it, and the tiler hands a window that
+  is already moving back to `anim_begin` instead of teleporting it.
+
+### Changed
+
+- Re-targeting a running animation continues from the frame **on screen** rather
+  than from where the previous move started, so a layout change mid-motion no
+  longer jumps the window backwards before it sets off again.
+
 ## 0.14.3 — 2026-08-10
 
 ### Fixed
