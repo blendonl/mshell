@@ -151,7 +151,19 @@ With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
 and, just as importantly, *hides* them when you switch desktops: cloaking a
 window is blocked by the same integrity check as moving it, so without the
-helper an elevated window is visible on every desktop at once. It is also what
+helper an elevated window is visible on every desktop at once.
+
+**And cloaking is not only about elevated windows.** DWM refuses
+`DWMWA_CLOAK` on *any* window an unelevated process does not own, ordinary
+same-user windows included, so with no helper running the default `"cloak"`
+hide policy is not what actually happens: every desktop switch falls back to
+`ShowWindow(SW_HIDE)`. Chromium-based apps (Chrome, Edge, Electron) rebuild
+their compositor in the wrong place after that — the page walks further into
+the window on every switch, with the app's own frame colour filling the gap,
+until the app is restarted. If you switch desktops with a browser open, install
+the helper.
+
+It is also what
 lets `float_on_top` hold for such a window: floats are kept above the grid by
 putting them in the always-on-top band, that call meets the same check, and
 without the helper an elevated float is the one window a click can still bury.

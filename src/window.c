@@ -512,22 +512,32 @@ void window_restore_all_decorations(void) {
 
 /* Ask DWM to stop compositing this window (or to resume). Cross-process, like
  * every other DwmSetWindowAttribute call here. Fails on a window whose process
- * has gone, which is why the result is checked rather than assumed.
- *
- * The raw HRESULT is returned, not a bool: E_ACCESSDENIED means the window
- * belongs to a higher-integrity process, which is the one failure the
- * privileged helper can still do something about — every other failure (DWM
- * off in a VM or a remote session) is what the SW_HIDE fallback is for. */
+ * has gone, which is why the result is checked rather than assumed. */
 static HRESULT dwm_set_cloaked(HWND hwnd, bool on) {
     BOOL v = on ? TRUE : FALSE;
     return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &v, sizeof(v));
 }
 
 /* Cloak (or uncloak) with the helper as the second try. Returns true when the
- * window ended up in the requested state by either route. */
+ * window ended up in the requested state by either route.
+ *
+ * The helper is asked on ANY failure, not on E_ACCESSDENIED alone. That test
+ * was written from the placement path, where a refusal really does arrive as
+ * ERROR_ACCESS_DENIED — but DWM does not answer the same way. Measured on
+ * Windows 11, from an unelevated shell:
+ *
+ *     ordinary same-user window (a browser, a terminal)   0x80070005
+ *     window owned by a higher-integrity process          0x80070006
+ *
+ * So the one case the helper exists for — Task Manager, an admin terminal —
+ * was the case the old test let through, and the fallback never ran for it.
+ * Nothing here can tell the failures apart usefully anyway: cloaking another
+ * process's window is privileged whoever owns it, and the only question worth
+ * asking is whether it worked. A missing helper costs one WaitNamedPipe with a
+ * zero timeout, so trying and failing is cheap. */
 static bool window_set_cloaked(HWND hwnd, bool on) {
     HRESULT hr = dwm_set_cloaked(hwnd, on);
-    if (hr == E_ACCESSDENIED && helper_set_cloak(hwnd, on)) hr = S_OK;
+    if (FAILED(hr) && helper_set_cloak(hwnd, on)) hr = S_OK;
     return SUCCEEDED(hr);
 }
 
@@ -560,20 +570,41 @@ void window_hide(ManagedWindow *mw) {
     if (g.hide_policy == HIDE_CLOAK) {
         mw->cloaked = window_set_cloaked(mw->hwnd, true);
         if (!mw->cloaked) {
-            /* DWM refused and so did the helper — composition off, which is
-             * possible in a VM or over some remote sessions. Fall back so
-             * desktops keep working.
+            /* DWM refused and so did the helper. Fall back so desktops keep
+             * working — but say so where the user will actually see it.
              *
-             * Said once and loudly: a silent downgrade to the mechanism that
-             * leaves the visible bit cleared changes how the hide is detected
-             * and how the window comes back, and the log is the only place it
-             * would ever show. */
+             * This is not the rare VM/remote-session case the fallback was
+             * written for. Cloaking ANOTHER PROCESS'S window is privileged:
+             * from an unelevated shell DwmSetWindowAttribute(DWMWA_CLOAK)
+             * refuses every foreign window, which is every window mshell
+             * manages. So with no mshelld.exe running the default hide policy
+             * silently is not the default at all — every desktop switch, every
+             * monocle pass and every scratchpad toggle goes through SW_HIDE.
+             *
+             * That costs more than flicker. SW_HIDE tears the redirection
+             * surface down, and a Chromium-class app (Chrome, Edge, Electron)
+             * rebuilds its compositor on the way back — off by its client
+             * origin each time, so its page walks further into the window on
+             * every switch and its own frame colour fills the gap. Read as a
+             * grey border that grows and a page that shrinks, one switch at a
+             * time, until the app is restarted.
+             *
+             * Hence ERROR and a toast rather than a WARN line in a file nobody
+             * opens: the shell is running in a mode that quietly damages the
+             * windows it manages, and one command fixes it. */
             static bool warned;
             if (!warned) {
                 warned = true;
-                log_msg(LOG_WARN, L"hide: DWM refused to cloak a window — "
-                                  L"falling back to ShowWindow(SW_HIDE) for "
-                                  L"this session");
+                log_err(L"hide: cloaking is unavailable — DWM refuses to cloak "
+                        L"another process's window unless the request comes "
+                        L"from mshelld.exe, so desktops fall back to "
+                        L"ShowWindow(SW_HIDE). Chromium-based apps come back "
+                        L"mis-composited from that (the frame grows inward on "
+                        L"every switch). Fix: run `install.bat /helper` from an "
+                        L"administrator prompt — see INSTALL.md.");
+                notify_show(L"cloaking unavailable — start mshelld.exe "
+                            L"(install.bat /helper); browsers will drift "
+                            L"otherwise", NOTIFY_ERROR, 6000);
             }
             ShowWindow(mw->hwnd, SW_HIDE);
         }

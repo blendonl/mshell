@@ -75,10 +75,13 @@ static bool helper_connect(void) {
 void helper_init(void) {
     g_tried = true;
     if (!helper_connect())
-        log_w(L"helper: mshelld.exe is not running; windows owned by elevated "
+        log_w(L"helper: mshelld.exe is not running. Windows owned by elevated "
               L"processes will float instead of tiling and will stay on every "
-              L"desktop (this is the default and is fine unless you want them "
-              L"tiled and desktop-bound)");
+              L"desktop — and, less obviously, NO window can be cloaked: DWM "
+              L"refuses DWMWA_CLOAK on another process's window whoever owns "
+              L"it, so hiding falls back to ShowWindow(SW_HIDE) for everything "
+              L"(see window_hide). Run `install.bat /helper` from an "
+              L"administrator prompt to change both.");
 }
 
 void helper_shutdown(void) {
