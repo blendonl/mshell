@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.6 — 2026-08-10
+
 ### Fixed
 
 - **A refused cloak no longer means `SW_HIDE`, and browsers stop rotting.** The
