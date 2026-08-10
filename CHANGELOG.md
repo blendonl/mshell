@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.5 — 2026-08-10
+
 ### Fixed
 
 - **Changing layout froze the whole machine.** `Win+Space`, or any of the
