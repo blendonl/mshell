@@ -5,6 +5,51 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **The browser that got smaller every time you came back to it.** Switch away
+  from a desktop with Chrome on it, switch back, and a dark grey band appeared
+  inside mshell's border — a little wider on every round trip, the page creeping
+  further into the window until it was clipped off the right and bottom edges.
+  Measured with Chrome tiled full screen: the page moved **13 px per switch**,
+  which is exactly this window's client origin (the outer gap plus Chromium's
+  own client inset). Nothing about the geometry mshell applies was wrong — the
+  window rect, DWM's extended frame bounds and the client size were identical
+  before and after every switch. The grey was Chrome's own frame colour, showing
+  through where Chrome had stopped drawing.
+
+  The cause was two steps upstream. `window_hide` cloaks by default precisely
+  because `ShowWindow(SW_HIDE)` tears a window's redirection surface down and
+  Chromium-class apps do not rebuild theirs where they left it — but **cloaking
+  another process's window is privileged**. From an unelevated shell DWM refuses
+  `DWMWA_CLOAK` for *every* foreign window, an ordinary same-user one included,
+  so without `mshelld.exe` running the default hide policy was never the policy
+  in effect: every desktop switch, every monocle pass and every scratchpad
+  toggle went through `SW_HIDE`, and a browser paid a client origin for each one
+  until it was restarted.
+
+  Run the helper and the whole class of damage goes away —
+  `install.bat /helper` from an administrator prompt, see INSTALL.md. The
+  documentation said this mattered only for elevated windows; it matters for
+  all of them, and now says so in INSTALL.md, in the sample config and next to
+  `HidePolicy` itself.
+
+- **The helper was asked about cloaking only when DWM said the one thing it
+  never says.** `window_set_cloaked` forwarded to `mshelld.exe` on
+  `E_ACCESSDENIED` — the code the *placement* path really does come back with.
+  DWM answers differently: `0x80070005` for an ordinary window, and
+  `0x80070006` for one owned by a higher-integrity process. So the single case
+  the helper exists for — Task Manager, regedit, an admin terminal — was the
+  case the test let through, and those windows stayed visible on every desktop
+  even with the helper running. Any failure now forwards; with no helper around
+  that costs one `WaitNamedPipe` with a zero timeout.
+
+- **The fallback stopped being silent.** Losing cloaking cost one `WARN` line,
+  in a file nobody opens, worded as though the shell had chosen a slightly
+  different flicker for the session. It is now an `ERROR` and a toast, once,
+  naming what breaks (Chromium apps drift on every switch) and the one command
+  that fixes it.
+
 ## 0.14.2 — 2026-08-10
 
 ### Fixed
