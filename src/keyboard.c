@@ -1365,11 +1365,26 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_LAYOUT_BSTACK:   dt->layout = LAYOUT_BSTACK;   tile_current(); session_save(); break;
     case ACTION_LAYOUT_COLUMNS:  dt->layout = LAYOUT_COLUMNS;  tile_current(); session_save(); break;
 
-    case ACTION_CYCLE_LAYOUT:
-        dt->layout = (Layout)((dt->layout + 1) % LAYOUT_COUNT);
+    case ACTION_CYCLE_LAYOUT: {
+        /* The cycle covers the DYNAMIC layouts — the seven that are a pure
+         * function of the window list, where cycling past one you did not want
+         * costs nothing. BSP is not one of them: its structure is the record of
+         * where you were each time a window opened, so arriving in it by
+         * pressing Space one time too many drops you into a tree you did not
+         * build, and pressing Space again abandons it. It has its own binding
+         * (`layout_bsp`, and the `b` submap) for the same reason.
+         *
+         * Wrapping on LAYOUT_BSP rather than LAYOUT_COUNT is what excludes it,
+         * and it is why the enum keeps BSP last before LAYOUT_COUNT. A desktop
+         * already in BSP still cycles OUT — into tiling, the first of the
+         * dynamic ones — so the key is never a dead end. */
+        Layout next = (Layout)(dt->layout + 1);
+        if (next >= LAYOUT_BSP) next = LAYOUT_TILING;
+        dt->layout = next;
         tile_current();
         session_save();
         break;
+    }
 
     /* -- number of master windows -------------------------------------- */
     case ACTION_INC_NMASTER:

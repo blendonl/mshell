@@ -22,6 +22,10 @@
  * a desktop's windows, which is the same order the tiler already runs at, and
  * it means no other file has to know the tree exists.
  *
+ * There is one tree per desktop AND MONITOR, because the tiler lays a desktop
+ * out one display at a time and a tree spanning them all would place every
+ * window on every display. See the table below.
+ *
  * CONTAINERS. A split node whose mode is TABBED or STACKED shows one child at a
  * time instead of dividing its area. That reuses the `layout_hidden` flag
  * monocle needs anyway, so the machinery for "in the layout but not on screen"
@@ -52,26 +56,85 @@ typedef struct {
     int       in_use;
 } Tree;
 
-/* One tree per desktop slot. Indexed by desktop ID modulo the table, resolved
- * through a small map so a desktop's tree follows its ID rather than its slot
- * (slots are re-sorted on every create). */
-static Tree s_trees[MAX_DESKTOPS];
-static int  s_tree_owner[MAX_DESKTOPS];   /* desktop id owning each tree, 0 = free */
+/* ---------------------------------------------------------------------------
+ * One tree per DESKTOP AND MONITOR, not per desktop.
+ *
+ * A desktop spans every display, and the tiler already treats it that way: it
+ * groups the desktop's windows by monitor and lays each group out into that
+ * monitor's work area, once per monitor. A single tree per desktop cannot
+ * survive that. It holds every window on the desktop, so each monitor's pass
+ * placed ALL of them into that monitor's area — every window positioned twice
+ * per tiling pass, ending up wherever the last monitor's pass put it, with the
+ * other display's windows piled on top of it.
+ *
+ * Keyed by the pair, each pass sees only the windows that live on the display
+ * being laid out, and the splits you build on one screen are that screen's.
+ *
+ * The table is still MAX_DESKTOPS entries rather than desktops × monitors: a
+ * tree is 512 nodes, so a full cross product would be megabytes of mostly
+ * untouched pool for a layout most desktops never select. Entries are claimed
+ * on demand and reclaimed from desktops that are gone and monitors that have
+ * been unplugged, which covers any realistic number of BSP desktops. If it does
+ * fill up, layout_tree_run says so rather than dropping the windows — see the
+ * fallback there.
+ * --------------------------------------------------------------------------- */
+typedef struct {
+    int desktop_id;      /* 0 = free */
+    int monitor;
+} TreeOwner;
 
-static Tree *tree_for(int desktop_id, bool create) {
+static Tree      s_trees[MAX_DESKTOPS];
+static TreeOwner s_tree_owner[MAX_DESKTOPS];
+
+/* The monitor a window counts as being on, spelled exactly the way
+ * collect_clients spells it — including the defensive clamp, so a window with a
+ * stale index lands in the same tree the tiler will lay out. */
+static int tree_monitor_of(const ManagedWindow *mw) {
+    int mon = mw->monitor;
+    if (mon < 0 || mon >= g.monitor_count) mon = 0;
+    return mon;
+}
+
+/* Is this window one the tree on `mon` is responsible for? The same filter
+ * collect_clients applies, plus the monitor test — the two must agree, or a
+ * window is tiled by one and ignored by the other. */
+static bool tree_owns_window(HWND hwnd, int mon) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || mw->is_floating || mw->tracked_only || mw->app_hidden) return false;
+    if (IsIconic(hwnd)) return false;
+    return tree_monitor_of(mw) == mon;
+}
+
+static Tree *tree_for(int desktop_id, int monitor, bool create) {
     for (int i = 0; i < MAX_DESKTOPS; i++)
-        if (s_tree_owner[i] == desktop_id) return &s_trees[i];
+        if (s_tree_owner[i].desktop_id == desktop_id &&
+            s_tree_owner[i].monitor    == monitor) return &s_trees[i];
     if (!create) return NULL;
 
     for (int i = 0; i < MAX_DESKTOPS; i++) {
-        if (s_tree_owner[i] == 0 || !desktop_by_id(s_tree_owner[i])) {
-            /* Free, or owned by a desktop that no longer exists. Reclaiming the
-             * latter lazily is what keeps this table the same size as the
-             * desktop table without a destroy hook. */
-            memset(&s_trees[i], 0, sizeof(s_trees[i]));
-            s_tree_owner[i] = desktop_id;
-            return &s_trees[i];
-        }
+        TreeOwner *o = &s_tree_owner[i];
+        /* Free, owned by a desktop that no longer exists, or owned by a monitor
+         * that has been unplugged. Reclaiming the last two lazily is what keeps
+         * this table small without a destroy hook or a hotplug hook. */
+        bool stale = o->desktop_id == 0 ||
+                     !desktop_by_id(o->desktop_id) ||
+                     (g.monitor_count > 0 && o->monitor >= g.monitor_count);
+        if (!stale) continue;
+
+        memset(&s_trees[i], 0, sizeof(s_trees[i]));
+        o->desktop_id = desktop_id;
+        o->monitor    = monitor;
+        return &s_trees[i];
+    }
+
+    static bool warned;
+    if (!warned) {
+        warned = true;
+        log_msg(LOG_WARN, L"bsp: no tree left for desktop %d monitor %d — "
+                          L"%d desktop/monitor pairs are already using the "
+                          L"manual layout. That display falls back to "
+                          L"master-stack.",
+                desktop_id, monitor, MAX_DESKTOPS);
     }
     return NULL;
 }
@@ -184,8 +247,10 @@ static void tree_remove(Tree *t, HWND hwnd) {
  * that appeared are inserted at the focused leaf; leaves whose window has left
  * the desktop (closed, moved, floated) are removed.
  * --------------------------------------------------------------------------- */
-static void tree_sync(Tree *t, Desktop *dt) {
-    /* Prune first: removing frees nodes that inserting may need. */
+static void tree_sync(Tree *t, Desktop *dt, int mon) {
+    /* Prune first: removing frees nodes that inserting may need. A window that
+     * has MOVED to another display is stale here too — it is pruned from this
+     * tree and inserted into that monitor's on its pass. */
     for (int guard = 0; guard < TREE_MAX_NODES; guard++) {
         HWND stale = NULL;
 
@@ -196,9 +261,7 @@ static void tree_sync(Tree *t, Desktop *dt) {
             bool present = false;
             for (int j = 0; j < dt->count; j++) {
                 if (dt->windows[j] != n->hwnd) continue;
-                ManagedWindow *mw = window_find(dt->windows[j]);
-                present = mw && !mw->is_floating && !mw->app_hidden &&
-                          !IsIconic(dt->windows[j]);
+                present = tree_owns_window(dt->windows[j], mon);
                 break;
             }
             if (!present) stale = n->hwnd;
@@ -212,10 +275,12 @@ static void tree_sync(Tree *t, Desktop *dt) {
     HWND focus = desktop_get_focused();
     for (int i = 0; i < dt->count; i++) {
         HWND h = dt->windows[i];
-        ManagedWindow *mw = window_find(h);
-        if (!mw || mw->is_floating || mw->app_hidden || IsIconic(h)) continue;
+        if (!tree_owns_window(h, mon)) continue;
         if (tree_find(t->root, h)) continue;
 
+        /* tree_find returns NULL for a focus that is on another display, which
+         * is what we want: a window arriving on THIS screen splits the leftmost
+         * leaf of THIS screen, not nothing at all. */
         TreeNode *at = (focus && focus != h) ? tree_find(t->root, focus) : NULL;
         tree_insert(t, at, h, g.next_split);
     }
@@ -271,25 +336,48 @@ static void tree_place(TreeNode *n, RECT area, TreeEmitFn emit, void *ctx) {
 /* ---------------------------------------------------------------------------
  * The public entry point: lay out one monitor's slice using the tree.
  * --------------------------------------------------------------------------- */
-void layout_tree_run(Desktop *dt, RECT area, TreeEmitFn emit, void *ctx) {
-    Tree *t = tree_for(dt->id, true);
-    if (!t) return;
+bool layout_tree_run(Desktop *dt, int monitor, RECT area, TreeEmitFn emit,
+                     void *ctx) {
+    Tree *t = tree_for(dt->id, monitor, true);
+    if (!t) return false;              /* table full — the caller falls back */
 
-    tree_sync(t, dt);
-    if (!t->root) return;
+    tree_sync(t, dt, monitor);
+    if (!t->root) return false;        /* nothing of ours here; let the caller
+                                        * place whatever it thinks is */
 
-    /* Everything starts visible; the container walk marks what it hides. */
+    /* Everything on THIS display starts visible; the container walk marks what
+     * it hides. Restricted to this monitor's windows because the other
+     * monitor's pass has already decided about its own, and clearing the flag
+     * for the whole desktop would un-hide the far side of a container over
+     * there — the same pass that just hid it. */
     for (int i = 0; i < dt->count; i++) {
+        if (!tree_owns_window(dt->windows[i], monitor)) continue;
         ManagedWindow *mw = window_find(dt->windows[i]);
         if (mw) mw->layout_hidden = false;
     }
 
     tree_place(t->root, area, emit, ctx);
+    return true;
 }
 
 /* ---------------------------------------------------------------------------
  * Actions
  * --------------------------------------------------------------------------- */
+
+/* Every action below acts on the split holding the FOCUSED window, so the tree
+ * it needs is the one for that window's display. Resolved here rather than in
+ * five places, and never created: an action before the first tiling pass has
+ * nothing to act on either way. */
+static Tree *tree_of_focus(HWND *focus_out) {
+    HWND f = desktop_get_focused();
+    if (!f) return NULL;
+
+    ManagedWindow *mw = window_find(f);
+    if (!mw) return NULL;
+
+    *focus_out = f;
+    return tree_for(desktop_current()->id, tree_monitor_of(mw), false);
+}
 
 /* The split direction the NEXT window will use. Set rather than applied
  * immediately, because "split vertically" is a statement about where the next
@@ -302,9 +390,8 @@ void layout_tree_set_split(SplitMode mode) {
 
 /* Flip the split that contains the focused window. */
 void layout_tree_rotate(void) {
-    Desktop *dt = desktop_current();
-    Tree    *t  = tree_for(dt->id, false);
-    HWND     f  = desktop_get_focused();
+    HWND  f = NULL;
+    Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
     TreeNode *n = tree_find(t->root, f);
@@ -317,9 +404,8 @@ void layout_tree_rotate(void) {
 
 /* Turn the focused window's split into a tabbed/stacked container, or back. */
 void layout_tree_set_container(SplitMode mode) {
-    Desktop *dt = desktop_current();
-    Tree    *t  = tree_for(dt->id, false);
-    HWND     f  = desktop_get_focused();
+    HWND  f = NULL;
+    Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
     TreeNode *n = tree_find(t->root, f);
@@ -335,9 +421,8 @@ void layout_tree_set_container(SplitMode mode) {
 
 /* Show the next child of the focused window's container. */
 void layout_tree_cycle_container(int delta) {
-    Desktop *dt = desktop_current();
-    Tree    *t  = tree_for(dt->id, false);
-    HWND     f  = desktop_get_focused();
+    HWND  f = NULL;
+    Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
     TreeNode *n = tree_find(t->root, f);
@@ -364,9 +449,8 @@ void layout_tree_cycle_container(int delta) {
 
 /* Resize the split containing the focused window. */
 void layout_tree_resize(float delta) {
-    Desktop *dt = desktop_current();
-    Tree    *t  = tree_for(dt->id, false);
-    HWND     f  = desktop_get_focused();
+    HWND  f = NULL;
+    Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
     TreeNode *n = tree_find(t->root, f);
@@ -379,14 +463,16 @@ void layout_tree_resize(float delta) {
     tile_current();
 }
 
-/* Drop a desktop's tree — called when the desktop is destroyed so the pool slot
- * is reusable straight away rather than at the next allocation. */
+/* Drop a desktop's trees — called when the desktop is destroyed so the pool
+ * slots are reusable straight away rather than at the next allocation. Plural:
+ * a desktop that spanned three displays owns three of them, and stopping at the
+ * first would strand the rest until something else needed the space. */
 void layout_tree_forget(int desktop_id) {
     for (int i = 0; i < MAX_DESKTOPS; i++)
-        if (s_tree_owner[i] == desktop_id) {
+        if (s_tree_owner[i].desktop_id == desktop_id) {
             memset(&s_trees[i], 0, sizeof(s_trees[i]));
-            s_tree_owner[i] = 0;
-            return;
+            s_tree_owner[i].desktop_id = 0;
+            s_tree_owner[i].monitor    = 0;
         }
 }
 

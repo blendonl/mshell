@@ -387,8 +387,17 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
 
     /* Manual splits. The tree keeps its own structure but not its own window
      * list — it reconciles against the desktop's on every pass — so switching
-     * to and from this layout needs nothing but the case. */
-    case LAYOUT_BSP:      layout_tree_run(dt, lp.area, tree_emit_cb, NULL); break;
+     * to and from this layout needs nothing but the case.
+     *
+     * One tree PER MONITOR, hence `mon`: this pass must place the windows on
+     * this display and no others. The fallback is for the case where there is
+     * no tree to be had (the pool is exhausted, which takes 32 desktop/monitor
+     * pairs in the manual layout at once) — these windows are tiled by the
+     * default layout instead of being left wherever they happened to be. */
+    case LAYOUT_BSP:
+        if (!layout_tree_run(dt, mon, lp.area, tree_emit_cb, NULL))
+            layout_master_stack(&lp, cs, n);
+        break;
     case LAYOUT_COUNT:    break;
     }
 }
