@@ -181,13 +181,36 @@ echo  Pointing the %SCOPE% shell at %DEST%\mshell.exe ...
 reg add "%HIVE%\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" ^
     /v Shell /t REG_SZ /d "%DEST%\mshell.exe --shell" /f >nul || goto :fail
 
-echo  Applying registry hardening (harden.reg) ...
-REM  All registry hardening lives in harden.reg (single source of truth):
-REM  blanket Win-hotkey off, longer low-level-hook timeout, Win+L lock, Game
-REM  Bar, the accessibility chords, and bare PrtScn. Reverted by harden-undo.reg
-REM  (uninstall.bat imports it). Also copy both next to the exe so the shell
-REM  install is self-contained.
-reg import "%~dp0harden.reg" >nul || goto :fail
+echo  Applying registry hardening (the `input` tweaks) ...
+REM  The hardening itself is unchanged — blanket Win-hotkey off, longer
+REM  low-level-hook timeout, Win+L lock, Game Bar, the accessibility chords and
+REM  bare PrtScn — but it is applied by the binary rather than by importing
+REM  harden.reg, because `reg import` was the wrong tool for it twice over.
+REM
+REM  Two of those values live under HKCU\...\CurrentVersion\Policies\, and
+REM  Windows ACLs the Policies subtree read-only for the user who owns the hive:
+REM  SYSTEM and Administrators may write it, you may not. `reg import` is
+REM  all-or-nothing and stops at the first refusal — and it was the FIRST key in
+REM  the file — so a per-user install, the documented default that is supposed
+REM  to need no elevation, failed here having already replaced the binaries and
+REM  pointed the shell key at them, applied none of the other nine tweaks, never
+REM  reached the helper task or the restart, and printed INSTALL FAILED over an
+REM  install that was otherwise complete.
+REM
+REM  `--tweaks apply` is the same table harden.reg is generated from, applied a
+REM  value at a time: it records the previous value first (so uninstall restores
+REM  what you had rather than Microsoft's default), sets everything it is
+REM  allowed to, and skips what it is not. Run it elevated — or double-click
+REM  harden.reg as administrator — to pick up the last two.
+REM
+REM  Both .reg files are still copied next to the exe: they remain the way to
+REM  apply this without mshell, and uninstall.bat's fallback.
+"%DEST%\mshell.exe" --tweaks apply input
+net session >nul 2>&1 || (
+    echo  ^(Not an administrator prompt, so the two Policies values —
+    echo   the Win-key hotkey policy and Win+L — were left as they are.
+    echo   Re-run this from an admin prompt to apply those.^)
+)
 copy /Y "%~dp0harden.reg"       "%DEST%\harden.reg"       >nul
 copy /Y "%~dp0harden-undo.reg"  "%DEST%\harden-undo.reg"  >nul
 
