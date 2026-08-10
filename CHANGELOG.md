@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.2 — 2026-08-10
+
 ### Fixed
 
 - **An elevated window can be kept on top too — with the helper.** 0.14.1 put
