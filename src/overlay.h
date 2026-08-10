@@ -45,6 +45,15 @@ HWND overlay_create(const wchar_t *cls, DWORD exstyle);
  * NULL handle so shutdown paths need no guard. */
 void overlay_destroy(HWND *hwnd, const wchar_t *cls);
 
+/* Re-assert the top of the topmost band for mshell's own surfaces: the status
+ * bar, the toasts, the launcher and the which-key panel. They are created
+ * WS_EX_TOPMOST, which used to be enough — nothing else of ours was up there.
+ * Floating windows now are (see window_raise_floats), and a float raised into
+ * that band lands above them, so whatever put it there calls this straight
+ * after. Hidden overlays stay hidden: no SWP_SHOWWINDOW. The focus ring is
+ * deliberately absent — it stacks against the window it hugs, not the top. */
+void overlay_raise_all(void);
+
 /* --- DPI ---------------------------------------------------------------- */
 
 /* Scale a design pixel measured at 96 DPI. mshell is per-monitor DPI aware, so

@@ -30,6 +30,21 @@ HWND overlay_create(const wchar_t *cls, DWORD exstyle) {
     return h;
 }
 
+void overlay_raise_all(void) {
+    HWND ours[MAX_MONITORS + 3];
+    int  n = 0;
+
+    for (int i = 0; i < g.monitor_count && i < MAX_MONITORS; i++)
+        if (g.bar_windows[i]) ours[n++] = g.bar_windows[i];
+    if (g.notify_window)   ours[n++] = g.notify_window;
+    if (g.launcher_window) ours[n++] = g.launcher_window;
+    if (g.whichkey_window) ours[n++] = g.whichkey_window;
+
+    for (int i = 0; i < n; i++)
+        SetWindowPos(ours[i], HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void overlay_destroy(HWND *hwnd, const wchar_t *cls) {
     if (hwnd && *hwnd) {
         DestroyWindow(*hwnd);

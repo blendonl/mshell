@@ -568,8 +568,20 @@ Open one tiled window and one floating one (`Win+f`), overlapping.
   window afterwards leaves the two floats in that same order instead of
   swapping them.
 - `toggle_always_on_top` on one of two floats keeps it over the other one.
+- The float is in the *topmost band*, so nothing has to re-assert it: activate a
+  window mshell does not manage (a UAC-elevated console, an installer, an
+  Explorer dialog) and the float still sits over it. An app that raises itself a
+  moment after activation — Chrome opening a new window, an Electron app taking
+  focus into a child — cannot bury it either.
+- The status bar still wins: a float dragged over the strip goes *under* it,
+  and the launcher, which-key panel and toasts all open over the float.
+- A window covering its whole monitor still beats the float: play a video
+  fullscreen and the float is gone until you leave fullscreen.
+- With `dim_enabled`, focusing a float dims the wallpaper and the other windows
+  but never the bar.
 - `mshell.set_float_on_top(false)` and reload: the old behaviour is back — the
-  float sinks behind whatever you focus.
+  float sinks behind whatever you focus. Un-floating with `Win+f` takes the
+  window back out of the band immediately, without waiting for a re-tile.
 - A float minimized and restored is still on top; one moved to another desktop
   does not raise itself over the desktop you are looking at.
 

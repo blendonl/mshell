@@ -292,9 +292,11 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- window. Uncomment to guarantee a fully-tiled desktop:
 -- mshell.set_float_policy("never")
 
--- Floating windows stay above the tiled grid, through focus changes too. Turn
--- this off to make a float an ordinary window in the stack, which sinks behind
--- whatever you focus next:
+-- Floating windows stay above the tiled grid whatever you focus — they are put
+-- in Windows' always-on-top band, so no other window can cover one (mshell's
+-- own status bar and a fullscreen window still do). Turn this off to make a
+-- float an ordinary window in the stack, which sinks behind whatever you focus
+-- next:
 -- mshell.set_float_on_top(false)
 
 -- Where a floating window goes. A float is the window you are looking at — the

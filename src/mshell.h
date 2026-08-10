@@ -690,12 +690,13 @@ typedef struct {
                                       * that stopped drawing while hidden. Set
                                       * by window_show, consumed and cleared by
                                       * the tiling pass.                       */
-    bool      made_topmost;          /* WE put it in the topmost band to keep
-                                      * always-on-top windows off a fullscreen
-                                      * one — so only WE take it back out. A
-                                      * window that was already topmost by its
-                                      * own choice is never flagged, and so is
-                                      * never demoted out from under its app. */
+    bool      made_topmost;          /* WE put it in the topmost band — because
+                                      * it is fullscreen, pinned, or a float
+                                      * with float_on_top set — so only WE take
+                                      * it back out. A window that was already
+                                      * topmost by its own choice is never
+                                      * flagged, and so is never demoted out
+                                      * from under its app.                    */
 } ManagedWindow;
 
 /* ---------------------------------------------------------------------------
@@ -1077,7 +1078,8 @@ typedef struct {
                                       * on its monitor (default) or wherever
                                       * the app opened it                     */
     bool     manage_owned;    /* also tile owned windows (dialogs); risky     */
-    bool     float_on_top;    /* keep floating windows above tiled ones       */
+    bool     float_on_top;    /* floats live in the topmost band, above every
+                               * tiled window whatever the focus is           */
     int      min_win_w;       /* ignore windows narrower than this            */
     int      min_win_h;       /* ignore windows shorter than this             */
 
@@ -1389,9 +1391,11 @@ void     window_set_floating(HWND hwnd, bool floating);
 void     window_promote(HWND hwnd);
 void     window_center_float(HWND hwnd);  /* no-op unless it should be centred */
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
-/* The float half of the pass on its own — every focus change re-asserts it,
- * because activating a tiled window raises it over the floats. No-op unless
- * float_on_top is set. */
+/* The raising half of the pass on its own — floats into the topmost band (so
+ * no ordinary window can ever cover one), then our overlays over them, then
+ * fullscreen and pinned windows over both. Every focus change re-asserts the
+ * order *within* that band; the band itself is what makes a missed event
+ * harmless. Raises nothing but fullscreen/pinned unless float_on_top is set. */
 void     window_raise_floats(void);
 bool     window_frame_rect(HWND hwnd, RECT *out);  /* DWM visible-frame bounds  */
 

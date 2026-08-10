@@ -251,4 +251,11 @@ void anim_dim_refresh(void) {
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(d, NULL, TRUE);
     }
+
+    /* A focused float lives in the topmost band, and inserting the scrim under
+     * it drags the scrim up there too — over the status bar, which would then
+     * be dimmed along with the wallpaper. Our own surfaces stay above it. The
+     * scrim demotes itself again the moment the focus is an ordinary window,
+     * because SetWindowPos below a non-topmost window clears the style. */
+    overlay_raise_all();
 }
