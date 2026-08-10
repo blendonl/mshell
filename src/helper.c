@@ -143,6 +143,20 @@ bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
     return helper_exchange(&req);
 }
 
+bool helper_set_topmost(HWND hwnd, bool on) {
+    static bool warned;
+    if (!helper_ready(L"a floating window could not be kept on top", &warned))
+        return false;
+
+    ProtoMsg req = {
+        .type    = PROTO_ZORDER,
+        .version = MSHELLD_PROTO_VERSION,
+        .hwnd    = (uint64_t)(uintptr_t)hwnd,
+        .flags   = on ? 1u : 0u,
+    };
+    return helper_exchange(&req);
+}
+
 bool helper_set_cloak(HWND hwnd, bool on) {
     static bool warned;
     if (!helper_ready(L"a window could not be hidden", &warned)) return false;

@@ -142,15 +142,20 @@ elevated. In order of preference:
 
 `mshelld.exe` ships alongside mshell and exists to make elevating mshell
 unnecessary. It is elevated; mshell is not. It has **no config file, no Lua, no
-scripting, no window rules and no keyboard hook** — it accepts three requests:
-"put this window at this rectangle", "cloak or uncloak this window" and "post
-this window a WM_CLOSE". Every decision stays in the unelevated shell.
+scripting, no window rules and no keyboard hook** — it accepts four requests:
+"put this window at this rectangle", "put this window in or out of the
+always-on-top band", "cloak or uncloak this window" and "post this window a
+WM_CLOSE". Every decision stays in the unelevated shell.
 
 With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
 and, just as importantly, *hides* them when you switch desktops: cloaking a
 window is blocked by the same integrity check as moving it, so without the
-helper an elevated window is visible on every desktop at once. The close
+helper an elevated window is visible on every desktop at once. It is also what
+lets `float_on_top` hold for such a window: floats are kept above the grid by
+putting them in the always-on-top band, that call meets the same check, and
+without the helper an elevated float is the one window a click can still bury.
+The close
 keybind reaches them too. And your `init.lua` is never administrator-level
 code.
 

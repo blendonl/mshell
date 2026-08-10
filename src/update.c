@@ -46,6 +46,10 @@
 #define UPDATE_URL   L"https://api.github.com/repos/blendonl/mshell/releases/latest"
 #define UPDATE_KEY   L"Software\\mshell"
 
+/* Read twice: for "is the registered shell us" (both hives) and for
+ * AutoRestartShell (HKLM), which decides whether exiting is a restart. */
+#define WINLOGON_KEY L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+
 /* The release zip is ~500 KB today. The cap is not a prediction, it is a
  * ceiling on what a hostile or broken response can make us allocate. */
 #define UPDATE_MAX_DOWNLOAD  (64u * 1024u * 1024u)
@@ -359,13 +363,10 @@ static bool running_as_installed_shell(void) {
     DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
     if (!n || n >= MAX_PATH) return false;
 
-    static const wchar_t *WINLOGON =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
-
     const HKEY hives[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
     for (int i = 0; i < 2; i++) {
         HKEY k;
-        if (RegOpenKeyExW(hives[i], WINLOGON, 0, KEY_READ, &k) != ERROR_SUCCESS)
+        if (RegOpenKeyExW(hives[i], WINLOGON_KEY, 0, KEY_READ, &k) != ERROR_SUCCESS)
             continue;
 
         wchar_t shell[MAX_PATH * 2];
@@ -409,6 +410,84 @@ static bool running_as_installed_shell(void) {
         if (_wcsicmp(p, self) == 0) return true;
     }
     return false;
+}
+
+/* Where install.bat's output goes. Beside mshell.log, because that is where
+ * somebody already looks when the shell misbehaves, and because an install
+ * that went wrong is exactly when %TEMP% is the wrong place for the evidence. */
+static void install_log_path(wchar_t *out, size_t cap) {
+    wchar_t dir[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH);
+    if (!n || n >= MAX_PATH) {
+        if (!GetTempPathW(MAX_PATH, dir)) { out[0] = L'\0'; return; }
+        _snwprintf(out, cap - 1, L"%lsmshell-install.log", dir);  /* ends in \ */
+    } else {
+        _snwprintf(out, cap - 1, L"%ls\\mshell\\install.log", dir);
+    }
+    out[cap - 1] = L'\0';
+}
+
+/* Would Windows put a shell back if this one exited?
+ *
+ * AutoRestartShell (HKLM, 1 by default) is what makes exiting a restart rather
+ * than a logout. With it off, the session ends when the shell does — so the
+ * update stops one step short and says so, the same call install.bat makes
+ * before it would kill anything. */
+static bool winlogon_restarts_the_shell(void) {
+    HKEY  k;
+    DWORD v = 1, sz = sizeof v, type = 0;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, WINLOGON_KEY, 0, KEY_READ, &k)
+        != ERROR_SUCCESS)
+        return true;   /* unreadable: the documented default is on */
+
+    if (RegQueryValueExW(k, L"AutoRestartShell", NULL, &type, (LPBYTE)&v, &sz)
+            != ERROR_SUCCESS || type != REG_DWORD)
+        v = 1;
+    RegCloseKey(k);
+
+    return v != 0;
+}
+
+/* The staged image install.bat left behind: it renames the running mshell.exe
+ * aside because Windows will not overwrite a live one. Deleting it is the new
+ * instance's job — by the time anything runs this, nothing holds it open. */
+void update_clear_staged_image(void) {
+    wchar_t self[MAX_PATH];
+    DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
+    if (!n || n >= MAX_PATH - 5) return;
+
+    wchar_t old[MAX_PATH + 8];
+    _snwprintf(old, ARRAYSIZE(old) - 1, L"%ls.old", self);
+    old[ARRAYSIZE(old) - 1] = L'\0';
+
+    if (GetFileAttributesW(old) == INVALID_FILE_ATTRIBUTES) return;
+    if (DeleteFileW(old))
+        log_msg(LOG_INFO, L"update: removed the previous build (%ls)", old);
+}
+
+/* Hand the session over to the build just installed.
+ *
+ * We exit; Winlogon starts the Shell value again, which now names the new
+ * binary. Nothing else can be trusted to do it — see the comment at the call
+ * site — and this process is the one thing with an unconditional right to
+ * stop itself. The quit runs on the main thread, because that is where the
+ * shutdown sequence (decorations restored, windows uncloaked) belongs. */
+static void update_restart_self(const wchar_t *version) {
+    if (!winlogon_restarts_the_shell()) {
+        update_notify(NOTIFY_WARN, 30000,
+                      L"mshell %ls is installed, but AutoRestartShell is off on "
+                      L"this machine — stopping the shell would log you out. "
+                      L"Sign out and back in to start the new build.", version);
+        return;
+    }
+
+    update_notify(NOTIFY_INFO, 5000,
+                  L"mshell %ls installed — restarting.", version);
+    Sleep(1200);   /* let the toast reach the screen before we take it away */
+
+    if (g.message_window)
+        PostMessageW(g.message_window, WM_MSHELL_RESTART, 0, 0);
 }
 
 static DWORD WINAPI install_thread(LPVOID param) {
@@ -566,37 +645,47 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    update_notify(NOTIFY_INFO, 15000,
-                  L"Installing mshell %ls — mshell will restart.", latest);
+    update_notify(NOTIFY_INFO, 15000, L"Installing mshell %ls …", latest);
 
-    /* Give the toast a moment to be painted: install.bat's first act after the
-     * copy is to kill this process, and a message that never made it to the
-     * screen is the same as no message. */
-    Sleep(1200);
+    /* WAITED ON, not handed over — and /norestart, so the restart is ours.
+     *
+     * This used to spawn install.bat in a console and return, letting the
+     * script kill this process and start the new build. Both halves of that
+     * could fail quietly: the kill needs rights a child process may not have,
+     * the console can be closed before it gets there, and either way nothing
+     * checked. The update then "succeeded" — toast, log line and all — while
+     * the OLD build kept running, which is indistinguishable from the new one
+     * being broken and is exactly how a fix can look like it did not work.
+     *
+     * So: run it to completion, read its exit code, and restart ourselves.
+     * Exiting is the one thing this process can always do, and Winlogon puts
+     * the shell back — no privileged kill in the loop. The script's output
+     * goes to a file rather than a console nobody keeps: a console that has
+     * already scrolled past (or been closed) is not a record. */
+    wchar_t ilog[MAX_PATH];
+    install_log_path(ilog, ARRAYSIZE(ilog));
 
-    /* Handed over rather than waited on — install.bat terminates us on
-     * purpose and starts the build it just wrote. Its console is left visible:
-     * with no taskbar and the shell about to restart, that window is the only
-     * account of what happened, and it says which of its outcomes was reached
-     * (restarted, installed-but-not-restarted, or refused). */
-    wchar_t run[MAX_PATH * 2];
-    _snwprintf(run, ARRAYSIZE(run) - 1, L"cmd.exe /c \"install.bat\"");
+    wchar_t run[MAX_PATH * 3];
+    _snwprintf(run, ARRAYSIZE(run) - 1,
+               L"cmd.exe /c \"\"%ls\" /norestart >\"%ls\" 2>&1\"", bat, ilog);
     run[ARRAYSIZE(run) - 1] = L'\0';
 
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    memset(&si, 0, sizeof(si));
-    memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-
-    if (!CreateProcessW(NULL, run, NULL, NULL, FALSE,
-                        CREATE_NEW_CONSOLE, NULL, root, &si, &pi)) {
-        update_notify(NOTIFY_ERROR, 20000,
-                      L"Could not start install.bat in %ls.", root);
+    DWORD irc = 1;
+    if (!run_wait(run, root, 300000, &irc)) {
+        update_notify(NOTIFY_ERROR, 25000,
+                      L"install.bat did not finish. Nothing was restarted; "
+                      L"%ls says how far it got.", ilog);
         goto out;
     }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    if (irc != 0) {
+        update_notify(NOTIFY_ERROR, 25000,
+                      L"install.bat failed (exit %lu) — see %ls. The running "
+                      L"mshell is untouched.", irc, ilog);
+        goto out;
+    }
+
+    log_msg(LOG_INFO, L"update: install.bat finished cleanly (log: %ls)", ilog);
+    update_restart_self(latest);
 
 out:
     free(zip);

@@ -116,6 +116,13 @@
  * message, so the kind and the dwell time have to travel with the text. */
 #define WM_MSHELL_UPDATE          (WM_APP + 7)
 
+/* Posted by the update thread once the new build is on disk: quit, so Winlogon
+ * starts the Shell value again and the binary just installed is the one
+ * running. Handled on the main thread because that is where the orderly
+ * shutdown lives — and because exiting is the only way to hand over that
+ * cannot be refused for want of rights. */
+#define WM_MSHELL_RESTART         (WM_APP + 8)
+
 /* ---------------------------------------------------------------------------
  * Constants
  * --------------------------------------------------------------------------- */
@@ -1575,6 +1582,7 @@ void     helper_init(void);
 void     helper_shutdown(void);
 bool     helper_available(void);
 bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
+bool     helper_set_topmost(HWND hwnd, bool on);   /* the always-on-top band  */
 bool     helper_set_cloak(HWND hwnd, bool on);
 bool     helper_close_window(HWND hwnd);
 
@@ -1704,9 +1712,15 @@ void     tweaks_emit_reg(const wchar_t *group, bool undo);
 void     update_check_async(void);
 
 /* The `update` action: check GitHub, download and verify the release zip,
- * unpack it and run the install.bat inside it. Returns immediately — the work
- * is on its own thread, and reports by notification. */
+ * unpack it, run the install.bat inside it to completion, and then restart
+ * mshell so the build just installed is the running one. Returns immediately —
+ * the work is on its own thread, and reports by notification. */
 void     update_install_async(void);
+
+/* Delete the previous mshell.exe that an install renamed aside. Called at
+ * startup: whatever was holding that image is, by then, the process we just
+ * replaced. A no-op when there is nothing staged. */
+void     update_clear_staged_image(void);
 
 void     ipc_start(void);   /* begin serving the per-session named pipe */
 void     ipc_stop(void);
