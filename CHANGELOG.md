@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.1 — 2026-08-10
+
 ### Fixed
 
 - **A floating window can no longer be buried by anything you click.** Keeping
