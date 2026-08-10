@@ -331,6 +331,16 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
                   ? g.monitors[mon].full : work;
     int keep = 0;
     for (int i = 0; i < n; i++) {
+        /* A stashed window is one mshell moved clear of every display to take
+         * it off the screen (window.c) — monocle's unfocused windows and a
+         * stowed scratchpad on the desktop you are looking at. It is off-screen
+         * by construction, so window_covers_monitor says no and the fullscreen
+         * branch below would park it back over the monitor: on screen, in front
+         * of the window monocle is showing, while every flag still says it is
+         * away. It keeps its place in the list — monocle cycles through these —
+         * and simply is not placed. */
+        if (cs[i].mw->stashed) { cs[keep++] = cs[i]; continue; }
+
         if (window_is_screen_fullscreen(cs[i].mw)) {
             if (cs[i].mw->fs_mode == FS_WINDOW || !window_covers_monitor(cs[i].hwnd))
                 emit_raw(cs[i].hwnd, full);
