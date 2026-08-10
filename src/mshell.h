@@ -496,9 +496,17 @@ typedef enum {
  *       rebuild its compositor where it left it. Measured with Chrome tiled
  *       full-screen: its page content lands one client origin (gap + client
  *       inset) further right on every hide/show round trip, with the frame's
- *       own colour filling the gap, until the app is restarted. That is the
- *       "grey border that keeps growing" report, and it is why cloaking is the
- *       default and why the fallback to this is worth a toast.
+ *       own colour filling the gap, until the app is restarted. Sometimes it
+ *       comes back blank instead. That is the "grey border that keeps growing"
+ *       report, and it is why this is not what a refused cloak falls back to.
+ *
+ *   STASHING (not a policy — what a refused cloak falls back to; window.c)
+ *       When HIDE_CLOAK is asked for and refused, the window is MOVED clear of
+ *       every display instead. It keeps WS_VISIBLE and its surface, so nothing
+ *       is torn down and there is nothing to rebuild wrongly, and the way back
+ *       is a genuine SetWindowPos rather than the no-op move an app is free to
+ *       ignore. set_hide_policy("hide") still gets literal SW_HIDE: that is
+ *       what asking for it means.
  *
  * NEITHER is enough on its own, and assuming cloaking was is what shipped a
  * broken fix once already. An app that renders off the UI thread — anything
@@ -725,6 +733,14 @@ typedef struct {
                                       * per window so a policy change mid-
                                       * session still un-hides the way the
                                       * window was hidden.                     */
+    bool      stashed;               /* ...or we did it by moving the window
+                                      * clear of every display, because
+                                      * cloaking was refused and SW_HIDE is
+                                      * what breaks Chromium windows. See the
+                                      * stashing section in window.c.          */
+    RECT      stash_rect;            /* where it was when we stashed it, so the
+                                      * way back is a real move rather than a
+                                      * no-op the app can ignore.              */
     bool      needs_repaint;         /* it just came back on screen, so the next
                                       * placement must NOT be skipped for being
                                       * a no-op move — that SetWindowPos is what
