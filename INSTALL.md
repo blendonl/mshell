@@ -248,8 +248,18 @@ into three importable files by blast radius:
 
 - **`harden.reg`** — keyboard shortcuts the low-level hook can't reach: Win+L
   lock, the Sticky / Filter / Toggle / High-Contrast / Mouse-Keys hotkeys, and
-  bare PrtScn → Snip. Per-user, no admin. `install.bat` already applies these;
-  the file is for re-applying by hand. Undo: `harden-undo.reg`.
+  bare PrtScn → Snip. All per-user (HKCU), and `install.bat` already applies
+  them — as `mshell.exe --tweaks apply input`, one value at a time, which also
+  records what each was so the uninstall can put *your* value back rather than
+  Microsoft's default. The file is for applying the same set without mshell.
+
+  **Two of them need an administrator prompt**, and they are the two under
+  `HKCU\…\CurrentVersion\Policies\` — the blanket Win-key hotkey policy and
+  Win+L. Windows ACLs that subtree read-only for the user who owns the hive, so
+  an ordinary per-user install applies the other nine and skips those, and says
+  so. Re-run `install.bat` elevated (or right-click → Merge `harden.reg` and
+  accept UAC) to pick them up. Undo: `harden-undo.reg`, or `mshell.exe
+  --tweaks revert input`.
 
 - **`debloat.reg`** — the visual layer: window/menu/tooltip animations and
   fades, Aero Snap / Snap Assist / Aero Shake / Aero Peek, transparency,
