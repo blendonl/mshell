@@ -5,6 +5,67 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **Changing layout froze the whole machine.** `Win+Space`, or any of the
+  `layout_*` bindings, and everything stopped answering — mshell, the bar, and
+  every window on the desktop — for as long as it took to kill the shell.
+
+  Two loops, both of them the same shape: a tiling pass produces window moves,
+  window moves produce `EVENT_OBJECT_LOCATIONCHANGE`, and the drift detector
+  answers a location change with another tiling pass. The suppression counter
+  does not break the cycle, because the hooks are `WINEVENT_OUTOFCONTEXT`: the
+  system queues those events and delivers them on the next pump, long after the
+  pass that caused them called `events_suppress_end()`. Changing layout is the
+  one action that resizes *every* window at once, which is why it is where this
+  bites.
+
+  The first loop is a window that **cannot take the rect it is given** — an app
+  with a minimum size larger than its new cell (Discord, Steam, Spotify at three
+  columns), one that re-centres itself, one whose DWM frame does not round-trip
+  across monitors of different DPI. It never lands inside the 4 px tolerance, so
+  every snap-back earns another location change and another full pass, forever.
+  The snap-back is now capped: three attempts inside a second, then the window is
+  left where it insists on being and the log says which window and why.
+
+  The second is **animation**. `anim_tick` moves each window every 16 ms, and
+  every one of those frames arrived at the drift detector looking like escape,
+  because an in-flight window is by definition not at the rect the layout
+  assigned. `anim_is_animating()` existed for exactly this and nothing called
+  it — the tiler fought the animation frame for frame, one whole tiling pass per
+  window per frame. The detector now asks it, and the tiler hands a window that
+  is already moving back to `anim_begin` instead of teleporting it.
+
+- **Manual tiling (bsp) placed every window on every display.** The tiler lays a
+  desktop out one monitor at a time — it groups the desktop's windows by the
+  display they live on and gives each group that display's work area — but there
+  was a single tree per desktop, holding all of them. So each monitor's pass fed
+  the *whole* desktop through that monitor's rectangle: every window placed
+  twice per tiling pass on two displays, ending up wherever the last pass put
+  it, with the other screen's windows piled on top. Splits built on one display
+  moved the other's windows.
+
+  Trees are now keyed by desktop **and** monitor. Each pass sees only the
+  windows on the display it is laying out; a window dragged across displays is
+  pruned from the tree it left and splits the focused leaf of the one it
+  arrived on; `rotate_split`, `split_grow` and the container bindings act on the
+  focused window's display and leave the other alone. Unplugging a display
+  releases its trees.
+
+### Changed
+
+- **`cycle_layout` no longer cycles into bsp.** The cycle is the seven dynamic
+  layouts, each a pure function of the window list, where overshooting costs one
+  more press. bsp is not: its structure is the record of where you were as each
+  window opened, so arriving there by pressing `Win+Space` once too many put you
+  in a tree you did not build — and pressing again abandoned it. It keeps its own
+  binding (`layout_bsp`, the `b` submap). A desktop already in bsp still cycles
+  out, so the key is never a dead end.
+
+- Re-targeting a running animation continues from the frame **on screen** rather
+  than from where the previous move started, so a layout change mid-motion no
+  longer jumps the window backwards before it sets off again.
+
 ## 0.14.4 — 2026-08-10
 
 ### Fixed

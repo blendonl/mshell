@@ -387,8 +387,17 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
 
     /* Manual splits. The tree keeps its own structure but not its own window
      * list — it reconciles against the desktop's on every pass — so switching
-     * to and from this layout needs nothing but the case. */
-    case LAYOUT_BSP:      layout_tree_run(dt, lp.area, tree_emit_cb, NULL); break;
+     * to and from this layout needs nothing but the case.
+     *
+     * One tree PER MONITOR, hence `mon`: this pass must place the windows on
+     * this display and no others. The fallback is for the case where there is
+     * no tree to be had (the pool is exhausted, which takes 32 desktop/monitor
+     * pairs in the manual layout at once) — these windows are tiled by the
+     * default layout instead of being left wherever they happened to be. */
+    case LAYOUT_BSP:
+        if (!layout_tree_run(dt, mon, lp.area, tree_emit_cb, NULL))
+            layout_master_stack(&lp, cs, n);
+        break;
     case LAYOUT_COUNT:    break;
     }
 }
@@ -443,10 +452,19 @@ static void flush_placements(void) {
          * anim_begin takes over the move and drives it over the next few
          * frames. applied_rect is still set to the TARGET below, not to the
          * frame currently on screen: the layout's bookkeeping stays truthful
-         * about where the window is going, and the drift detector compares
-         * against that — so a window in flight is not mistaken for one that
-         * escaped. */
-        if (mw && mw->has_applied && anim_begin(hwnd, mw->applied_rect, want)) {
+         * about where the window is going. That is NOT what keeps the drift
+         * detector off an in-flight window — every intermediate frame differs
+         * from the target, which is precisely what drift looks like — so the
+         * detector asks anim_is_animating instead. See the LOCATIONCHANGE
+         * handler.
+         *
+         * anim_is_animating here as well as has_applied: something else may have
+         * cleared has_applied while the window was mid-flight (a show, a
+         * minimize, a rule re-assert). Placing it outright then would fight the
+         * animation still running — one teleport per pass — where handing it
+         * back to anim_begin simply re-targets the motion in progress. */
+        if (mw && (mw->has_applied || anim_is_animating(hwnd)) &&
+            anim_begin(hwnd, mw->applied_rect, want)) {
             mw->applied_rect = want;
             continue;
         }

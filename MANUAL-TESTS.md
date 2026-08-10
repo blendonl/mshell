@@ -408,6 +408,22 @@ below asks for two keys held at once, and any sequence can be abandoned with
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
+- `Win+Space` cycles the seven dynamic layouts and never lands in bsp; from bsp
+  it cycles OUT, to tiling. `layout_bsp` (`b b`) is the only way in.
+
+With **two monitors**, the desktop spanning both:
+
+- `layout_bsp`, windows on both displays: each display holds **its own** splits.
+  A window is placed once, on the display it lives on — nothing is placed twice
+  per pass, and neither screen's windows appear stacked on the other's.
+- Build a different structure per display (say tabbed on one, a three-way split
+  on the other); both survive a switch to `tiling` and back.
+- `rotate_split`, `split_grow` and `toggle_tabbed` act on the **focused
+  window's** display and leave the other one alone.
+- Drag or `move_to_monitor_next` a window across: it leaves one tree and splits
+  the focused leaf of the other. Nothing is left behind on the display it left.
+- Unplug the second display with bsp windows on it: they land on the primary and
+  join its tree. Plug it back in — they return.
 
 ## Which-key panel
 
@@ -457,6 +473,9 @@ and whether it is still readable.
 - `set_animation(120)`: windows glide to their new tiles rather than jumping.
 - During the motion, confirm windows are NOT snapped back — the drift detector
   must not fight the animation.
+- Press `Win+Space` **twice in quick succession**, while the first move is still
+  in flight. The windows re-aim from where they are; they must not jump back to
+  where the first move started, and the shell must stay responsive.
 - `set_animation(0)` restores instant placement.
 - `set_dim{enabled = true}`: everything but the focused window is dimmed, and
   the dimming follows the focus.
@@ -464,6 +483,25 @@ and whether it is still readable.
   video) and confirm it still renders — this is the failure mode the punched
   scrim exists to avoid.
 - Clicking a dimmed window still reaches it (the scrim is click-through).
+
+## Changing layout does not lock the shell up
+
+The freeze this guards against needs a window that cannot be made as small as
+its cell — Discord, Steam and Spotify all have a minimum size — so open one of
+those, not four terminals.
+
+- Open the stubborn app plus three or four other windows on one desktop, then
+  cycle layouts with `Win+Space` through all of them, and again with
+  `set_animation(120)` on. mshell, the bar and the other windows keep answering
+  throughout; the mouse does not stutter.
+- The stubborn window ends up wherever it can fit and **stays there** — mshell
+  must not keep pulling at it. `%LOCALAPPDATA%\mshell\mshell.log` says
+  `a window will not stay where the layout puts it`, naming it, at most once per
+  layout change (the guard re-arms a second later, so a line per attempt is
+  expected; a line per frame is the bug coming back).
+- Move that window (drag it, or `Win+Shift+j`) and change layout again: it is
+  re-tiled normally. The guard must expire, not disable the window for good.
+- Same run with two monitors at **different scaling factors**, windows on both.
 
 ## Per-monitor rules and hotplug
 
