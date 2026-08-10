@@ -66,7 +66,24 @@ REM  is left running as administrator. Silent when there is nothing to stop or
 REM  we do not have the rights; mshell copes with the helper vanishing.
 taskkill /F /IM mshelld.exe >nul 2>&1
 
-echo  Reverting OS-shortcut hardening (harden-undo.reg) ...
+echo  Reverting OS-shortcut hardening ...
+REM  The binary's own revert whenever there is something to revert TO, and the
+REM  .reg file otherwise.
+REM
+REM  install.bat applies these a value at a time and records what each one was
+REM  BEFORE it changed it, so `--tweaks revert` puts back exactly that —
+REM  including "this value did not exist", which harden-undo.reg cannot express:
+REM  it carries Microsoft's documented defaults, so importing it overwrites any
+REM  of these you had deliberately set yourself. The backup key is what says
+REM  which of the two we are in: an install from before that change (or one done
+REM  by double-clicking harden.reg) has none, and for those the undo file is
+REM  still the only thing that knows anything at all.
+set "HAVEBACKUP="
+reg query "HKCU\Software\mshell\TweakBackup" >nul 2>&1 && set "HAVEBACKUP=1"
+if defined HAVEBACKUP if exist "C:\mshell\mshell.exe" (
+    "C:\mshell\mshell.exe" --tweaks revert input
+    goto :reverted
+)
 if exist "%~dp0harden-undo.reg" (
     reg import "%~dp0harden-undo.reg" >nul
 ) else if exist "C:\mshell\harden-undo.reg" (
@@ -75,6 +92,7 @@ if exist "%~dp0harden-undo.reg" (
     echo  ^(harden-undo.reg not found next to this script or in C:\mshell —
     echo   Windows shortcut defaults were left unchanged.^)
 )
+:reverted
 
 echo.
 echo  Done. Sign out and back in to return to Explorer.
