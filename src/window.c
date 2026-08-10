@@ -537,8 +537,38 @@ static HRESULT dwm_set_cloaked(HWND hwnd, bool on) {
  * zero timeout, so trying and failing is cheap. */
 static bool window_set_cloaked(HWND hwnd, bool on) {
     HRESULT hr = dwm_set_cloaked(hwnd, on);
-    if (FAILED(hr) && helper_set_cloak(hwnd, on)) hr = S_OK;
-    return SUCCEEDED(hr);
+    if (SUCCEEDED(hr)) return true;
+    if (helper_set_cloak(hwnd, on)) return true;
+
+    /* Both routes refused. Report it here, where the HRESULT and whether the
+     * helper was even listening are both still in hand — window_hide only
+     * knows that it has to fall back.
+     *
+     * Whether the helper was running is the whole diagnosis. Elevated, it is
+     * supposed to be the way across this boundary; if it was connected and the
+     * cloak STILL did not happen, then DWM is not refusing on integrity at all
+     * and will not cloak another process's window from any process on this
+     * build of Windows — in which case no amount of installing changes it and
+     * SW_HIDE, with everything that costs a Chromium window, is all there is.
+     * Say which of the two it is rather than sending the user to INSTALL.md for
+     * a helper they may already have running. */
+    static bool warned;
+    if (!warned) {
+        warned = true;
+        log_err(L"cloak: refused for %p — DwmSetWindowAttribute returned "
+                L"0x%08lX and mshelld.exe %ls. Hiding falls back to "
+                L"ShowWindow(SW_HIDE), which Chromium-based apps come back from "
+                L"blank or mis-composited.%ls",
+                (void *)hwnd, (unsigned long)hr,
+                helper_available() ? L"could not do it either"
+                                   : L"is not running",
+                helper_available()
+                    ? L" The helper IS connected, so this is not a missing "
+                      L"install: DWM will not cloak a foreign window at all here."
+                    : L" Run `install.bat /helper` from an administrator prompt "
+                      L"— see INSTALL.md.");
+    }
+    return false;
 }
 
 bool window_on_screen(const ManagedWindow *mw) {
@@ -570,41 +600,25 @@ void window_hide(ManagedWindow *mw) {
     if (g.hide_policy == HIDE_CLOAK) {
         mw->cloaked = window_set_cloaked(mw->hwnd, true);
         if (!mw->cloaked) {
-            /* DWM refused and so did the helper. Fall back so desktops keep
-             * working — but say so where the user will actually see it.
+            /* Cloaking was refused — window_set_cloaked has already said so,
+             * with the HRESULT and whether the helper was listening, which is
+             * the part worth reading. Fall back so desktops keep working, and
+             * put ONE toast on the screen, because the log is not where anyone
+             * will connect a browser that comes back blank to a hide mechanism
+             * they never chose.
              *
-             * This is not the rare VM/remote-session case the fallback was
-             * written for. Cloaking ANOTHER PROCESS'S window is privileged:
-             * from an unelevated shell DwmSetWindowAttribute(DWMWA_CLOAK)
-             * refuses every foreign window, which is every window mshell
-             * manages. So with no mshelld.exe running the default hide policy
-             * silently is not the default at all — every desktop switch, every
-             * monocle pass and every scratchpad toggle goes through SW_HIDE.
-             *
-             * That costs more than flicker. SW_HIDE tears the redirection
-             * surface down, and a Chromium-class app (Chrome, Edge, Electron)
-             * rebuilds its compositor on the way back — off by its client
-             * origin each time, so its page walks further into the window on
-             * every switch and its own frame colour fills the gap. Read as a
-             * grey border that grows and a page that shrinks, one switch at a
-             * time, until the app is restarted.
-             *
-             * Hence ERROR and a toast rather than a WARN line in a file nobody
-             * opens: the shell is running in a mode that quietly damages the
-             * windows it manages, and one command fixes it. */
+             * SW_HIDE clears WS_VISIBLE, DWM drops the window's redirection
+             * surface, and a Chromium-class app (Chrome, Edge, Electron)
+             * rebuilds its compositor on the way back — sometimes blank until
+             * something makes it draw, sometimes offset by its client origin,
+             * once per round trip, until the app is restarted. window_show
+             * nudges for exactly this reason and does not always win. */
             static bool warned;
             if (!warned) {
                 warned = true;
-                log_err(L"hide: cloaking is unavailable — DWM refuses to cloak "
-                        L"another process's window unless the request comes "
-                        L"from mshelld.exe, so desktops fall back to "
-                        L"ShowWindow(SW_HIDE). Chromium-based apps come back "
-                        L"mis-composited from that (the frame grows inward on "
-                        L"every switch). Fix: run `install.bat /helper` from an "
-                        L"administrator prompt — see INSTALL.md.");
-                notify_show(L"cloaking unavailable — start mshelld.exe "
-                            L"(install.bat /helper); browsers will drift "
-                            L"otherwise", NOTIFY_ERROR, 6000);
+                notify_show(L"cloaking refused — desktops hide with SW_HIDE; "
+                            L"Chromium windows may come back blank (see the log)",
+                            NOTIFY_ERROR, 6000);
             }
             ShowWindow(mw->hwnd, SW_HIDE);
         }
