@@ -68,11 +68,52 @@ static int lerp(int a, int b, float t) {
     return a + (int)((float)(b - a) * t + (b > a ? 0.5f : -0.5f));
 }
 
+/* Where an animation has the window at `now`. One function so a re-target and
+ * a frame agree on what "currently" means: the re-target continues from what
+ * is on screen instead of restarting from where the last move began, which is
+ * a visible jump backwards before the window sets off again. */
+static RECT anim_rect_at(const Anim *a, ULONGLONG now) {
+    float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
+    if (t < 0.f) t = 0.f;
+    if (t > 1.f) t = 1.f;
+    float e = ease(t);
+
+    RECT r;
+    r.left   = lerp(a->from.left,   a->to.left,   e);
+    r.top    = lerp(a->from.top,    a->to.top,    e);
+    r.right  = lerp(a->from.right,  a->to.right,  e);
+    r.bottom = lerp(a->from.bottom, a->to.bottom, e);
+    return r;
+}
+
 /* Called by the tiler instead of moving a window directly. Returns false when
  * animation is off or the move is not worth animating, in which case the caller
  * places the window itself. */
 bool anim_begin(HWND hwnd, RECT from, RECT to) {
     if (!g.anim_ms) return false;
+
+    /* Re-target an animation already running for this window rather than
+     * queueing a second one: two animations of one window fight.
+     *
+     * Tested BEFORE the heuristics below, which decide whether to START
+     * moving — a window already in flight has answered that question. Asking
+     * them first would measure the distance from a `from` that is stale by
+     * definition, and a "too small to animate" verdict hands the window back
+     * to the caller to place outright: a teleport, mid-motion, with the
+     * animation still running behind it. */
+    for (int i = 0; i < s_anim_n; i++) {
+        if (s_anims[i].active && s_anims[i].hwnd == hwnd) {
+            /* `from` is where the CALLER thinks the window is — the last rect
+             * the layout assigned, which for a window mid-flight is where it
+             * is headed, not where it is. Continue from the frame actually on
+             * screen. */
+            ULONGLONG now    = GetTickCount64();
+            s_anims[i].from  = anim_rect_at(&s_anims[i], now);
+            s_anims[i].to    = to;
+            s_anims[i].start = now;
+            return true;
+        }
+    }
 
     /* A window that is appearing (no previous rect) or moving a trivial
      * distance is placed outright — animating either looks like a glitch
@@ -83,16 +124,6 @@ bool anim_begin(HWND hwnd, RECT from, RECT to) {
     if (dx + dy + dw + dh < 8) return false;
     if (from.right <= from.left || from.bottom <= from.top) return false;
 
-    /* Re-target an animation already running for this window rather than
-     * queueing a second one: two animations of one window fight. */
-    for (int i = 0; i < s_anim_n; i++) {
-        if (s_anims[i].active && s_anims[i].hwnd == hwnd) {
-            s_anims[i].from  = from;
-            s_anims[i].to    = to;
-            s_anims[i].start = GetTickCount64();
-            return true;
-        }
-    }
     if (s_anim_n >= MAX_WINDOWS_PER_DESKTOP) return false;
 
     Anim *a = &s_anims[s_anim_n++];
@@ -122,16 +153,9 @@ void anim_tick(void) {
 
         if (!IsWindow(a->hwnd)) { a->active = false; continue; }
 
-        float t = (float)(now - a->start) / (float)g.anim_ms;
-        if (t >= 1.f) t = 1.f;
-        float e = ease(t);
+        float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
 
-        RECT r;
-        r.left   = lerp(a->from.left,   a->to.left,   e);
-        r.top    = lerp(a->from.top,    a->to.top,    e);
-        r.right  = lerp(a->from.right,  a->to.right,  e);
-        r.bottom = lerp(a->from.bottom, a->to.bottom, e);
-
+        RECT r   = anim_rect_at(a, now);
         RECT adj = window_adjust_for_frame(a->hwnd, r);
         window_set_pos(a->hwnd, adj.left, adj.top,
                        adj.right - adj.left, adj.bottom - adj.top,

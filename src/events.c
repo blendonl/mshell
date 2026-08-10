@@ -292,6 +292,18 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                 break;
             }
 
+            /* ---- our own animation is moving it ----
+             * Every frame of an animated move lands here: anim_tick holds the
+             * suppression counter across its pass, but the hooks are
+             * out-of-context, so the events it produces are delivered later,
+             * with the counter long released. A window in flight is by
+             * definition NOT at applied_rect — that is where it is going — so
+             * reading the gap as drift makes the tiler fight the animation
+             * frame for frame: a full tiling pass every 16ms, for every
+             * animated window, for as long as the motion lasts. That is what a
+             * layout change with animation on turned into. */
+            if (anim_is_animating(hwnd)) break;
+
             if (mw->has_applied) {
                 RECT cur;
                 RECT a = mw->applied_rect;
@@ -301,11 +313,51 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                     int dy = abs((int)(cur.top  - a.top));
                     int dw = abs((int)((cur.right - cur.left) - (a.right - a.left)));
                     int dh = abs((int)((cur.bottom - cur.top) - (a.bottom - a.top)));
-                    if (dx <= EPS && dy <= EPS && dw <= EPS && dh <= EPS)
-                        break;           /* within tolerance — that was us */
+                    if (dx <= EPS && dy <= EPS && dw <= EPS && dh <= EPS) {
+                        mw->snap_tries = 0;  /* it arrived: the burst is over */
+                        break;               /* within tolerance — that was us */
+                    }
                 }
                 mw->has_applied = false; /* real drift: force reposition */
             }
+
+            /* ---- snap it back, but not forever ----
+             * The snap-back is a SetWindowPos, which produces another
+             * LOCATIONCHANGE, which lands right back here. That is harmless
+             * while the window ends up where it was put: the tolerance check
+             * above sees no drift and stops. It does NOT stop for a window
+             * that cannot take the rect — an app with a minimum size in a cell
+             * smaller than it, one that re-centres itself, one whose frame
+             * does not round-trip across monitors of different DPI. Then every
+             * pass produces the event that triggers the next one, each pass
+             * moving every window on the desktop, and the message pump never
+             * gets to anything else: the whole shell, and every app waiting on
+             * it, stops answering.
+             *
+             * Changing layout is where this bites, because it is the one
+             * action that resizes everything at once into cells nobody agreed
+             * to. So: three attempts inside a second, then leave the window
+             * where it insists on being until it moves again. Same shape as
+             * the minimize repeat guard above, and the same reasoning — we
+             * cannot win, so stop paying to lose. */
+            {
+                ULONGLONG now = GetTickCount64();
+                if (now - mw->snap_first_at > 1000) {
+                    mw->snap_first_at = now;
+                    mw->snap_tries    = 0;
+                }
+                if (++mw->snap_tries > 3) {
+                    if (mw->snap_tries == 4)
+                        log_msg(LOG_WARN, L"a window will not stay where the "
+                                          L"layout puts it: %p — it has a "
+                                          L"minimum size or re-places itself. "
+                                          L"Leaving it alone rather than "
+                                          L"re-tiling in a loop.",
+                                (void *)hwnd);
+                    break;
+                }
+            }
+
             tile_current();
         }
         break;

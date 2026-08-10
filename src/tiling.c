@@ -443,10 +443,19 @@ static void flush_placements(void) {
          * anim_begin takes over the move and drives it over the next few
          * frames. applied_rect is still set to the TARGET below, not to the
          * frame currently on screen: the layout's bookkeeping stays truthful
-         * about where the window is going, and the drift detector compares
-         * against that — so a window in flight is not mistaken for one that
-         * escaped. */
-        if (mw && mw->has_applied && anim_begin(hwnd, mw->applied_rect, want)) {
+         * about where the window is going. That is NOT what keeps the drift
+         * detector off an in-flight window — every intermediate frame differs
+         * from the target, which is precisely what drift looks like — so the
+         * detector asks anim_is_animating instead. See the LOCATIONCHANGE
+         * handler.
+         *
+         * anim_is_animating here as well as has_applied: something else may have
+         * cleared has_applied while the window was mid-flight (a show, a
+         * minimize, a rule re-assert). Placing it outright then would fight the
+         * animation still running — one teleport per pass — where handing it
+         * back to anim_begin simply re-targets the motion in progress. */
+        if (mw && (mw->has_applied || anim_is_animating(hwnd)) &&
+            anim_begin(hwnd, mw->applied_rect, want)) {
             mw->applied_rect = want;
             continue;
         }
