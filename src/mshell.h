@@ -664,6 +664,16 @@ typedef struct {
     float     cfact;                 /* size factor within its stack (1.0)  */
     RECT      applied_rect;          /* last frame rect we assigned         */
     bool      has_applied;           /* applied_rect is valid               */
+    /* --- snap-back storm guard; see the LOCATIONCHANGE handler ---
+     * A window that CANNOT sit where the layout puts it — one with a minimum
+     * size smaller cells cannot satisfy, one that re-places itself, one whose
+     * DWM frame does not round-trip across a DPI boundary — turns every
+     * snap-back into another LOCATIONCHANGE and another tiling pass. Counted
+     * per window rather than globally, because a layout change moves all of
+     * them at once and a shared counter would be reset by whichever window is
+     * behaving. */
+    ULONGLONG snap_first_at;         /* when this burst of drift started    */
+    int       snap_tries;            /* snap-backs attempted inside it      */
 
     /* --- fullscreen (see FullscreenMode) --- */
     FullscreenMode fs_mode;          /* explicit mode set from a keybinding  */
