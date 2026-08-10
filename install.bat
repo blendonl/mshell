@@ -43,15 +43,19 @@ REM  (the :wait helper below already accommodates a non-interactive console),
 REM  and a question waiting on stdin would hang that. /machine is the one
 REM  exception — see below.
 REM
-REM    /helper   also register mshelld.exe's logon task
-REM    /machine  set the shell for EVERY account (HKLM) rather than just this one
+REM    /helper     also register mshelld.exe's logon task
+REM    /machine    set the shell for EVERY account (HKLM) rather than just this one
+REM    /norestart  install, but leave the running mshell alone
 set "WANTHELPERTASK="
 set "MACHINEWIDE="
+set "NORESTART="
 for %%a in (%*) do (
-    if /I "%%~a"=="/helper"   set "WANTHELPERTASK=1"
-    if /I "%%~a"=="--helper"  set "WANTHELPERTASK=1"
-    if /I "%%~a"=="/machine"  set "MACHINEWIDE=1"
-    if /I "%%~a"=="--machine" set "MACHINEWIDE=1"
+    if /I "%%~a"=="/helper"    set "WANTHELPERTASK=1"
+    if /I "%%~a"=="--helper"   set "WANTHELPERTASK=1"
+    if /I "%%~a"=="/machine"   set "MACHINEWIDE=1"
+    if /I "%%~a"=="--machine"  set "MACHINEWIDE=1"
+    if /I "%%~a"=="/norestart" set "NORESTART=1"
+    if /I "%%~a"=="--norestart" set "NORESTART=1"
 )
 
 REM  --- per-user or machine-wide? ---
@@ -196,6 +200,20 @@ REM  --- swap the running mshell for the one just installed ---
 REM  Nothing to restart if mshell wasn't running when this script started
 REM  (first install, or you're still on Explorer) — it starts at sign-in.
 if not defined WASRUNNING goto :report
+
+REM  /norestart: mshell's own `update` action runs this script and then restarts
+REM  ITSELF, which is the reliable way round. Killing the shell from a child
+REM  process depends on rights we may not have and on this console surviving
+REM  long enough to do it — and when either failed, the update silently left the
+REM  OLD build running while everything said the new one was installed. mshell
+REM  can always exit on its own, and Winlogon puts the new build back.
+REM
+REM  mshell.exe.old is deliberately left behind here: it is the image the caller
+REM  is still executing. The instance that comes up next deletes it.
+if defined NORESTART (
+    echo  Installed. The caller asked to restart mshell itself - not touching it.
+    goto :report
+)
 
 REM  Stopping the shell is only safe while Windows is willing to put a shell
 REM  back: that is Winlogon's AutoRestartShell (HKLM, 1 by default). With it

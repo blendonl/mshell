@@ -614,6 +614,17 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    case WM_MSHELL_RESTART:
+        /* The update finished and the new binary is in place. Quitting IS the
+         * restart: Winlogon relaunches the Shell value, which names the file
+         * that was just replaced. Same exit as the quit keybind, so the
+         * shutdown sequence still runs and no window is left cloaked or
+         * stripped of its frame. */
+        log_w(L"update: handing over to the build just installed");
+        g.running = false;
+        PostQuitMessage(0);
+        return 0;
+
     case WM_MSHELL_CAPTURE_KEY:
         launcher_key((DWORD)wp, (wchar_t)lp);
         return 0;
@@ -865,6 +876,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * Config can raise it at runtime via mshell.set_log_level("debug"). --- */
     log_init(L"mshell", verbose ? LOG_DEBUG : LOG_INFO);
     log_msg(LOG_INFO, L"=== mshell v%hs starting ===", MSHELL_VERSION);
+
+    /* If we are the build an update just installed, the one it replaced is
+     * still on disk beside us — it could not be deleted while it was the
+     * running image. Nothing holds it now. */
+    update_clear_staged_image();
 
     /* Armed as early as the log exists: a crash before this point has nothing
      * to restore anyway (no window is hidden until a desktop switch). */
