@@ -972,6 +972,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     g.inner_gap        = DEFAULT_INNER_GAP;
     g.outer_gap        = DEFAULT_OUTER_GAP;
     g.smart_gaps       = false;
+    g.smart_borders    = false;
     g.border_width     = DEFAULT_BORDER_WIDTH;
     g.border_color     = DEFAULT_BORDER_COLOR;
     g.background_color = DEFAULT_BACKGROUND_COLOR;

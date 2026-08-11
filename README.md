@@ -268,6 +268,7 @@ Highlights:
 mshell.set_gaps(6, 6)              -- inner gap, outer gap
 mshell.set_smart_gaps(true)       -- no gaps when a monitor has one window
 mshell.set_border(2, 0xffffff)    -- focus ring: width, 0xRRGGBB
+mshell.set_smart_borders(true)    -- no ring when a monitor shows one window
 mshell.set_background(0x000000)   -- desktop backdrop
 mshell.desktop_rule("1", { default = true })          -- the desktop you land on
 mshell.desktop_rule("web", { app = "firefox.exe" })   -- open it when empty
@@ -316,7 +317,8 @@ mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
 
 API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
 `set_gaps`,
-`set_smart_gaps`, `set_border`, `set_background`, `set_bar`, `set_whichkey`,
+`set_smart_gaps`, `set_border`, `set_smart_borders`, `set_background`,
+`set_bar`, `set_whichkey`,
 `set_notify`, `notify`, `set_urgency`,
 `desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
 `set_float_policy`, `set_fullscreen_policy`, `set_float_placement`,
