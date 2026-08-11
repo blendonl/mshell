@@ -145,6 +145,25 @@ From a normal terminal, with mshell running:
 - `%TEMP%\mshelld.log` records the connection.
 - Kill `mshelld.exe` while mshell runs: mshell keeps working, and elevated
   windows go back to floating rather than mshell hanging or crashing.
+- **Suspend it rather than killing it** — this is the case a kill does not
+  cover, and the one that used to hang the shell outright. Get its PID from
+  `%TEMP%\mshelld.log` or Task Manager and suspend the process (Process
+  Explorer, or `pssuspend`), then press a layout key. mshell must stay
+  responsive: keybinds keep working, windows keep tiling, and the log shows the
+  250 ms timeout followed once by the breaker message. Resume the process and
+  placements start going through it again within a few seconds, with no reload.
+- **Open Task Manager as the *first* window on a desktop**, with no helper
+  running, then press a layout key. Everything *else* on that desktop tiles;
+  only Task Manager is left alone, and the log says it was floated because it
+  could not be placed. (Before, one such window failed the whole batch and
+  nothing on the desktop moved at all, silently.)
+- **Hide and re-show an elevated Chromium window** — an Edge or Chrome window
+  started with "Run as administrator" — by switching desktops away and back
+  with the helper running. It comes back painted, not blank or offset.
+- **A second signed-in user cannot reach your helper.** With fast user
+  switching, sign in as another account and confirm it cannot open
+  `\\.\pipe\mshelld-<your session id>`. The helper's log names the SID it
+  granted the pipe to, which should be yours.
 - Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
   each other with a logged protocol-version message.
 
