@@ -40,6 +40,10 @@
 #include <wctype.h>
 
 #include "log.h"
+/* Pure, Windows-free, and host-tested — the desktop index and name arithmetic,
+ * plus AttachPolicy. Safe to include anywhere: it pulls in nothing but the C
+ * library. */
+#include "desktop_list.h"
 
 /* ---------------------------------------------------------------------------
  * Lua forward declarations — need the real headers at compile time
@@ -572,17 +576,8 @@ typedef enum {
     FS_BOTH,
 } FullscreenMode;
 
-/* ---------------------------------------------------------------------------
- * Attach policy — where a newly-managed window lands in the window order
- *   ATTACH_END    : append (becomes last stack window) — the historical default
- *   ATTACH_MASTER : insert at index 0 (becomes master, dwm-style)
- *   ATTACH_AFTER  : insert right after the focused window
- * --------------------------------------------------------------------------- */
-typedef enum {
-    ATTACH_END = 0,
-    ATTACH_MASTER,
-    ATTACH_AFTER,
-} AttachPolicy;
+/* AttachPolicy lives in desktop_list.h, with desktop_attach_index() — the code
+ * that acts on it — so both can be tested without Windows. */
 
 /* ---------------------------------------------------------------------------
  * Where the which-key panel sits on the focused monitor. Nine anchors: the
@@ -661,7 +656,19 @@ struct KeyMap {
  * --------------------------------------------------------------------------- */
 typedef struct {
     HWND      hwnd;
-    int       desktop_id;            /* Desktop.id — stable across reordering */
+    /* Desktop.id — stable across reordering.
+     *
+     * Half of a two-sided fact: the desktop's windows[] must contain this
+     * window, and this window must name that desktop. Both sides move together
+     * or neither does — desktop.c's add/remove/move are what guarantee that,
+     * and window_manage's initial assignment is the one exception, paired with
+     * the desktop_add_window a few lines below it.
+     *
+     * Write it anywhere else and you get a window claiming one desktop while it
+     * sits in another's list: its close never unlinks it, so the old desktop
+     * keeps a dead handle, never reaches count 0, and never gets collected.
+     * That was the scratchpad bug — summoning it set the id and nothing else. */
+    int       desktop_id;
     int       monitor;               /* which monitor it is tiled on        */
     /* The display it was on, by name. An index is meaningless across a
      * hotplug — the survivors renumber — so on replug this is what puts the
@@ -737,6 +744,21 @@ typedef struct {
                                       * window leaves the layout and must not be
                                       * shown again until the app shows it —
                                       * see the EVENT_OBJECT_HIDE handler.     */
+    /* The third answer to "who took this window off the screen", after
+     * app_hidden (the app did) and layout_hidden (the layout did): the USER
+     * did, with toggle_scratchpad, and only the user puts it back.
+     *
+     * layout_hidden is an output of the tiling pass and is re-decided every
+     * time one runs, which is what lets the desktop-switch show loop reveal
+     * everything and let the tiler sort it out a moment later. That trick does
+     * not work here: the scratchpad is FLOATING, the tiler never places floats,
+     * so nothing would ever hide it again — a stowed scratchpad came back every
+     * time you returned to its desktop. Hence a flag the show loops respect
+     * rather than one they can override.
+     *
+     * NOT honoured by window_restore_all_visibility(): on the way out every
+     * window mshell hid has to come back, including this one. */
+    bool      user_hidden;
     bool      wm_hidden;             /* MSHELL has it off the screen: another
                                       * desktop, monocle, a stowed scratchpad.
                                       * Tracked rather than derived, because
@@ -1482,6 +1504,11 @@ void     window_center_float(HWND hwnd);  /* no-op unless it should be centred *
  * unreachable, and for a floating one no tiling pass will ever put it back.
  * A no-op unless the window really is off every display. */
 bool     window_rescue_offscreen(ManagedWindow *mw);
+/* Move a window fully inside one monitor's work area, keeping its size and
+ * moving it the least distance that gets it there. The rescue above is this
+ * with an "is it off every display?" gate in front; a desktop's monitor pin
+ * calls it directly for FLOATS, which no tiling pass will ever place. */
+bool     window_clamp_into_monitor(ManagedWindow *mw, int mon);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 /* The raising half of the pass on its own — floats into the topmost band (so
  * no ordinary window can ever cover one), then our overlays over them, then
@@ -1574,7 +1601,10 @@ void     desktop_switch(const wchar_t *name);
 void     desktop_switch_last(void);      /* back to g.last_desktop (no-op if same) */
 void     desktop_cycle(int delta);       /* +1/-1 through the live desktops */
 void     desktop_move_window(HWND hwnd, const wchar_t *name);
-void     desktop_add_window(HWND hwnd, int slot);
+/* False when the desktop is full — the window is NOT on it, and a caller that
+ * has already written mw->desktop_id has just created a window belonging to a
+ * list that does not contain it. Check before you commit to anything. */
+bool     desktop_add_window(HWND hwnd, int slot);
 void     desktop_remove_window(HWND hwnd);
 int      desktop_of_window(HWND hwnd);   /* desktop id, or 0 when unmanaged */
 void     desktop_focus_update(HWND hwnd);
