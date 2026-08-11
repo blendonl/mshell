@@ -5,6 +5,13 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.7 — 2026-08-11
+
+- fix: the tiling pass believed every move it was refused
+- fix: a float that could not say which display it was on
+- fix: a helper that stopped answering took the whole shell with it
+- docs: changelog for the window-model fixes
+
 ## 0.14.6 — 2026-08-10
 
 ### Fixed
