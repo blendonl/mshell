@@ -4,7 +4,7 @@
  */
 
 #include "mshell.h"
-#include "layout_math.h"   /* center_axis() — where a floating window sits */
+#include "layout_math.h"   /* center_axis()/clamp_axis() — where a float sits */
 #include "overlay.h"       /* overlay_raise_all() — our own surfaces stay up */
 
 /* ---------------------------------------------------------------------------
@@ -60,6 +60,11 @@ void window_process_path(HWND hwnd, wchar_t *out, size_t out_len) {
  * topmost band back happens on paths that come long before it — unmanaging a
  * window, and shutting down. */
 static bool window_set_band(HWND hwnd, HWND after, bool topmost);
+
+/* Defined with the rest of the float placement logic, declared here because
+ * adoption and promotion both finish by asking it — and both come earlier in
+ * the file than the floats do. */
+static void window_park_float_if_fullscreen(ManagedWindow *mw);
 
 /* The file name inside a path, or the whole string when there is no separator. */
 static const wchar_t *path_basename(const wchar_t *path) {
@@ -1043,6 +1048,11 @@ void window_manage(HWND hwnd) {
             RECT want = { rule->x, rule->y, rule->x + rule->w,
                           rule->y + rule->h };
             window_apply_rect(mw, want, SWP_NOZORDER | SWP_NOACTIVATE);
+            /* A rule is a coordinate someone typed, and displays come and go
+             * after it was typed. If it just put the window somewhere the user
+             * cannot look at, pull it back — a window that opens onto no
+             * display at all cannot be recovered from the keyboard. */
+            window_rescue_offscreen(mw);
         } else if (mw->is_floating) {
             /* Nothing more specific asked for a rect, so the placement policy
              * gets it. Also before the tile pass, for the same reason: the
@@ -1064,10 +1074,15 @@ void window_manage(HWND hwnd) {
 
     tile_current();
 
-    /* The tiler never places floating windows, so a fullscreen rule does it
-     * here. No-op for tiled windows — the layout already owns their geometry —
-     * and for tracked ones, which carry no fullscreen flag. */
-    window_apply_fullscreen(hwnd);
+    /* The tiler never places floating windows, so anything that wants one to
+     * fill its monitor has to do it here — the `fullscreen = true` rule, and
+     * `start_fullscreen`, which sets the MODE and which nothing used to act on
+     * for a float. No-op for tiled windows (the layout already owns their
+     * geometry) and for tracked ones, which carry neither flag.
+     *
+     * Parking only, deliberately not window_place_float: a `geometry` rule has
+     * already put this window exactly where the config asked. */
+    window_park_float_if_fullscreen(mw);
 
     log_w(L"%ls: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
           tier == ADOPT_TRACK ? L"Tracking" : L"Managed",
@@ -1101,8 +1116,10 @@ void window_promote(HWND hwnd) {
     mw->has_applied = false;
 
     /* Same tail as window_manage: the tiler never places floating windows, so
-     * a fullscreen rule is applied here. A no-op without one. */
-    window_apply_fullscreen(hwnd);
+     * a window that should fill its monitor is parked here. A no-op without a
+     * fullscreen rule or mode, and promotion must not otherwise move a window
+     * you are looking at. */
+    window_park_float_if_fullscreen(mw);
 
     log_w(L"promoted to full management: %p (float=%d)", (void *)hwnd,
           mw->is_floating);
@@ -1389,6 +1406,68 @@ void window_center_float(HWND hwnd) {
 }
 
 /* ===========================================================================
+ * Put a managed window back where it can be reached.
+ *
+ * A window can end up on no display at all without anybody moving it: the
+ * monitor it lived on was unplugged, or a `geometry` rule was written for an
+ * arrangement this machine no longer has. There is no taskbar under mshell, so
+ * off every display means gone — no button to click, and for a floating window
+ * not even a tiling pass that would put it back, because the tiler never places
+ * floats. `has_applied = false` is what the hotplug path sets, and for a float
+ * it is inert.
+ *
+ * CLAMPED rather than centred, unlike the startup stray sweep further down.
+ * The sweep deals with one window at a time, at startup, whose position means
+ * nothing (it was parked 4000px clear of the desktop by a dead mshell), so the
+ * middle of the screen is the friendliest answer. This runs on every display
+ * change and can rescue SEVERAL windows at once — centring would stack every
+ * one of them in exactly the same spot, which is a worse outcome than the
+ * stranding. Moving each the least distance that gets it back on screen keeps
+ * them apart and roughly where they were, which is what a dock/undock cycle
+ * wants.
+ *
+ * A no-op unless the window really is off every display, so callers do not have
+ * to check. Returns true when it moved something.
+ * =========================================================================== */
+bool window_rescue_offscreen(ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd)) return false;
+    /* An iconic window has no on-screen rect to judge, and moving one only
+     * edits the rect it will restore to. */
+    if (IsIconic(mw->hwnd)) return false;
+
+    RECT cur;
+    if (!window_frame_rect(mw->hwnd, &cur)) return false;
+    if (!rect_off_screen(cur)) return false;
+
+    int mon = mw->monitor;
+    if (mon < 0 || mon >= g.monitor_count) mon = g.primary_monitor;
+    RECT area = (mon >= 0 && mon < g.monitor_count) ? g.monitors[mon].work_area
+                                                    : g.work_area;
+
+    int aw = (int)(area.right - area.left);
+    int ah = (int)(area.bottom - area.top);
+    int w  = (int)(cur.right - cur.left);
+    int h  = (int)(cur.bottom - cur.top);
+    if (aw <= 0 || ah <= 0 || w <= 0 || h <= 0) return false;
+    if (w > aw) w = aw;
+    if (h > ah) h = ah;
+
+    RECT want = { clamp_axis(area.left, aw, cur.left, w),
+                  clamp_axis(area.top,  ah, cur.top,  h), 0, 0 };
+    want.right  = want.left + w;
+    want.bottom = want.top  + h;
+
+    log_msg(LOG_INFO, L"rescued %p from off-screen onto monitor %d",
+            (void *)mw->hwnd, mon);
+
+    events_suppress_begin();
+    window_apply_rect(mw, want,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    events_suppress_end();
+    return true;
+}
+
+/* ===========================================================================
  * Park a window over the whole monitor it lives on.
  *
  * Deliberately the monitor's *full* bounds, not its work area, and with no gap
@@ -1421,6 +1500,67 @@ void window_apply_fullscreen(HWND hwnd) {
     ManagedWindow *mw = window_find(hwnd);
     if (!mw || !mw->fullscreen || !mw->is_floating) return;
     window_park_over_monitor(hwnd);
+}
+
+/* ===========================================================================
+ * Where does a floating window sit?
+ *
+ * The single answer, because there are two of them and they used to be asked
+ * as two independent questions that each no-opped when the other applied:
+ * window_apply_fullscreen (which needs the RULE flag) followed by
+ * window_center_float (which bails on any kind of fullscreen). A window
+ * fullscreened from the KEYBOARD while tiled satisfies neither — fs_mode says
+ * FS_WINDOW but mw->fullscreen is false — so floating one did nothing at all
+ * and left it sitting at the tile it no longer owned, with every flag claiming
+ * it was a fullscreen float. Pressing fullscreen again then restored a rect
+ * that had never been saved, which is to say it did nothing either.
+ *
+ * Asking once, in order of who outranks whom, is the whole fix.
+ * =========================================================================== */
+/* The parking half on its own, because one caller wants it WITHOUT the
+ * centring: a window whose rule gave it an explicit `geometry` has already been
+ * put exactly where the config asked, and centring it afterwards would throw
+ * that away.
+ *
+ * Two independent things can ask for a screen-filling float and only one of
+ * them used to be honoured here. `fullscreen = true` is a rule and is permanent
+ * — there is nothing to restore, so nothing is saved. A fullscreen MODE is the
+ * keyboard state machine, and `start_fullscreen` puts a window into FS_WINDOW
+ * at manage time without setting the rule flag at all; that window was never
+ * parked by anyone, because the tiler skips floats and this path only asked
+ * about the rule. */
+static void window_park_float_if_fullscreen(ManagedWindow *mw) {
+    if (!mw || !mw->is_floating) return;
+    if (!mw->fullscreen && !window_is_screen_fullscreen(mw)) return;
+
+    /* Save what it had before we take the whole monitor, or leaving fullscreen
+     * has nothing to go back to. Guarded, so arriving here already parked does
+     * not overwrite the user's rect with our own. Not saved for the rule case:
+     * that window is fullscreen for as long as it lives. */
+    if (!mw->fullscreen && !mw->fs_has_prev)
+        mw->fs_has_prev = window_frame_rect(mw->hwnd, &mw->fs_prev_rect);
+
+    window_park_over_monitor(mw->hwnd);
+}
+
+static void window_place_float(ManagedWindow *mw) {
+    if (!mw || !mw->is_floating) return;
+
+    if (mw->fullscreen || window_is_screen_fullscreen(mw)) {
+        window_park_float_if_fullscreen(mw);
+        return;
+    }
+
+    window_center_float(mw->hwnd);   /* no-op unless it should be centred */
+}
+
+/* A saved pre-fullscreen rect belongs to the float it was saved from. A window
+ * that leaves the floating tier must forget it: the layout owns a tiled
+ * window's geometry, so the rect is meaningless there, and keeping it made the
+ * NEXT float refuse to save its own (window_set_fullscreen only saves when
+ * nothing is saved) and then restore a rect from two arrangements ago. */
+static void fs_forget_prev(ManagedWindow *mw) {
+    if (mw) mw->fs_has_prev = false;
 }
 
 /* ===========================================================================
@@ -1573,7 +1713,7 @@ void window_reassert_rule(HWND hwnd) {
  * lapse. Floats are here only while float_on_top asks for it. */
 static bool zorder_wants_topmost(const ManagedWindow *mw) {
     return window_is_screen_fullscreen(mw) || mw->always_on_top ||
-           (g.float_on_top && mw->is_floating);
+           (g.float_on_top && window_is_float_tier(mw));
 }
 
 /* Move a window between the ordinary and the topmost band.
@@ -1667,7 +1807,10 @@ void window_raise_floats(void) {
     for (HWND h = GetTopWindow(NULL); h && n < MAX_WINDOWS_PER_DESKTOP;
          h = GetWindow(h, GW_HWNDNEXT)) {
         ManagedWindow *mw = window_find(h);
-        if (!mw || !mw->is_floating) continue;
+        /* The TIER, not the exemption: a tracked window is floating only in the
+         * sense that the layout leaves it alone, and putting one in the topmost
+         * band is doing something to a window the tier promises not to touch. */
+        if (!window_is_float_tier(mw)) continue;
         if (mw->desktop_id != g.current_desktop_id) continue;
         /* window_on_screen, not IsWindowVisible: a window mshell has cloaked —
          * a stowed scratchpad is the floating case — keeps its visible bit, so
@@ -1790,15 +1933,17 @@ void window_set_floating(HWND hwnd, bool floating) {
          * stay borderless, in which case floating it must not re-decorate it. */
         if (mw->no_decor) window_strip_decorations(hwnd);
         else              window_restore_decorations(hwnd);
-        window_apply_fullscreen(hwnd);   /* no-op without a fullscreen rule */
         /* A window leaving the grid keeps the size of the tile it just left,
          * which is a fine size and a meaningless position — the tile is about
-         * to be given away to the windows that stayed. Centring it is the same
-         * answer as for a window that opened floating, so it is the same call;
-         * a no-op if the fullscreen line above already parked it. */
-        window_center_float(hwnd);
+         * to be given away to the windows that stayed. Where it goes instead is
+         * one question with one answer; see window_place_float. */
+        window_place_float(mw);
     } else {
         window_strip_decorations(hwnd);
+
+        /* Leaving the float tier: the pre-fullscreen rect it was holding
+         * describes an arrangement that no longer exists. */
+        fs_forget_prev(mw);
 
         /* Back into the grid, so out of the topmost band we put it in — right
          * now, not at the next tiling pass. The window is about to be given a
