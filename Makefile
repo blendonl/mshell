@@ -7,7 +7,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 
 # --- Version (single source of truth; baked into the binary and the zip) ---
-VERSION  = 0.15.1
+VERSION  = 0.15.2
 
 # VERSIONINFO needs the parts as separate numbers, so split them out here
 # rather than making anyone maintain the version in two shapes.
