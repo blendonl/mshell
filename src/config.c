@@ -21,6 +21,7 @@ static void config_apply_defaults(void) {
     g.inner_gap        = DEFAULT_INNER_GAP;
     g.outer_gap        = DEFAULT_OUTER_GAP;
     g.smart_gaps       = false;
+    g.smart_borders    = false;
     g.border_width     = DEFAULT_BORDER_WIDTH;
     g.border_color     = DEFAULT_BORDER_COLOR;
     g.border_color_float  = DEFAULT_BORDER_COLOR;
@@ -142,7 +143,7 @@ typedef struct {
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
     bool      start_desktop_always;
     int       inner_gap, outer_gap, border_width;
-    bool      smart_gaps;
+    bool      smart_gaps, smart_borders;
     COLORREF  border_color, border_color_float, border_color_urgent;
     int       corner_pref;
     COLORREF  background_color;
@@ -205,6 +206,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->inner_gap         = g.inner_gap;
     s->outer_gap         = g.outer_gap;
     s->smart_gaps        = g.smart_gaps;
+    s->smart_borders     = g.smart_borders;
     s->border_width      = g.border_width;
     s->border_color      = g.border_color;
     s->border_color_float  = g.border_color_float;
@@ -318,6 +320,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.inner_gap         = s->inner_gap;
     g.outer_gap         = s->outer_gap;
     g.smart_gaps        = s->smart_gaps;
+    g.smart_borders     = s->smart_borders;
     g.border_width      = s->border_width;
     g.border_color      = s->border_color;
     g.border_color_float  = s->border_color_float;

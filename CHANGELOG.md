@@ -5,6 +5,27 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **`mshell.set_smart_borders(true)` — no focus ring when there is nothing to
+  tell apart.** The ring exists to answer "which window has the keyboard". On a
+  monitor showing a single window that question has no second candidate, and
+  the ring is reduced to a coloured line drawn around the screen's contents.
+  With this on, that case draws nothing; open a second window and the ring is
+  back on the focused one.
+
+  Counted per monitor, like `set_smart_gaps`, and over the current desktop's
+  windows — a window on another desktop or another display never keeps the ring
+  alive. Unlike smart gaps, **floats count**: a float sitting over one tiled
+  window is a second window you can see, and telling those two apart is exactly
+  the ring's job. Anything off the screen does not count, however it went away —
+  minimised, hidden by its app to the tray, held back by the layout, or taken
+  off the screen by mshell for a desktop switch.
+
+  `monocle` shows one window by design, so the ring is off there for as long as
+  that layout is up. Off by default; a config that never calls it sees no
+  change.
+
 ## 0.14.9 — 2026-08-11
 
 - fix: hide a window by sinking it under the backdrop, not by removing it

@@ -1058,6 +1058,13 @@ typedef struct {
     int      inner_gap;       /* gap between adjacent tiled windows           */
     int      outer_gap;       /* margin between the screen edge and windows   */
     bool     smart_gaps;      /* drop all gaps when a monitor has one window  */
+    /* The ring's whole job is saying WHICH window has focus. On a monitor
+     * showing a single window there is nothing to disambiguate, so the ring is
+     * only a coloured line around the screen's contents. Per monitor, like
+     * smart_gaps, and counting every visible window (floats included) rather
+     * than only the tiled ones — a float over a lone tile is a second window
+     * you can see, and telling them apart is the point. */
+    bool     smart_borders;   /* hide the ring when a monitor has one window  */
     int      border_width;    /* focused-window ring thickness (0 = off)      */
     COLORREF border_color;    /* focused-window ring color                    */
     /* Per-state ring colours. A tiled window and a floating one behave
