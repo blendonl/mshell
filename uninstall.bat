@@ -82,6 +82,7 @@ set "HAVEBACKUP="
 reg query "HKCU\Software\mshell\TweakBackup" >nul 2>&1 && set "HAVEBACKUP=1"
 if defined HAVEBACKUP if exist "C:\mshell\mshell.exe" (
     "C:\mshell\mshell.exe" --tweaks revert input
+    "C:\mshell\mshell.exe" --tweaks revert apps
     goto :reverted
 )
 if exist "%~dp0harden-undo.reg" (

@@ -5,6 +5,44 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **The browser window that comes back as one flat grey rectangle.** Not the
+  drifting frame 0.14.6 fixed — this one is the whole window: frame painted,
+  nothing inside it, permanent. Chromium decides for itself whether anyone can
+  see each of its windows ("native window occlusion") and stops presenting the
+  ones it believes are hidden, and in a tiling shell that is most windows most
+  of the time: cloaked, `SW_HIDE`'d, stashed off every display, or simply
+  covered by whatever you are looking at. Sometimes it does not start again.
+
+  Measured against such a window, live: `RedrawWindow` async, `RedrawWindow`
+  with `RDW_UPDATENOW`, a 1px move, a real resize, `SetForegroundWindow`,
+  `SwitchToThisWindow`, and a full minimise/restore. **None** of them brought a
+  pixel back. The browser process, its GPU process and all five renderers were
+  alive and the window answered `WM_NULL`. Only restarting the browser fixed it,
+  which means there is nothing for mshell to fix on the way back — the fix is to
+  stop the browser guessing.
+
+  New tweak group, `apps`, holding the policy that does that for Chrome,
+  Chromium and Edge:
+
+  ```
+  mshell.exe --tweaks apply apps          (from an administrator prompt)
+  ```
+
+  `install.bat` applies it alongside the hardening, and needs the same
+  administrator prompt for the same reason: the key is under
+  `HKCU\Software\Policies`, which Windows ACLs read-only for the user who owns
+  the hive. Unelevated it is skipped and reported. The no-admin route — and the
+  only route for an Electron app, which has no policy — is on the launch:
+
+  ```
+  chrome.exe --disable-features=CalculateNativeWinOcclusion
+  ```
+
+  `uninstall.bat` reverts this group along with the rest, back to whatever the
+  value was before rather than to a default.
+
 ## 0.14.7 — 2026-08-11
 
 - fix: the tiling pass believed every move it was refused

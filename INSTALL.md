@@ -269,6 +269,33 @@ into three importable files by blast radius:
   accept UAC) to pick them up. Undo: `harden-undo.reg`, or `mshell.exe
   --tweaks revert input`.
 
+- **The browser fix (`--tweaks apply apps`)** — Chromium decides for itself
+  whether anyone can see each of its windows and stops drawing the ones it
+  thinks are hidden. A tiling shell hides windows constantly, and coming back is
+  where it breaks: the window returns with its frame painted and **nothing
+  inside it**, one flat grey rectangle, and stays that way until the browser is
+  restarted. Nothing repairs it from outside — repaint, resize, re-activate and
+  minimise/restore were all measured against such a window and none brought a
+  pixel back.
+
+  `install.bat` sets the policy that turns that decision off, for Chrome,
+  Chromium and Edge. It needs an **administrator prompt** (its key lives under
+  `HKCU\Software\Policies`, which Windows ACLs read-only for you), and without
+  one it is skipped and reported, like the two hardening policies above. From an
+  admin prompt at any time:
+
+  ```
+  C:\mshell\mshell.exe --tweaks apply apps
+  ```
+
+  No admin, or an Electron app (which has no policy at all)? Put the flag on the
+  launch instead — in your shortcut, your launcher, or the `app`/`startup`
+  command in `init.lua`:
+
+  ```
+  chrome.exe --disable-features=CalculateNativeWinOcclusion
+  ```
+
 - **`debloat.reg`** — the visual layer: window/menu/tooltip animations and
   fades, Aero Snap / Snap Assist / Aero Shake / Aero Peek, transparency,
   accent colour on borders, toasts and "suggested content", the error beep.

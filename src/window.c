@@ -628,8 +628,9 @@ bool window_on_screen(const ManagedWindow *mw) {
  *
  * STRANDING. A window stashed when mshell dies is off-screen with nothing left
  * to bring it back, so the startup sweep in window_uncloak_strays pulls those
- * in too, and window_restore_all_visibility unstashes on the way out. An iconic window is never stashed: it has no surface to protect and
- * moving one only edits the rect it will restore to.
+ * in too, and window_restore_all_visibility unstashes on the way out. An iconic
+ * window is never stashed: it has no surface to protect, and moving one only
+ * edits the rect it will restore to.
  * =========================================================================== */
 
 /* Clear of the rightmost display, and clear of a display appearing there while
