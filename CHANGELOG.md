@@ -5,6 +5,63 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Fixed
+
+- **A desktop and its windows can no longer disagree about who is on it.** Every
+  window records the desktop it belongs to, and every desktop records the
+  windows on it. Those are two halves of one fact, and four bugs came from
+  writing one half without the other, or from acting on a window that was not
+  on the screen at all.
+
+  **A summoned scratchpad left a desktop behind that never went away.**
+  `toggle_scratchpad` brought the window to the desktop you were looking at by
+  changing which desktop the window *claimed*, and nothing else — so the desktop
+  it came from still listed it. Closing it there never removed it from that
+  list, which meant the desktop never ran out of windows, was never collected,
+  and sat in the status bar for the rest of the session. Every summon-then-close
+  cost another one.
+
+  **A stowed scratchpad came back on its own.** Put it away, visit another
+  desktop, come back, and it was on screen again. Returning to a desktop shows
+  everything on it and lets the tiling pass put back whatever should not be
+  visible — which works for tiled windows and cannot work for the scratchpad,
+  because the tiler never places floating windows. It now stays where you put
+  it until you ask for it, and re-marking a *different* window as the scratchpad
+  hands the old one its visibility back rather than leaving it stranded.
+
+  **Switching desktops un-minimised and un-trayed things.** Coming back to a
+  desktop hands the keyboard to the window you were last using there — and did
+  so without checking whether that window was still on the screen. Focusing a
+  window restores it if it is minimised, and reaches for a stronger API when the
+  first one is refused, which un-hides it. So a window you had minimised came
+  back restored, and an app you had closed to the tray (Discord, Slack, Steam)
+  was pulled back out of it. Focus now skips anything that is minimised or
+  trayed; the `restore` binding still reaches a minimised window, which is what
+  it is for.
+
+  **A window opened onto a full desktop disappeared.** At 256 windows the
+  desktop stopped accepting them silently: the window was adopted, told which
+  desktop it was on, hidden if that desktop was not the one in front of you —
+  and left off the list that brings a desktop back. Nothing could ever show it
+  again, and under a shell with no taskbar there is nothing to click. mshell now
+  declines to manage it and says so, leaving an ordinary window you can still
+  use.
+
+- **Sticky windows follow a pinned desktop onto its display.** A desktop pinned
+  with `monitor = N` puts its windows on that display; a window that came along
+  with you was not treated as one of them and stayed on whichever screen it was
+  already on. It also now joins that desktop's history, so `last_window` can
+  reach it — and if the desktop it is following you to is full, the log says so
+  instead of the window quietly vanishing.
+
+- **A monitor pin moves floating windows too.** Pinning a desktop recorded the
+  new display for every window on it and left the tiling pass to do the moving,
+  which is fine for tiled windows and does nothing at all for floats — the tiler
+  never places them. A float on a pinned desktop stayed on the old screen while
+  everything else moved. Each one is now moved the shortest distance that puts
+  it fully on the right display, so several of them do not end up stacked in the
+  same spot.
+
 ## 0.15.0 — 2026-08-11
 
 ### Added

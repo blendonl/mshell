@@ -87,6 +87,23 @@ From a normal terminal, with mshell running:
   and the bar's window count follows.
 - **Scratchpad**: `mark_scratchpad` on a terminal, switch desktops, then
   `toggle_scratchpad` — it appears here, focused. Again — it hides.
+
+## Desktop bookkeeping
+
+Each of these **fails before this section was written**. They all have the same
+shape: `ManagedWindow.desktop_id` and the desktop's `windows[]` disagreeing, or
+something off-screen being handed the keyboard.
+
+| # | Test | Expected |
+|---|------|----------|
+| 1 | `mark_scratchpad` a terminal on `1`, go to `2`, `toggle_scratchpad` to summon it, then close it. Make sure `1` has no other windows. | `1` disappears from the bar. Before: summoning set `desktop_id` without unlinking the window from `1`, so closing it left a dead handle behind — `1` never emptied and never went away. |
+| 2 | `mark_scratchpad` on `1`, `toggle_scratchpad` to stow it, go to `2`, come back to `1`. | Still stowed. Before: the switch-in show loop revealed every window on the desktop, and nothing re-hid a float. |
+| 3 | Stow the scratchpad, then `mark_scratchpad` a *different* window. | The old scratchpad reappears rather than being stranded invisible — nothing else could ever show it once it lost the role. |
+| 4 | Minimize the **only** window on `1`, go to `2`, come back. | Still minimized, and nothing is focused. Strengthens test #8 above, which passes today only because it never uses a single-window desktop. |
+| 5 | Tray an app (Discord/Slack) that is the focused window on `1`, go to `2`, come back. | Still in the tray. Before: `window_focus` fell back to `SwitchToThisWindow`, which un-hides. |
+| 6 | Pin a desktop with `monitor = 1`, put a **floating** window on it, reload the config. | The float is on display 1. Before: only its recorded monitor changed — the tiler never places floats, so it stayed on display 0. |
+| 7 | `toggle_sticky` a window, then switch to a desktop pinned to another display. | It arrives on that display, not the one it was already on. |
+| 8 | With any of the above, check `%LOCALAPPDATA%\mshell\mshell.log`. | A full desktop or a sticky window that could not follow now logs a line instead of failing silently. |
 - **Zoom**: from the stack it swaps into master; pressed again from master it
   swaps back out to where the old master went.
 - **Session**: change a desktop's layout and master ratio, quit, restart —
