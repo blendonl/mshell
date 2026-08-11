@@ -155,6 +155,12 @@ void anim_tick(void) {
 
         float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
 
+        /* window_set_pos, deliberately NOT window_apply_rect: this is an
+         * intermediate frame, and applied_rect must keep naming the animation's
+         * TARGET (see the file header). Recording each frame would make the
+         * layout's bookkeeping track the motion instead of the destination, and
+         * the drift detector — which compares against applied_rect — would then
+         * see every frame as the window arriving. */
         RECT r   = anim_rect_at(a, now);
         RECT adj = window_adjust_for_frame(a->hwnd, r);
         window_set_pos(a->hwnd, adj.left, adj.top,

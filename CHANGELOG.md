@@ -9,6 +9,124 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Fixed
 
+- **The tiling pass believed every move it was refused.** `window_set_pos`
+  exists because a placement can be refused — that is the entire reason
+  `mshelld.exe` exists — and it returned a `bool` that no caller read. Every
+  call site then wrote `applied_rect` and `has_applied` regardless.
+
+  One refused `SetWindowPos` therefore became permanent wrong state.
+  `applied_rect` is what the tiler's no-op skip, the drift detector and the
+  drag-to-swap hit test all read, so a window that never moved was recorded as
+  being where the layout wanted it, was never offered that rect again, and left
+  a phantom cell behind that a drop could land on.
+
+  The worst of it was the batch. `DeferWindowPos` only queues;
+  `EndDeferWindowPos` is what moves anything, and a batch holding one window we
+  are not allowed to move fails **as a whole**. Its return was never checked,
+  and the loop had already recorded every window in it. Open Task Manager as the
+  first window on a desktop and press a layout key: nothing moved, everything
+  claimed it had, and the skip matched that claim forever. The layout was frozen
+  with no log line.
+
+  The outcome is now a value — placed locally, placed by the helper, or refused
+  by both — and recording is one function that runs *after* the placement rather
+  than six copies that ran regardless. The batch records once it commits and
+  replays individually when it does not, which is what makes it
+  self-correcting: the replay marks the window that refused, so the next pass
+  keeps that one out of the batch and the rest of the desktop is never held
+  hostage to it again.
+
+  Three things fall out of having the answer. A window that needed the helper
+  can now stop needing it, where before one transient refusal pinned it to the
+  pipe for life. A window nobody can place no longer keeps a tile — with no
+  helper running it floats, which is what INSTALL.md and the helper's own
+  startup warning have always said happens, and its cell goes back to the
+  windows that can use it. And `window_hide` stops claiming hides it did not
+  achieve: cloak, stash and `SW_HIDE` can all be refused, only the first two
+  were checked, and `window_on_screen` was answering "gone" about a window still
+  sitting on the display.
+
+- **A float could not say which display it was on.** Only the keyboard move keys
+  updated a floating window's monitor. Mod+drag, a title-bar drag and the app
+  moving itself all left the index naming the display the window opened on.
+
+  That index is not bookkeeping: it picks the screen for centring and for
+  fullscreen, it becomes the focused monitor on the next focus, and it is what
+  the one-fullscreen-per-monitor check compares. Drag a float to your second
+  display and fullscreen it, and it grew on the first one. It is now read where
+  every move is observed.
+
+  Floats also survive losing a display. Re-homing on a hotplug clears the flag
+  that makes the next tiling pass re-place a window, and the tiler never places
+  floats — so a float whose monitor was unplugged kept a rect in that monitor's
+  coordinate space, which under a shell with no taskbar means gone. Those are
+  pulled back now, as is a `geometry` rule written for an arrangement the
+  machine no longer has. Clamped rather than centred, because several can be
+  rescued at once and centring would stack every one of them in the same spot.
+
+- **`float_on_top` was promoting windows mshell had promised not to touch.**
+  Windows adopted at the *tracked* tier — an owned dialog nobody opted into, one
+  too small to tile, one held disabled by its own modal — are marked floating to
+  keep them out of the layout, not because anybody chose to float them. The
+  z-order pass read that as the float tier and parked every one of them in the
+  always-on-top band, so a stray error box sat above everything on the desktop.
+  The two meanings are now distinguished, and the ring colour asks the same
+  question.
+
+- **Fullscreen and the float toggle disagreed about where a window goes.** Where
+  a float sits was two questions that each did nothing when the other applied: a
+  fullscreen *rule*, and centring, which bails on any kind of fullscreen. A
+  window fullscreened from the keyboard while tiled satisfies neither, so
+  `Win+f` on it did nothing at all and left it at the tile it no longer owned
+  with every flag claiming otherwise — and pressing fullscreen again restored a
+  rect that had never been saved. It is one question now. `start_fullscreen` on
+  a floating window also works, which it did not: it set the mode and nothing
+  acted on it.
+
+  A pre-fullscreen rect also belongs to the float it was saved from. It used to
+  survive a float → tile → float round trip, after which the next fullscreen
+  refused to save its own and restored one from two arrangements ago.
+
+- **A helper that stopped answering took the whole shell with it.** The requests
+  to `mshelld.exe` were synchronous reads on a blocking pipe, made from the
+  thread that pumps messages. A helper that *dies* was always handled; one that
+  is alive and simply not reading — suspended, in a Windows Error Reporting
+  dialog, blocked inside its own cross-process DWM call — was not, and the read
+  never returned. This process is the shell, so there is nothing behind it.
+
+  Requests are now bounded at 250 ms, and three consecutive timeouts stop mshell
+  asking for five seconds. What that degrades to is exactly the documented
+  no-helper behaviour: elevated windows float and stay put. That is a fallback;
+  a frozen session is not.
+
+### Security
+
+- **The helper's pipe was open to every interactively logged-on user.** Its DACL
+  named the `IU` alias, on the reasoning that the helper's elevated token is the
+  Administrators one and granting *that* would not let an unelevated mshell
+  connect. The first half is true and the conclusion was not: elevation changes
+  a token's integrity level and its groups, not its user. The helper already
+  runs as the interactive user, so its own SID was the right answer all along —
+  and `IU` is a far larger set than that. The pipe name is per-session and
+  entirely predictable, so with fast user switching a second signed-in user
+  could open the first user's helper and move, hide or close their windows,
+  including the elevated ones it exists to reach.
+
+  `mshell.exe`'s own `--msg` pipe had computed this correctly from its process
+  token all along, so the two now share one implementation rather than two
+  opinions. The helper logs which SID it granted, because when the shell cannot
+  connect that line is the whole diagnosis — and a logon task edited to run as
+  SYSTEM is now documented as unsupported rather than merely broken. If you
+  registered the task with the command in INSTALL.md, nothing changes for you.
+
+- **Both pipes accepted remote clients and allowed instance squatting.** A named
+  pipe is reachable over SMB as `\\host\pipe\mshelld-1` unless it says
+  otherwise, and anything holding `FILE_CREATE_PIPE_INSTANCE` on an existing
+  pipe can add an instance beside it and take turns serving the shell's
+  requests. Both are now refused: nothing on the network has any business
+  driving these operations, and failing loudly on a name already in use beats
+  sharing it quietly.
+
 - **A refused cloak no longer means `SW_HIDE`, and browsers stop rotting.** The
   hide policy is cloaking for a reason: `ShowWindow(SW_HIDE)` clears
   `WS_VISIBLE`, DWM drops the window's redirection surface, and a Chromium-class
