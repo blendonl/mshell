@@ -5,6 +5,22 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **`bar_top` / `bar_floating` actions — switch the bar between modes at
+  runtime.** Bindable like any other action; the shipped config wires them to
+  `Win+x b t` and `Win+x b f` via a submap. Either action enables the bar if
+  it was hidden.
+
+### Fixed
+
+- **Remove the dark grey border DWM draws on tiled windows.** Stripping
+  decorations used to add `WS_BORDER` to give a thin separator between adjacent
+  windows. DWM renders that as a ~4 px dark grey line on the left, right and
+  bottom edges — visible on Chrome, Discord and every other tiled window. Gaps
+  and the focus ring already handle visual separation, so the border is now
+  removed unconditionally.
+
 ## 0.15.1 — 2026-08-11
 
 ### Fixed

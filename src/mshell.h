@@ -683,8 +683,7 @@ typedef struct {
                                       * (see the tier note above). Implies
                                       * is_floating and no_ring.             */
     bool      no_ring;               /* suppress the focus ring (games)     */
-    bool      no_decor;              /* strip the frame even while floating,
-                                      * and never add the thin WS_BORDER    */
+    bool      no_decor;              /* strip the frame even while floating */
     bool      fullscreen;            /* while floating: cover the monitor   */
     /* Centre it whenever it floats. Resolved once, at manage time, from the
      * rule's `center` and set_float_placement — so it travels with the window
