@@ -459,7 +459,25 @@ void window_strip_decorations(HWND hwnd) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
-    mw->decorations_stripped = true;
+    /* Did it actually take? Neither SetWindowLongPtrW above can be trusted to
+     * have worked: UIPI refuses a style write aimed at a window owned by a
+     * higher-integrity process, and it refuses it silently as far as the return
+     * value is concerned. Setting the flag anyway meant `decorations_stripped`
+     * claimed a frame had been taken off a window that still wears its caption,
+     * and mshell then had no idea the rule had not applied.
+     *
+     * Read the style back rather than checking a return: it is one call, it is
+     * authoritative, and it is the same question the flag is supposed to answer.
+     * orig_style is left recorded either way — it is what the window HAD, which
+     * is true whether or not we managed to change it. */
+    bool stripped = !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION);
+    if (!stripped && !mw->decor_strip_refused) {
+        mw->decor_strip_refused = true;
+        log_msg(LOG_WARN, L"could not strip decorations from %p — the window "
+                          L"belongs to a higher-integrity process and keeps its "
+                          L"title bar", (void *)hwnd);
+    }
+    mw->decorations_stripped = stripped;
 }
 
 /* ===========================================================================
@@ -645,8 +663,11 @@ static bool window_stash(ManagedWindow *mw) {
     if (!stash_position(&x, &y) || !GetWindowRect(mw->hwnd, &r)) return false;
     if (rect_off_screen(r)) return false;   /* not ours to file away */
 
-    if (!window_set_pos(mw->hwnd, x, y, r.right - r.left, r.bottom - r.top,
-                        SWP_NOZORDER | SWP_NOACTIVATE))
+    /* Anything but a flat refusal is a stash: it does not matter to us whether
+     * the move went locally or through the helper, only that the window is
+     * gone from the screen and we know where it came from. */
+    if (window_set_pos(mw->hwnd, x, y, r.right - r.left, r.bottom - r.top,
+                       SWP_NOZORDER | SWP_NOACTIVATE) == PLACE_REFUSED)
         return false;
 
     mw->stash_rect = r;
@@ -699,14 +720,41 @@ void window_hide(ManagedWindow *mw) {
          * app rebuilds its compositor blank or offset on the way back, every
          * round trip, until it is restarted. */
         mw->cloaked = window_set_cloaked(mw->hwnd, true);
-        if (!mw->cloaked && !window_stash(mw)) {
-            /* Neither: an iconic window (nothing to protect, and moving one
-             * only edits the rect it will restore to), or no room left in the
-             * coordinate space to stash it in. */
-            ShowWindow(mw->hwnd, SW_HIDE);
-        }
-    } else {
+        if (!mw->cloaked) mw->stashed = window_stash(mw);
+    }
+
+    if (!mw->cloaked && !mw->stashed) {
+        /* Last resort: an iconic window (nothing to protect, and moving one
+         * only edits the rect it will restore to), no room left in the
+         * coordinate space to stash it in, or the "hide" policy outright. */
         ShowWindow(mw->hwnd, SW_HIDE);
+
+        /* ...and SW_HIDE can be refused too, on the same integrity boundary
+         * that just refused the cloak and the stash. Every mechanism having
+         * failed is the case that must NOT be recorded as a hide: wm_hidden is
+         * what window_on_screen() answers from, so a window still sitting on
+         * the display while the flag says otherwise is the "elevated window
+         * stares at you from every desktop" bug — silently, with the desktop
+         * switch believing it did its job.
+         *
+         * Clearing the flag here does not violate the set-it-first rule above.
+         * That rule exists so the queued EVENT_OBJECT_HIDE is not mistaken for
+         * the app traying itself — and if nothing hid the window, no such
+         * event was ever generated to be mistaken. */
+        if (IsWindowVisible(mw->hwnd)) {
+            mw->wm_hidden = false;
+            static bool warned;
+            if (!warned) {
+                warned = true;
+                log_err(L"hide: %p could not be taken off the screen by any "
+                        L"means — not cloaked, not stashed, and SW_HIDE was "
+                        L"refused. It will be visible on every desktop. This is "
+                        L"what mshelld.exe exists for: run `install.bat /helper` "
+                        L"from an administrator prompt (see INSTALL.md).",
+                        (void *)mw->hwnd);
+            }
+            return;
+        }
     }
 
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
@@ -994,12 +1042,7 @@ void window_manage(HWND hwnd) {
         if (mw->is_floating && rule && rule->set_geometry) {
             RECT want = { rule->x, rule->y, rule->x + rule->w,
                           rule->y + rule->h };
-            RECT adj  = window_adjust_for_frame(hwnd, want);
-            window_set_pos(hwnd, adj.left, adj.top,
-                           adj.right - adj.left, adj.bottom - adj.top,
-                           SWP_NOZORDER | SWP_NOACTIVATE);
-            mw->applied_rect = want;
-            mw->has_applied  = true;
+            window_apply_rect(mw, want, SWP_NOZORDER | SWP_NOACTIVATE);
         } else if (mw->is_floating) {
             /* Nothing more specific asked for a rect, so the placement policy
              * gets it. Also before the tile pass, for the same reason: the
@@ -1188,22 +1231,100 @@ RECT window_adjust_for_frame(HWND hwnd, RECT want) {
  * With no mshelld.exe running this is exactly the old behaviour: the placement
  * fails and the window is left where it is.
  * =========================================================================== */
-bool window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
-    if (SetWindowPos(hwnd, NULL, x, y, w, h, flags)) return true;
+PlaceResult window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
+    if (SetWindowPos(hwnd, NULL, x, y, w, h, flags)) return PLACE_OK;
 
     DWORD err = GetLastError();
     if (err != ERROR_ACCESS_DENIED) {
         log_w(L"SetWindowPos(%p) failed: %lu", (void *)hwnd, err);
-        return false;
+        return PLACE_REFUSED;
     }
 
-    /* Remember it, so the next tiling pass keeps this window out of the
-     * DeferWindowPos batch: one window the batch cannot move fails the whole
-     * group, which would strand every other window on the desktop. */
-    ManagedWindow *mw = window_find(hwnd);
-    if (mw) mw->needs_helper = true;
+    /* NB: which window needs the helper is deliberately NOT recorded here any
+     * more. This function does the I/O and says what happened; window_apply_rect
+     * owns the bookkeeping. Keeping the two apart is what lets the flag be
+     * CLEARED again — it used to be set here and nowhere unset, so one transient
+     * refusal pinned a window to the pipe for the rest of its life. */
+    return helper_set_window_pos(hwnd, x, y, w, h, flags) ? PLACE_VIA_HELPER
+                                                          : PLACE_REFUSED;
+}
 
-    return helper_set_window_pos(hwnd, x, y, w, h, flags);
+/* ===========================================================================
+ * A window nobody can place does not get to keep a tile.
+ *
+ * UIPI stops an unelevated shell from moving a window owned by a
+ * higher-integrity process, and without mshelld.exe running there is nothing
+ * further to try. Such a window used to stay a full tiled client: the layout
+ * kept handing it a cell it could never occupy, so the cell read as a hole and
+ * the window sat wherever it opened, over its neighbours.
+ *
+ * Floating it is what the documentation has always claimed happens — see
+ * helper.c's startup warning, proto.h's opening note and MANUAL-TESTS.md — and
+ * it is the better behaviour anyway: the window is left alone, and the cell it
+ * was never going to fill goes back to the windows that can use it.
+ *
+ * Once per window, not once per pass: `place_refused` is both the record that
+ * this already happened and the guard against recursing, since floating a
+ * window places it again and that placement is refused too.
+ * =========================================================================== */
+static void window_placement_refused(ManagedWindow *mw) {
+    if (mw->place_refused) return;      /* already dealt with, and no recursion */
+    mw->place_refused = true;
+
+    if (!mw->is_floating && helper_available()) {
+        /* The helper IS connected and still could not place it. Floating would
+         * be the wrong lesson to draw — the boundary is not the problem here. */
+        log_msg(LOG_WARN, L"placement refused for %p with mshelld.exe connected "
+                          L"— leaving it in the layout", (void *)mw->hwnd);
+        return;
+    }
+
+    if (!mw->is_floating && g.float_policy == FLOAT_NEVER) {
+        /* The config said every window tiles. Honour it, and say what that
+         * costs, because the symptom (a window sitting outside its cell) is
+         * otherwise indistinguishable from a bug. */
+        log_msg(LOG_WARN, L"%p cannot be placed (UIPI) and float_policy is "
+                          L"'never' — it stays in the layout without moving",
+                (void *)mw->hwnd);
+        return;
+    }
+
+    if (!mw->is_floating) {
+        log_err(L"%p belongs to a higher-integrity process and cannot be placed "
+                L"— floating it. Run `install.bat /helper` from an administrator "
+                L"prompt to tile it instead (see INSTALL.md).", (void *)mw->hwnd);
+        window_set_floating(mw->hwnd, true);
+    }
+}
+
+/* ===========================================================================
+ * Place a managed window and record the result. See the contract in mshell.h.
+ * =========================================================================== */
+PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags) {
+    HWND hwnd = mw ? mw->hwnd : NULL;
+    if (!hwnd || !IsWindow(hwnd)) return PLACE_REFUSED;
+
+    RECT adj = window_adjust_for_frame(hwnd, want);
+    PlaceResult res = window_set_pos(hwnd, adj.left, adj.top,
+                                     adj.right - adj.left,
+                                     adj.bottom - adj.top, flags);
+
+    if (res == PLACE_REFUSED) {
+        /* Record nothing. has_applied is left exactly as it was, so the next
+         * pass tries again rather than skipping this window forever as
+         * "already where we want it". */
+        window_placement_refused(mw);
+        return res;
+    }
+
+    mw->applied_rect  = want;
+    mw->has_applied   = true;
+    mw->place_refused = false;
+    /* Set when the helper had to do it, cleared when the local call worked
+     * again — an elevated window that closes and reopens unelevated, or one
+     * whose refusal was transient, rejoins the batch on its own. */
+    mw->needs_helper  = (res == PLACE_VIA_HELPER);
+    return res;
 }
 
 /* ===========================================================================
@@ -1259,17 +1380,12 @@ void window_center_float(HWND hwnd) {
     want.right  = want.left + w;
     want.bottom = want.top  + h;
 
+    /* Recorded as ours by window_apply_rect — but only if it actually took, so
+     * the drift detector reads the LOCATIONCHANGE this causes as an echo rather
+     * than as the app moving itself. */
     events_suppress_begin();
-    RECT adj = window_adjust_for_frame(hwnd, want);
-    window_set_pos(hwnd, adj.left, adj.top, adj.right - adj.left,
-                   adj.bottom - adj.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    window_apply_rect(mw, want, SWP_NOZORDER | SWP_NOACTIVATE);
     events_suppress_end();
-
-    /* Recorded as ours, like every other placement, so the drift detector reads
-     * the LOCATIONCHANGE this causes as an echo rather than as the app moving
-     * itself. */
-    mw->applied_rect = want;
-    mw->has_applied  = true;
 }
 
 /* ===========================================================================
@@ -1293,15 +1409,10 @@ void window_park_over_monitor(HWND hwnd) {
      * it out of that state first. */
     if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
 
-    RECT adj = window_adjust_for_frame(hwnd, want);
-    window_set_pos(hwnd, adj.left, adj.top,
-                   adj.right - adj.left, adj.bottom - adj.top,
-                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    window_apply_rect(mw, want,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     events_suppress_end();
-
-    mw->applied_rect = want;
-    mw->has_applied  = true;
 }
 
 /* Rule-driven variant: only for a floating window whose rule asked for it, so
@@ -1340,18 +1451,14 @@ bool window_covers_monitor(HWND hwnd) {
 static void fs_restore_floating(ManagedWindow *mw) {
     if (!mw || !mw->is_floating || !mw->fs_has_prev || !IsWindow(mw->hwnd)) return;
 
-    RECT p   = mw->fs_prev_rect;
-    RECT adj = window_adjust_for_frame(mw->hwnd, p);
+    RECT p = mw->fs_prev_rect;
 
     events_suppress_begin();
-    SetWindowPos(mw->hwnd, NULL, adj.left, adj.top,
-                 adj.right - adj.left, adj.bottom - adj.top,
-                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    window_apply_rect(mw, p,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     events_suppress_end();
 
-    mw->fs_has_prev  = false;
-    mw->applied_rect = p;
-    mw->has_applied  = true;
+    mw->fs_has_prev = false;
 }
 
 /* ===========================================================================
@@ -1657,6 +1764,12 @@ void window_set_floating(HWND hwnd, bool floating) {
      * tiled rect so re-tiling actually repositions it instead of assuming it's
      * still parked where we left it. */
     mw->has_applied = false;
+
+    /* The refusal record belongs to the arrangement it happened in. A float
+     * whose centring was refused must not carry that forward and rob itself of
+     * the "cannot be tiled, so float it" answer when it is next put in the
+     * grid — that answer is exactly what this transition may need. */
+    mw->place_refused = false;
 
     /* A floating window is not in the layout, so it cannot be layout-hidden.
      * Saying so here is not tidiness: the tiler skips floating windows on BOTH
