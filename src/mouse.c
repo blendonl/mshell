@@ -91,13 +91,7 @@ void mouse_mod_drag_apply(int dx, int dy) {
         want.top  += dy; want.bottom += dy;
     }
 
-    RECT adj = window_adjust_for_frame(mw->hwnd, want);
-    window_set_pos(mw->hwnd, adj.left, adj.top,
-                   adj.right - adj.left, adj.bottom - adj.top,
-                   SWP_NOZORDER | SWP_NOACTIVATE);
-
-    mw->applied_rect = want;
-    mw->has_applied  = true;
+    window_apply_rect(mw, want, SWP_NOZORDER | SWP_NOACTIVATE);
     border_refresh();   /* the ring follows the dragged/resized window */
 }
 

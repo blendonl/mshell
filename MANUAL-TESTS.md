@@ -98,6 +98,39 @@ From a normal terminal, with mshell running:
   `%LOCALAPPDATA%\mshell\mshell.log` is **not** truncated.
 - **Mouse**: drag a tiled window onto another — they swap. Drag it onto empty
   space — it snaps back. Drag a floating window — it moves normally.
+
+## Floating windows
+
+- **A float remembers which display it is on.** Drag a floating window to your
+  second monitor *with the mouse* (both a title-bar drag and a Mod+drag), then
+  press the fullscreen key. It fills the display it is **on**, not the one it
+  opened on. Same check with `Win+f`-toggling it and with the centring that
+  follows — none of them should send it back to the first monitor. The keyboard
+  move keys were the only path that used to update this.
+- **A float survives losing its display.** Put two or three floats on a second
+  monitor, then unplug it (or disable it in display settings). They reappear on
+  the primary work area, fully on screen, and **not stacked on top of each
+  other** — each is moved the least distance that gets it back. Plug the
+  display back in and they return to it.
+- **A `geometry` rule cannot strand a window.** Give a rule
+  `geometry = { x = 9000, y = 9000, w = 800, h = 600 }` with no display there
+  and open that app: the window lands on screen anyway, and the log says it was
+  rescued.
+- **Tracked windows are not floats.** With `float_on_top` on (the default),
+  open an app that shows a small owned dialog or a window below `min_win_w` —
+  the kind mshell only tracks. It must **not** sit above every other window,
+  and it keeps the ordinary focus ring colour rather than the floating one.
+- **A fullscreen float remembers the right rect.** Float a window, fullscreen
+  it, leave fullscreen — it returns to where it was. Then: float → fullscreen →
+  `Win+f` to tile → `Win+f` to float again → fullscreen → leave fullscreen. It
+  returns to the rect it had *this* time round, not one from before it was
+  tiled.
+- **Fullscreen survives the float toggle.** Fullscreen a **tiled** window with
+  the keybinding, then `Win+f`. It stays covering the monitor instead of
+  sitting at the tile it no longer owns. Leaving fullscreen then gives it a
+  sensible size back.
+- **`start_fullscreen` works on a float.** A rule with
+  `float = true, start_fullscreen = true` opens covering the monitor.
 - **Crash**: not easily forced, but if mshell ever does die, check that windows
   on other desktops are visible afterwards.
 
@@ -112,6 +145,25 @@ From a normal terminal, with mshell running:
 - `%TEMP%\mshelld.log` records the connection.
 - Kill `mshelld.exe` while mshell runs: mshell keeps working, and elevated
   windows go back to floating rather than mshell hanging or crashing.
+- **Suspend it rather than killing it** — this is the case a kill does not
+  cover, and the one that used to hang the shell outright. Get its PID from
+  `%TEMP%\mshelld.log` or Task Manager and suspend the process (Process
+  Explorer, or `pssuspend`), then press a layout key. mshell must stay
+  responsive: keybinds keep working, windows keep tiling, and the log shows the
+  250 ms timeout followed once by the breaker message. Resume the process and
+  placements start going through it again within a few seconds, with no reload.
+- **Open Task Manager as the *first* window on a desktop**, with no helper
+  running, then press a layout key. Everything *else* on that desktop tiles;
+  only Task Manager is left alone, and the log says it was floated because it
+  could not be placed. (Before, one such window failed the whole batch and
+  nothing on the desktop moved at all, silently.)
+- **Hide and re-show an elevated Chromium window** — an Edge or Chrome window
+  started with "Run as administrator" — by switching desktops away and back
+  with the helper running. It comes back painted, not blank or offset.
+- **A second signed-in user cannot reach your helper.** With fast user
+  switching, sign in as another account and confirm it cannot open
+  `\\.\pipe\mshelld-<your session id>`. The helper's log names the SID it
+  granted the pipe to, which should be yours.
 - Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
   each other with a logged protocol-version message.
 

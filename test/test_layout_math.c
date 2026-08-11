@@ -142,5 +142,68 @@ int main(void) {
     CHECK(center_axis(50, -10, 100) == 50, "negative span gave %d, expected 50",
           center_axis(50, -10, 100));
 
+    /* ---- clamp_axis: putting a window back where it can be reached ----
+     * The recovery counterpart of center_axis. A window already inside must not
+     * be nudged at all — this runs on every display change, and a rescue that
+     * moves windows nobody asked it to move is worse than the stranding it is
+     * meant to fix. */
+    CHECK(clamp_axis(0, 1920, 400, 800) == 400,
+          "already inside moved to %d, expected 400",
+          clamp_axis(0, 1920, 400, 800));
+    CHECK(clamp_axis(0, 1920, 0, 1920) == 0,
+          "exactly filling the span moved to %d, expected 0",
+          clamp_axis(0, 1920, 0, 1920));
+    CHECK(clamp_axis(0, 1920, 1120, 800) == 1120,
+          "flush against the far edge moved to %d, expected 1120",
+          clamp_axis(0, 1920, 1120, 800));
+
+    /* Off each end: moved the least distance that gets it fully back in. */
+    CHECK(clamp_axis(0, 1920, -500, 800) == 0,
+          "off the near edge gave %d, expected 0",
+          clamp_axis(0, 1920, -500, 800));
+    CHECK(clamp_axis(0, 1920, 5920, 800) == 1120,
+          "off the far edge gave %d, expected 1120",
+          clamp_axis(0, 1920, 5920, 800));
+
+    /* The case this exists for: a window stashed 4000px clear of the desktop,
+     * or left on a monitor that has been unplugged. */
+    CHECK(clamp_axis(0, 1920, 25920, 1280) == 640,
+          "a stashed window came back to %d, expected 640",
+          clamp_axis(0, 1920, 25920, 1280));
+
+    /* A monitor that is not at the origin — the second display, and one to the
+     * left of the primary, where the coordinates go negative. */
+    CHECK(clamp_axis(1920, 1920, 100, 800) == 1920,
+          "second monitor gave %d, expected 1920",
+          clamp_axis(1920, 1920, 100, 800));
+    CHECK(clamp_axis(-1080, 1080, -5000, 500) == -1080,
+          "monitor left of the primary gave %d, expected -1080",
+          clamp_axis(-1080, 1080, -5000, 500));
+
+    /* Too big to fit is pinned to the origin, like center_axis — never centred
+     * off the near edge, and never left hanging off the far one. */
+    CHECK(clamp_axis(0, 1920, -500, 2400) == 0,
+          "oversized gave %d, expected 0", clamp_axis(0, 1920, -500, 2400));
+    CHECK(clamp_axis(50, 0, 900, 0) == 50, "empty span gave %d, expected 50",
+          clamp_axis(50, 0, 900, 0));
+    CHECK(clamp_axis(50, -10, 900, 100) == 50,
+          "negative span gave %d, expected 50", clamp_axis(50, -10, 900, 100));
+
+    /* The property clamping actually promises: wherever the box started, it
+     * ends up fully inside the span, and it never moves when it need not. */
+    for (int span = 1; span <= 200; span++) {
+        for (int size = 0; size <= span; size++) {
+            for (int pos = -250; pos <= 450; pos += 7) {
+                int x = clamp_axis(100, span, pos, size);
+                CHECK(x >= 100 && x + size <= 100 + span,
+                      "span %d size %d pos %d escaped to %d", span, size,
+                      pos, x);
+                if (pos >= 100 && pos + size <= 100 + span)
+                    CHECK(x == pos, "span %d size %d pos %d was already inside "
+                          "but moved to %d", span, size, pos, x);
+            }
+        }
+    }
+
     return tests_report("layout_math");
 }
