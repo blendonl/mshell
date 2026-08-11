@@ -71,6 +71,20 @@ mshell.rule({ process = "consent.exe"            }, "float")
 mshell.rule({ process = "CredentialUIBroker.exe" }, "float")
 
 ----------------------------------------------------------------------
+-- Sub-maps
+----------------------------------------------------------------------
+-- Bar sub-map (one-shot): switch bar mode then back to root.
+mshell.submap("bar", {
+    t = "bar_top",       -- top-bar strip on every monitor
+    f = "bar_floating",  -- floating panel in the centre
+})
+
+-- Extra sub-map (one-shot): Win+x opens it, then pick a category.
+mshell.submap("extra", {
+    b = {"enter_submap", "bar"},   -- bar mode: Win+x b t / Win+x b f
+})
+
+----------------------------------------------------------------------
 -- Keybindings — hold Win and press a key
 ----------------------------------------------------------------------
 -- focus / move, vim keys
@@ -108,6 +122,7 @@ mshell.bind({mod}, "Space", "cycle_layout")
 mshell.bind({mod}, "f",     "toggle_float")
 mshell.bind({mod}, "Return","promote_master")
 mshell.bind({mod}, "b",     "toggle_bar")   -- hide/show the status bar
+mshell.bind({mod}, "x",     "enter_submap", "extra")  -- Win+x b t/f: bar mode
 
 -- master area: ratio (Ctrl+h/l), count (Ctrl+j/k)
 mshell.bind({mod, ctrl}, "h", "dec_master")
