@@ -5,6 +5,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.9 — 2026-08-11
+
+- fix: hide a window by sinking it under the backdrop, not by removing it
+
 ## 0.14.8 — 2026-08-11
 
 ### Fixed
