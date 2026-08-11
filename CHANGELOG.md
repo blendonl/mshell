@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.2 — 2026-08-11
+
 ### Added
 
 - **`bar_top` / `bar_floating` actions — switch the bar between modes at
