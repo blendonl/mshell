@@ -140,6 +140,10 @@ local kovaaks = "steam://rungameid/824270"
 mshell.set_gaps(6, 6)               -- inner gap (between windows), outer gap (screen edge)
 -- mshell.set_smart_gaps(true)      -- drop gaps when a monitor has a single window
 mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
+-- mshell.set_smart_borders(true)   -- hide the ring when a monitor shows a single
+                                    -- window: nothing to tell apart, so nothing to
+                                    -- point at. Counts floats too, and monocle
+                                    -- (which shows one window) counts as one.
 mshell.set_background(0x000000)     -- solid desktop backdrop color
 mshell.set_master_ratio(0.60)
 

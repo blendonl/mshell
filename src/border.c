@@ -55,6 +55,41 @@ void border_hide(void) {
     if (g.border_window) ShowWindow(g.border_window, SW_HIDE);
 }
 
+/* ===========================================================================
+ * Smart borders — how many windows can you actually SEE on `mon` right now?
+ *
+ * Counted over the current desktop's window list, the same list the tiler
+ * walks, so a window on another desktop or another display never keeps the
+ * ring alive. Anything off the screen is skipped whichever way it went away:
+ * the app hid itself (app_hidden), mshell hid it for a desktop switch or a
+ * stowed scratchpad (wm_hidden, which covers cloaked/sunk/stashed), the layout
+ * held it back (layout_hidden — monocle shows one window, and that is exactly
+ * the case with nothing to disambiguate), or the user minimized it.
+ *
+ * Floats and tracked windows COUNT: they are windows you can see, and picking
+ * the focused one out of a float sitting over a lone tile is the ring's job.
+ *
+ * Stops at 2 — "more than one" is all the caller ever asks.
+ * =========================================================================== */
+static int monitor_visible_count(int mon) {
+    Desktop *dt = desktop_current();
+    if (!dt) return 0;
+
+    int n = 0;
+    for (int i = 0; i < dt->count && n < 2; i++) {
+        ManagedWindow *mw = window_find(dt->windows[i]);
+        if (!mw) continue;
+        if (mw->app_hidden || mw->wm_hidden || mw->layout_hidden) continue;
+        if (IsIconic(dt->windows[i])) continue;
+
+        int wmon = mw->monitor;
+        if (wmon < 0 || wmon >= g.monitor_count) wmon = 0;   /* defensive */
+        if (wmon != mon) continue;
+        n++;
+    }
+    return n;
+}
+
 /* Draw the ring around the currently focused window (if any). */
 void border_refresh(void) {
     /* The dim scrim is placed relative to the focused window, so it moves at
@@ -77,6 +112,18 @@ void border_refresh(void) {
          * display. A FS_CONTENT window keeps its tile, and keeps its ring. */
         border_hide();
         return;
+    }
+
+    /* Smart borders: nothing to point at when the focused window is the only
+     * thing on its display. Needs a ManagedWindow to know WHICH display that
+     * is — an unmanaged focused window keeps its ring, as it always did. */
+    if (g.smart_borders && fmw) {
+        int mon = fmw->monitor;
+        if (mon < 0 || mon >= g.monitor_count) mon = 0;
+        if (monitor_visible_count(mon) <= 1) {
+            border_hide();
+            return;
+        }
     }
 
     RECT r;

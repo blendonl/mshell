@@ -411,6 +411,13 @@ below asks for two keys held at once, and any sequence can be abandoned with
   changes colour when the focused window is floating.
 - `set_border{ corners = "round" }` rounds managed windows' corners; `"square"`
   is the default.
+- `set_smart_borders(true)` — with one window on a monitor there is no ring.
+  Open a second: the ring appears on the focused one. Close it: the ring goes
+  again. Repeat with the second window **floating** (it counts, so the ring
+  stays), and on a second monitor holding its own single window (counted per
+  monitor, so that one has no ring either). In `monocle` only one window is on
+  screen, so no ring — expected. Minimising the second window is the same as
+  closing it as far as the ring is concerned.
 - With `set_urgency(true)`, make a background app flash for attention (a chat
   mention works): its ring turns the urgent colour and `jump_urgent` goes to it,
   switching desktops if needed. Focusing it clears the flag. With urgency off

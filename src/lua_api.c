@@ -516,6 +516,15 @@ static int lua_mshell_set_smart_gaps(lua_State *L) {
     return 0;
 }
 
+/* mshell.set_smart_borders(enabled) — hide the focus ring when a monitor shows
+ * a single window. Counted per monitor, over everything visible there (floats
+ * included), because the ring exists to say which of several windows is
+ * focused and one window is not several. */
+static int lua_mshell_set_smart_borders(lua_State *L) {
+    g.smart_borders = lua_toboolean(L, 1);
+    return 0;
+}
+
 /* ===========================================================================
  * mshell.block_system_keys(enabled)
  *   true  (default) — swallow Alt+Tab, Alt+Esc, Alt+Space, Ctrl+Esc.
@@ -2190,6 +2199,7 @@ void lua_register_api(lua_State *L) {
         {"set_leader",      lua_mshell_set_leader},
         {"set_gaps",        lua_mshell_set_gaps},
         {"set_smart_gaps",  lua_mshell_set_smart_gaps},
+        {"set_smart_borders", lua_mshell_set_smart_borders},
         {"set_border",      lua_mshell_set_border},
         {"set_background",  lua_mshell_set_background},
                 {"set_bar",         lua_mshell_set_bar},
