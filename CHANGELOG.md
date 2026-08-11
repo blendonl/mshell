@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.1 — 2026-08-11
+
 ### Fixed
 
 - **A desktop and its windows can no longer disagree about who is on it.** Every
