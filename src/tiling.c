@@ -26,7 +26,12 @@
  * Placement buffer — one target rect per tiled window, filled by the layout
  * functions and drained by flush_placements().
  * =========================================================================== */
-typedef struct { HWND hwnd; RECT rect; } Placement;
+/* `flags` is filled in by flush_placements rather than by the layouts: it
+ * depends on what the WINDOW needs (a fresh reveal wants SWP_NOCOPYBITS), not
+ * on where the layout decided to put it. It is stored per placement so a batch
+ * that has to be replayed individually replays with the same flags it was
+ * queued with. */
+typedef struct { HWND hwnd; RECT rect; UINT flags; } Placement;
 static Placement s_place[MAX_WINDOWS_PER_DESKTOP];
 static int       s_place_n;
 static int       s_inner;   /* inner gap in effect for the monitor being tiled */
@@ -46,8 +51,9 @@ static void emit(HWND hwnd, RECT cell) {
     RECT r = inset_rect(cell, s_inner / 2);
     if (r.right  - r.left < 20) r.right  = r.left + 20;
     if (r.bottom - r.top  < 20) r.bottom = r.top  + 20;
-    s_place[s_place_n].hwnd = hwnd;
-    s_place[s_place_n].rect = r;
+    s_place[s_place_n].hwnd  = hwnd;
+    s_place[s_place_n].rect  = r;
+    s_place[s_place_n].flags = 0;   /* flush_placements decides these */
     s_place_n++;
 }
 
@@ -62,8 +68,9 @@ static void tree_emit_cb(HWND hwnd, RECT area, void *ctx) {
 
 static void emit_raw(HWND hwnd, RECT rect) {
     if (!hwnd || s_place_n >= MAX_WINDOWS_PER_DESKTOP) return;
-    s_place[s_place_n].hwnd = hwnd;
-    s_place[s_place_n].rect = rect;
+    s_place[s_place_n].hwnd  = hwnd;
+    s_place[s_place_n].rect  = rect;
+    s_place[s_place_n].flags = 0;   /* flush_placements decides these */
     s_place_n++;
 }
 
@@ -417,6 +424,20 @@ static bool rect_eq(RECT a, RECT b) {
            a.right == b.right && a.bottom == b.bottom;
 }
 
+/* Place one window outside the batch, recording the outcome when there is a
+ * ManagedWindow to record it on. Everything in the placement buffer normally
+ * has one — the layouts only ever emit windows collect_clients found — but the
+ * buffer is keyed by HWND, so this stays honest if that ever stops being true.
+ */
+static void place_one(HWND hwnd, RECT want, UINT flags) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (mw) { window_apply_rect(mw, want, flags); return; }
+
+    RECT adj = window_adjust_for_frame(hwnd, want);
+    window_set_pos(hwnd, adj.left, adj.top, adj.right - adj.left,
+                   adj.bottom - adj.top, flags);
+}
+
 /* Apply the whole placement buffer in one deferred batch. */
 static void flush_placements(void) {
     if (s_place_n <= 0) return;
@@ -440,6 +461,17 @@ static void flush_placements(void) {
      * tile again this pass ends up shown, not hidden. */
     for (int i = 0; i < s_place_n; i++)
         window_show(window_find(s_place[i].hwnd));
+
+    /* Which placements went into the deferred batch, so they can be recorded
+     * once it commits — or replayed one at a time if it does not. Recording
+     * while QUEUEING was the bug: DeferWindowPos only queues, EndDeferWindowPos
+     * is what moves anything, and a batch containing one window we are not
+     * allowed to move fails as a whole. Every window on the desktop then stayed
+     * exactly where it was while its ManagedWindow claimed the new rect — after
+     * which the no-op skip below matched that claim forever and the layout
+     * never recovered. */
+    int batched[MAX_WINDOWS_PER_DESKTOP];
+    int batched_n = 0;
 
     HDWP hdwp = BeginDeferWindowPos(s_place_n);
 
@@ -483,9 +515,6 @@ static void flush_placements(void) {
          * that path: batching it would fail the batch for everything else. */
         bool mw_needs_helper = mw && mw->needs_helper;
 
-        RECT adj = window_adjust_for_frame(hwnd, want);
-        int x = adj.left, y = adj.top;
-        int w = adj.right - adj.left, h = adj.bottom - adj.top;
         UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
 
         /* Freshly revealed: forbid Windows from blitting the client area's
@@ -500,19 +529,58 @@ static void flush_placements(void) {
 
         /* Windows owned by a higher-integrity process cannot go through our
          * DeferWindowPos batch — the whole batch would fail — so they take the
-         * individual path, which falls back to the privileged helper. */
+         * individual path, which falls back to the privileged helper and
+         * records the outcome honestly. A window with no ManagedWindow has
+         * nothing to record either way, so it may as well ride the batch. */
         if (hdwp && !mw_needs_helper) {
-            HDWP next = DeferWindowPos(hdwp, hwnd, NULL, x, y, w, h, flags);
-            if (next) hdwp = next;
-            else      window_set_pos(hwnd, x, y, w, h, flags);
-        } else {
-            window_set_pos(hwnd, x, y, w, h, flags);
+            RECT adj = window_adjust_for_frame(hwnd, want);
+            HDWP next = DeferWindowPos(hdwp, hwnd, NULL, adj.left, adj.top,
+                                       adj.right - adj.left,
+                                       adj.bottom - adj.top, flags);
+            if (next) {
+                hdwp = next;
+                s_place[i].flags = flags;
+                batched[batched_n++] = i;
+                continue;
+            }
+            /* Queueing itself failed — place it directly instead. */
         }
 
-        if (mw) { mw->applied_rect = want; mw->has_applied = true; }
+        place_one(hwnd, want, flags);
     }
 
-    if (hdwp) EndDeferWindowPos(hdwp);
+    if (!hdwp) return;
+
+    if (EndDeferWindowPos(hdwp)) {
+        /* Committed: every queued window really is where it was put. */
+        for (int b = 0; b < batched_n; b++) {
+            ManagedWindow *mw = window_find(s_place[batched[b]].hwnd);
+            if (!mw) continue;
+            mw->applied_rect  = s_place[batched[b]].rect;
+            mw->has_applied   = true;
+            mw->place_refused = false;
+        }
+        return;
+    }
+
+    /* The batch was refused, so NOTHING in it moved. Replay it one window at a
+     * time: window_apply_rect places what it can, falls back to the helper for
+     * what it cannot, records only what actually happened, and — the part that
+     * makes this self-correcting — sets needs_helper on the window that caused
+     * this, so the next pass keeps it out of the batch and the other windows
+     * are never held hostage to it again.
+     *
+     * This is why no up-front "is this window elevated?" probe is needed. That
+     * would mean opening a process per window on the busiest path in the
+     * program to answer a question the failing call answers for free. */
+    log_msg(LOG_WARN, L"tiling: EndDeferWindowPos refused the batch (%lu) — "
+                      L"placing %d window(s) individually",
+            GetLastError(), batched_n);
+
+    for (int b = 0; b < batched_n; b++) {
+        Placement *p = &s_place[batched[b]];
+        place_one(p->hwnd, p->rect, p->flags);
+    }
 }
 
 /* ===========================================================================
