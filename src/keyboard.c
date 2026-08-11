@@ -1258,8 +1258,27 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_MARK_SCRATCHPAD: {
         ManagedWindow *mw = window_find(focus);
         if (!mw) break;
-        /* Only one at a time — a second mark moves the role. */
-        for (int i = 0; i < g.managed_count; i++) g.managed[i].scratchpad = false;
+        /* Only one at a time — a second mark moves the role.
+         *
+         * Give the outgoing scratchpad its visibility back on the way out. It
+         * may be STOWED, and user_hidden is honoured by the desktop-switch show
+         * loop precisely so that nothing reveals it by accident — so a window
+         * that loses the role while stowed would have nothing left that could
+         * ever show it: toggle_scratchpad now points at a different window. */
+        for (int i = 0; i < g.managed_count; i++) {
+            ManagedWindow *old = &g.managed[i];
+            if (!old->scratchpad) continue;
+            old->scratchpad = false;
+            if (!old->user_hidden) continue;
+            old->user_hidden = false;
+            /* Only if you would be able to see it: on another desktop the flag
+             * is enough, and that desktop's next switch-in does the rest. */
+            if (old->desktop_id == g.current_desktop_id) {
+                events_suppress_begin();
+                window_show(old);
+                events_suppress_end();
+            }
+        }
         mw->scratchpad  = true;
         mw->is_floating = true;   /* it overlays, it does not join the grid */
         window_set_floating(focus, true);
@@ -1283,14 +1302,34 @@ void execute_action(Action action, int arg, const wchar_t *command,
         bool here    = (sp->desktop_id == g.current_desktop_id);
         bool showing = here && window_on_screen(sp);
 
+        if (!showing) {
+            /* Summon it onto the desktop you are looking at, rather than
+             * making you go to where it happens to live.
+             *
+             * Through desktop_move_window, not by assigning desktop_id: that
+             * is the half of the move that unlinks the window from the desktop
+             * it was on. Setting the id alone left it in the old desktop's
+             * windows[] for good — closing it there never unlinked it, so that
+             * desktop kept a dead handle, never emptied and never went away.
+             *
+             * A no-op when the scratchpad already lives here, and it refuses
+             * (leaving the window where it is) if this desktop is full. */
+            desktop_move_window(sp->hwnd, desktop_current()->name);
+            /* Nothing in that call touches g.managed[], but re-resolve anyway:
+             * `sp` outlives a function that rearranges desktops. */
+            sp = window_find(sp->hwnd);
+            if (!sp) break;
+        }
+
         events_suppress_begin();
         if (showing) {
             window_hide(sp);
+            /* Stowed by the USER, so the desktop-switch show loop must leave
+             * it stowed — see user_hidden in mshell.h. */
+            sp->user_hidden = true;
         } else {
-            /* Summon it onto the desktop you are looking at, rather than
-             * making you go to where it happens to live. */
-            sp->desktop_id = g.current_desktop_id;
-            sp->app_hidden = false;
+            sp->user_hidden = false;
+            sp->app_hidden  = false;
             window_show(sp);
         }
         events_suppress_end();
