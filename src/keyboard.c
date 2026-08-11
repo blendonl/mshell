@@ -956,13 +956,7 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     }
 
     RECT want = { x, y, x + w, y + h };
-    RECT adj  = window_adjust_for_frame(mw->hwnd, want);
-    window_set_pos(mw->hwnd, adj.left, adj.top,
-                   adj.right - adj.left, adj.bottom - adj.top,
-                   SWP_NOZORDER | SWP_NOACTIVATE);
-
-    mw->applied_rect = want;
-    mw->has_applied  = true;
+    window_apply_rect(mw, want, SWP_NOZORDER | SWP_NOACTIVATE);
     window_set_monitor(mw, monitor_of_window(mw->hwnd));
     border_refresh();
 }
