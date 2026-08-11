@@ -349,6 +349,10 @@ typedef enum {
      * the way for a moment is the normal case. */
     ACTION_TOGGLE_BAR,
 
+    /* Switch the bar between its two modes without toggling visibility. */
+    ACTION_BAR_TOP,
+    ACTION_BAR_FLOATING,
+
     /* The physical display, on the focused monitor. Bindable because these are
      * the two display settings people change per task rather than once — HDR
      * only while a game is up, a lower refresh rate on battery — and with no
@@ -1805,6 +1809,10 @@ void     bar_refresh(void);
 /* Show/hide the bar at runtime (the toggle_bar action), re-measuring the work
  * area and re-tiling so a hidden top_bar gives its strip back. */
 void     bar_toggle(void);
+
+/* Switch the bar between top_bar and floating at runtime (bar_top / bar_floating
+ * actions). Enables the bar if it was hidden. */
+void     bar_set_mode(BarMode mode);
 
 /* True when the floating panel is the surface notifications appear on, in
  * which case notify.c does not raise its own toasts. */
