@@ -20,29 +20,20 @@
 
 #include "mshell.h"
 
+/* Defined with the rest of the focus bookkeeping at the bottom; needed by the
+ * sticky loop and the move path, both of which land a window on a desktop. */
+static void desktop_focus_hist_push(Desktop *dt, HWND hwnd);
+
 /* ===========================================================================
  * Names
  *
- * Case-insensitive (so `switch_desktop "Web"` and "web" are one desktop), and
- * the first spelling to create the desktop is the one that gets displayed.
+ * What a usable name is, when two names mean the same desktop, and how the set
+ * is ordered all live in desktop_list.c — pure, and covered by `make test`.
+ * This wrapper exists only to bind the length limit, so no caller has to
+ * remember it.
  * =========================================================================== */
 bool desktop_name_ok(const wchar_t *name) {
-    if (!name || !name[0]) return false;
-    if (wcslen(name) >= DESKTOP_NAME_MAX) return false;
-    /* Whitespace would make a name impossible to tell apart in a log line, and
-     * is never what the config meant. */
-    for (const wchar_t *p = name; *p; p++)
-        if (iswspace(*p)) return false;
-    return true;
-}
-
-/* A name made only of digits sorts as the number it spells (see below). */
-static bool name_is_number(const wchar_t *name, long *out) {
-    wchar_t *end = NULL;
-    long     v   = wcstol(name, &end, 10);
-    if (!end || end == name || *end != L'\0' || v < 0) return false;
-    if (out) *out = v;
-    return true;
+    return desktop_list_name_ok(name, DESKTOP_NAME_MAX);
 }
 
 /* ===========================================================================
@@ -51,7 +42,7 @@ static bool name_is_number(const wchar_t *name, long *out) {
 int desktop_slot_by_name(const wchar_t *name) {
     if (!name || !name[0]) return -1;
     for (int i = 0; i < g.desktop_count; i++)
-        if (_wcsicmp(g.desktops[i].name, name) == 0) return i;
+        if (desktop_name_eq(g.desktops[i].name, name)) return i;
     return -1;
 }
 
@@ -122,7 +113,19 @@ static void desktop_resolve_monitor(Desktop *dt) {
 
     for (int i = 0; i < dt->count; i++) {
         ManagedWindow *mw = window_find(dt->windows[i]);
-        if (mw) window_set_monitor(mw, dt->monitor);
+        if (!mw) continue;
+        if (!window_set_monitor(mw, dt->monitor)) continue;  /* already there */
+
+        /* window_set_monitor only RECORDS the display and drops has_applied;
+         * the next tiling pass is what turns that into a window that moved.
+         * The tiler skips floats, so for those nothing downstream would ever
+         * act on it and "every window on the desktop moves too" was false —
+         * the float stayed on the old display while its record said otherwise.
+         *
+         * Clamped, not centred, and for the reason window_rescue_offscreen
+         * gives: a pin can move several floats at once, and centring would
+         * stack every one of them in the same spot. */
+        if (mw->is_floating) window_clamp_into_monitor(mw, dt->monitor);
     }
 }
 
@@ -187,21 +190,12 @@ void desktop_apply_rules(int slot) {
  * you, "the next one" has to mean the same thing every time, and creation
  * order does not survive a desktop being destroyed and re-created.
  * =========================================================================== */
-static int desktop_sort_cmp(const Desktop *a, const Desktop *b) {
-    long na, nb;
-    bool ia = name_is_number(a->name, &na);
-    bool ib = name_is_number(b->name, &nb);
-
-    if (ia && ib) return (na < nb) ? -1 : (na > nb) ? 1 : 0;
-    if (ia != ib) return ia ? -1 : 1;          /* numbers before words */
-    return _wcsicmp(a->name, b->name);
-}
-
 /* Bubble the desktop at `slot` to where the order says it belongs. Only ever
- * called right after an insert at the end, so one pass is enough. */
+ * called right after an insert at the end, so one pass is enough. The ordering
+ * itself is desktop_name_cmp, in desktop_list.c, where `make test` covers it. */
 static int desktop_sort_in(int slot) {
-    while (slot > 0 && desktop_sort_cmp(&g.desktops[slot - 1],
-                                        &g.desktops[slot]) > 0) {
+    while (slot > 0 && desktop_name_cmp(g.desktops[slot - 1].name,
+                                        g.desktops[slot].name) > 0) {
         Desktop tmp          = g.desktops[slot - 1];
         g.desktops[slot - 1] = g.desktops[slot];
         g.desktops[slot]     = tmp;
@@ -350,6 +344,9 @@ void desktop_reapply(void) {
              * the find is needed for the handle either way. */
             ManagedWindow *mw = window_find(h);
             if (!mw) continue;
+            /* ...and a window the USER stowed stays stowed, for the same
+             * reason: a reload is not a request to un-stow the scratchpad. */
+            if (mw->user_hidden) continue;
             if (d == cur) window_show(mw);
             else          window_hide(mw);
         }
@@ -373,7 +370,7 @@ void desktop_switch(const wchar_t *name) {
     if (!name || !name[0]) return;
 
     Desktop *cur = desktop_current();
-    if (_wcsicmp(cur->name, name) == 0) return;   /* already there */
+    if (desktop_name_eq(cur->name, name)) return;   /* already there */
 
     /* Remember where we came from BEFORE anything can move it. Only a switch
      * that actually moves records it, which is what makes the pair a toggle:
@@ -408,24 +405,43 @@ void desktop_switch(const wchar_t *name) {
      *
      * Done before the hide loop below, so they are never hidden in the first
      * place and there is no flicker. */
-    if (old_dt && new_dt->count < MAX_WINDOWS_PER_DESKTOP) {
+    int stuck = 0;   /* sticky windows the target had no room for */
+    if (old_dt) {
         for (int i = old_dt->count - 1; i >= 0; i--) {
             HWND h = old_dt->windows[i];
             ManagedWindow *mw = window_find(h);
             if (!mw || !mw->sticky) continue;
-            if (new_dt->count >= MAX_WINDOWS_PER_DESKTOP) break;
+            if (new_dt->count >= MAX_WINDOWS_PER_DESKTOP) { stuck++; continue; }
 
             memmove(&old_dt->windows[i], &old_dt->windows[i + 1],
                     (size_t)(old_dt->count - i - 1) * sizeof(HWND));
             old_dt->count--;
-            if (old_dt->focused >= old_dt->count && old_dt->count > 0)
-                old_dt->focused = old_dt->count - 1;
+            old_dt->focused = desktop_focus_clamp(old_dt->focused,
+                                                 old_dt->count);
 
             new_dt->windows[new_dt->count++] = h;
             mw->desktop_id  = target_id;
             mw->has_applied = false;
+
+            /* The window arrived, so it belongs in the history of the desktop
+             * it arrived on — otherwise last_window cannot reach a window that
+             * followed you here. */
+            desktop_focus_hist_push(new_dt, h);
+
+            /* A pinned desktop puts its windows on one display, and a window
+             * that just joined it is one of its windows. Without this a sticky
+             * window followed you to a pinned desktop and stayed on whatever
+             * display it was already on. */
+            if (new_dt->monitor >= 0 && new_dt->monitor < g.monitor_count)
+                window_set_monitor(mw, new_dt->monitor);
         }
     }
+    /* Say so rather than letting them vanish: they stay on the desktop being
+     * left, which step 1 is about to take off the screen. */
+    if (stuck)
+        log_err(L"desktop: '%ls' is full (%d windows) — %d sticky window(s) "
+                L"could not follow you and stay on '%ls'", new_dt->name,
+                MAX_WINDOWS_PER_DESKTOP, stuck, from);
 
     /* 1. Take every window on the desktop we're leaving off the screen.
      *
@@ -442,6 +458,9 @@ void desktop_switch(const wchar_t *name) {
      *    are not ours to reveal, and switching to a desktop must not un-tray
      *    everything parked on it.
      *
+     *    — and except the ones the USER stowed (user_hidden: a scratchpad put
+     *    away with toggle_scratchpad), which is not the same thing at all.
+     *
      *    Everything else is shown unconditionally, including windows the LAYOUT
      *    was holding back (monocle's unfocused windows, the unshown side of a
      *    tabbed container). Skipping those to save an uncloak/recloak looks
@@ -449,9 +468,17 @@ void desktop_switch(const wchar_t *name) {
      *    a desktop back, so any window it declines to show is a window that
      *    stays invisible if the flag is wrong for any reason. The tile pass at
      *    step 5 hides them again in the same turn of the message loop, before
-     *    anything is composited. Correct beats clever here. */
+     *    anything is composited. Correct beats clever here.
+     *
+     *    That last argument is exactly why user_hidden has to be checked rather
+     *    than left to step 5: it holds for TILED windows, whose layout_hidden
+     *    the tiler re-decides on every pass, and the stowed scratchpad is a
+     *    FLOAT. The tiler never places floats, so nothing downstream would put
+     *    it away again — it simply reappeared every time you came back. */
     for (int i = 0; i < new_dt->count; i++) {
-        window_show(window_find(new_dt->windows[i]));
+        ManagedWindow *mw = window_find(new_dt->windows[i]);
+        if (!mw || mw->user_hidden) continue;
+        window_show(mw);
     }
 
     g.current_desktop_id = target_id;
@@ -514,7 +541,7 @@ void desktop_switch(const wchar_t *name) {
 void desktop_switch_last(void) {
     if (!g.last_desktop[0]) return;
 
-    if (_wcsicmp(g.last_desktop, desktop_current()->name) == 0) {
+    if (desktop_name_eq(g.last_desktop, desktop_current()->name)) {
         log_w(L"last_desktop: already on '%ls' — nothing to go back to",
               g.last_desktop);
         return;
@@ -553,7 +580,7 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     if (!mw) return;
 
     Desktop *old_dt = desktop_by_id(mw->desktop_id);
-    if (old_dt && _wcsicmp(old_dt->name, name) == 0) return;  /* already there */
+    if (old_dt && desktop_name_eq(old_dt->name, name)) return;  /* already there */
 
     int old_id = mw->desktop_id;
 
@@ -583,8 +610,8 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
             memmove(&old_dt->windows[i], &old_dt->windows[i + 1],
                     (size_t)(old_dt->count - i - 1) * sizeof(HWND));
             old_dt->count--;
-            if (old_dt->focused >= old_dt->count && old_dt->count > 0)
-                old_dt->focused = old_dt->count - 1;
+            old_dt->focused = desktop_focus_clamp(old_dt->focused,
+                                                 old_dt->count);
             break;
         }
     }
@@ -608,6 +635,10 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     new_dt->focused = new_dt->count;
     new_dt->count++;
     new_dt->app_pending = false;   /* no longer empty — cancel auto-launch */
+
+    /* It is the window you were last in on that desktop — you just put it
+     * there. Without this, last_window on the target could not reach it. */
+    desktop_focus_hist_push(new_dt, hwnd);
 
     mw->desktop_id  = new_id;
     mw->has_applied = false;
@@ -635,28 +666,24 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
 /* ===========================================================================
  * Add a window to a desktop
  * =========================================================================== */
-void desktop_add_window(HWND hwnd, int slot) {
-    if (slot < 0 || slot >= g.desktop_count) return;
+bool desktop_add_window(HWND hwnd, int slot) {
+    if (slot < 0 || slot >= g.desktop_count) return false;
 
     Desktop *dt = &g.desktops[slot];
-    if (dt->count >= MAX_WINDOWS_PER_DESKTOP) return;
+    if (dt->count >= MAX_WINDOWS_PER_DESKTOP) {
+        log_err(L"desktop: '%ls' already holds %d windows, which is the "
+                L"maximum — %p is not on it", dt->name,
+                MAX_WINDOWS_PER_DESKTOP, (void *)hwnd);
+        return false;
+    }
 
     /* Don't add duplicates */
     for (int i = 0; i < dt->count; i++) {
-        if (dt->windows[i] == hwnd) return;
+        if (dt->windows[i] == hwnd) return true;
     }
 
     /* Where the new window lands is governed by the attach policy. */
-    int idx;
-    switch (g.attach_policy) {
-    case ATTACH_MASTER: idx = 0; break;
-    case ATTACH_AFTER:
-        idx = (dt->focused >= 0 && dt->focused < dt->count)
-                ? dt->focused + 1 : dt->count;
-        break;
-    case ATTACH_END:
-    default:            idx = dt->count; break;
-    }
+    int idx = desktop_attach_index(g.attach_policy, dt->focused, dt->count);
 
     if (idx < dt->count)
         memmove(&dt->windows[idx + 1], &dt->windows[idx],
@@ -669,6 +696,7 @@ void desktop_add_window(HWND hwnd, int slot) {
     /* A window landed — a pending auto-launch has materialised (or a manual
      * window arrived). Either way, stop treating this desktop as "launching". */
     dt->app_pending = false;
+    return true;
 }
 
 /* ===========================================================================
@@ -690,9 +718,7 @@ void desktop_remove_window(HWND hwnd) {
                     &dt->windows[i + 1],
                     (size_t)(dt->count - i - 1) * sizeof(HWND));
             dt->count--;
-            if (dt->focused >= dt->count && dt->count > 0) {
-                dt->focused = dt->count - 1;
-            }
+            dt->focused = desktop_focus_clamp(dt->focused, dt->count);
             return;
         }
     }
@@ -706,18 +732,19 @@ void desktop_remove_window(HWND hwnd) {
 static void desktop_focus_hist_push(Desktop *dt, HWND hwnd) {
     if (dt->focus_hist_n > 0 && dt->focus_hist[0] == hwnd) return;  /* no change */
 
-    int from = dt->focus_hist_n;         /* how much of the list to shift */
+    int found = -1;
     for (int i = 0; i < dt->focus_hist_n; i++) {
-        if (dt->focus_hist[i] == hwnd) { from = i; break; }
+        if (dt->focus_hist[i] == hwnd) { found = i; break; }
     }
-    if (from >= FOCUS_HIST_MAX) from = FOCUS_HIST_MAX - 1;
+
+    /* How far to shift, and how long the list ends up — desktop_list.c, where
+     * `make test` covers the saturating case. */
+    int from = desktop_hist_shift(dt->focus_hist_n, found, FOCUS_HIST_MAX,
+                                  &dt->focus_hist_n);
 
     for (int i = from; i > 0; i--)
         dt->focus_hist[i] = dt->focus_hist[i - 1];
     dt->focus_hist[0] = hwnd;
-
-    if (dt->focus_hist_n < FOCUS_HIST_MAX && from == dt->focus_hist_n)
-        dt->focus_hist_n++;
 }
 
 /* The most recent still-live window that is not the current one. Entries are
@@ -754,18 +781,44 @@ void desktop_focus_update(HWND hwnd) {
 /* ===========================================================================
  * Get the currently focused window on the current desktop
  * =========================================================================== */
+/* Can this window be handed the keyboard right now?
+ *
+ * "Alive" is not enough, because the answer is fed straight to window_focus(),
+ * which RESTORES an iconic window (SW_RESTORE) and, when SetForegroundWindow is
+ * refused, falls back to SwitchToThisWindow — which un-hides. So naming a
+ * minimised or trayed window here does not merely focus something invisible: it
+ * drags it back onto the screen. That is what made a desktop switch un-minimise
+ * the window you left minimised and un-tray the one the app had trayed, undoing
+ * the whole point of app_hidden.
+ *
+ * IsIconic rather than a flag, matching collect_clients: it is authoritative
+ * even if a minimize event was missed. */
+static bool desktop_focusable(HWND h) {
+    if (!h || !IsWindow(h)) return false;
+    const ManagedWindow *mw = window_find(h);
+    if (mw && (mw->app_hidden || mw->user_hidden)) return false;
+    return !IsIconic(h);
+}
+
 HWND desktop_get_focused(void) {
     Desktop *dt = desktop_current();
     if (dt->count == 0) return NULL;
 
     if (dt->focused >= 0 && dt->focused < dt->count) {
         HWND h = dt->windows[dt->focused];
-        if (h && IsWindow(h)) return h;
+        if (desktop_focusable(h)) return h;
     }
 
-    /* Focused window is gone — find any valid window */
+    /* The remembered window is gone, minimised or away in the tray — hand the
+     * keyboard to a sibling that is actually on screen.
+     *
+     * dt->focused moves with it, and has to: execute_action reads this function
+     * and then dt->focused, and a keybinding that computes its target from a
+     * different window than the one it was told is focused walks from the wrong
+     * place. Getting back to a minimised window is ACTION_RESTORE's job — it
+     * scans windows[] itself and is deliberately not filtered by any of this. */
     for (int i = 0; i < dt->count; i++) {
-        if (dt->windows[i] && IsWindow(dt->windows[i])) {
+        if (desktop_focusable(dt->windows[i])) {
             dt->focused = i;
             return dt->windows[i];
         }
