@@ -1106,12 +1106,32 @@ void window_manage(HWND hwnd) {
                                L"name is unusable or there are too many "
                                L"desktops", rule->desktop);
     }
-    Desktop *dt = &g.desktops[slot];
+    /* Refuse a full desktop BEFORE adopting, the same way desktop_move_window
+     * refuses one before dismantling anything.
+     *
+     * desktop_add_window is at the far end of this function, and its failure
+     * used to be silent: the window was already managed, already carried this
+     * desktop's id, and was hidden below if the desktop was not the current
+     * one — but it was in no desktop's windows[], so the show loop that brings
+     * a desktop back never saw it. Under a shell with no taskbar that is a
+     * window gone for good. Not adopting it at all leaves it an ordinary
+     * untiled window the user can still reach. */
+    if (g.desktops[slot].count >= MAX_WINDOWS_PER_DESKTOP) {
+        log_err(L"desktop: '%ls' already holds %d windows, which is the "
+                L"maximum — leaving %p unmanaged", g.desktops[slot].name,
+                MAX_WINDOWS_PER_DESKTOP, (void *)hwnd);
+        return;
+    }
+
+    /* The ID, not the slot: g.desktops is re-sorted on every insert, so a
+     * pointer into it is only good until the next create or destroy — and this
+     * function runs a long way before it is finished with the desktop. */
+    int desk_id = g.desktops[slot].id;
 
     ManagedWindow *mw = &g.managed[g.managed_count++];
     memset(mw, 0, sizeof(*mw));
     mw->hwnd       = hwnd;
-    mw->desktop_id = dt->id;
+    mw->desktop_id = desk_id;
     mw->cfact      = 1.0f;
 
     if (tier == ADOPT_TRACK) {
@@ -1135,9 +1155,10 @@ void window_manage(HWND hwnd) {
              * there, so honouring a per-window pin against it would just be
              * undone on the next reload. Otherwise the rule's pin, then
              * wherever it opened. */
+            const Desktop *dt = desktop_by_id(desk_id);
             int mon = monitor_of_window(hwnd);
             if (rule && rule->set_monitor) mon = rule->monitor;
-            if (dt->monitor >= 0 && dt->monitor < g.monitor_count)
+            if (dt && dt->monitor >= 0 && dt->monitor < g.monitor_count)
                 mon = dt->monitor;
             window_set_monitor(mw, mon);
         }
@@ -1164,11 +1185,15 @@ void window_manage(HWND hwnd) {
         }
     }
 
-    desktop_add_window(hwnd, slot);
+    /* Capacity was checked above, before anything was committed, so the only
+     * way this fails now is a desktop that vanished under us — which cannot
+     * happen, since it has our window's id on it. Looked up by id all the same:
+     * `slot` was resolved a long way up. */
+    desktop_add_window(hwnd, desktop_slot_by_id(desk_id));
 
     /* Hide it if it landed somewhere you are not looking — desktop membership
      * is show/hide here, and only the current desktop is ever tiled. */
-    if (dt->id != g.current_desktop_id) {
+    if (desk_id != g.current_desktop_id) {
         events_suppress_begin();
         window_hide(mw);
         events_suppress_end();
@@ -1186,10 +1211,13 @@ void window_manage(HWND hwnd) {
      * already put this window exactly where the config asked. */
     window_park_float_if_fullscreen(mw);
 
-    log_w(L"%ls: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
-          tier == ADOPT_TRACK ? L"Tracking" : L"Managed",
-          (void *)hwnd, dt->name, mw->is_floating, mw->no_decor,
-          mw->fullscreen);
+    {
+        const Desktop *dt = desktop_by_id(desk_id);
+        log_w(L"%ls: %p (desktop '%ls', float=%d, no_decor=%d, fullscreen=%d)",
+              tier == ADOPT_TRACK ? L"Tracking" : L"Managed",
+              (void *)hwnd, dt ? dt->name : L"?", mw->is_floating,
+              mw->no_decor, mw->fullscreen);
+    }
 
     /* Last, once the window is fully set up, so a handler sees its final
      * state (desktop, floating, monitor) rather than a half-built record. */
@@ -1508,30 +1536,26 @@ void window_center_float(HWND hwnd) {
 }
 
 /* ===========================================================================
- * Put a managed window back where it can be reached.
+ * Put a floating window fully onto one display.
  *
- * A window can end up on no display at all without anybody moving it: the
- * monitor it lived on was unplugged, or a `geometry` rule was written for an
- * arrangement this machine no longer has. There is no taskbar under mshell, so
- * off every display means gone — no button to click, and for a floating window
- * not even a tiling pass that would put it back, because the tiler never places
- * floats. `has_applied = false` is what the hotplug path sets, and for a float
- * it is inert.
+ * The WHERE half, with no opinion about when: move `mw` the least distance
+ * that gets it entirely inside monitor `mon`'s work area, keeping its size.
+ * Two callers want exactly this for different reasons — the rescue below,
+ * whose window is off every display, and a desktop's monitor pin (desktop.c),
+ * whose window is on the wrong one.
  *
  * CLAMPED rather than centred, unlike the startup stray sweep further down.
  * The sweep deals with one window at a time, at startup, whose position means
  * nothing (it was parked 4000px clear of the desktop by a dead mshell), so the
- * middle of the screen is the friendliest answer. This runs on every display
- * change and can rescue SEVERAL windows at once — centring would stack every
- * one of them in exactly the same spot, which is a worse outcome than the
- * stranding. Moving each the least distance that gets it back on screen keeps
- * them apart and roughly where they were, which is what a dock/undock cycle
- * wants.
+ * middle of the screen is the friendliest answer. Both callers here can move
+ * SEVERAL windows at once — a dock/undock cycle, or a pin that claims a whole
+ * desktop — and centring would stack every one of them in exactly the same
+ * spot. Moving each the least distance keeps them apart and roughly where they
+ * were.
  *
- * A no-op unless the window really is off every display, so callers do not have
- * to check. Returns true when it moved something.
+ * Returns true when it moved something.
  * =========================================================================== */
-bool window_rescue_offscreen(ManagedWindow *mw) {
+bool window_clamp_into_monitor(ManagedWindow *mw, int mon) {
     if (!mw || !IsWindow(mw->hwnd)) return false;
     /* An iconic window has no on-screen rect to judge, and moving one only
      * edits the rect it will restore to. */
@@ -1539,9 +1563,7 @@ bool window_rescue_offscreen(ManagedWindow *mw) {
 
     RECT cur;
     if (!window_frame_rect(mw->hwnd, &cur)) return false;
-    if (!rect_off_screen(cur)) return false;
 
-    int mon = mw->monitor;
     if (mon < 0 || mon >= g.monitor_count) mon = g.primary_monitor;
     RECT area = (mon >= 0 && mon < g.monitor_count) ? g.monitors[mon].work_area
                                                     : g.work_area;
@@ -1559,13 +1581,44 @@ bool window_rescue_offscreen(ManagedWindow *mw) {
     want.right  = want.left + w;
     want.bottom = want.top  + h;
 
-    log_msg(LOG_INFO, L"rescued %p from off-screen onto monitor %d",
-            (void *)mw->hwnd, mon);
-
     events_suppress_begin();
     window_apply_rect(mw, want,
                       SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     events_suppress_end();
+    return true;
+}
+
+/* ===========================================================================
+ * Put a managed window back where it can be reached.
+ *
+ * A window can end up on no display at all without anybody moving it: the
+ * monitor it lived on was unplugged, or a `geometry` rule was written for an
+ * arrangement this machine no longer has. There is no taskbar under mshell, so
+ * off every display means gone — no button to click, and for a floating window
+ * not even a tiling pass that would put it back, because the tiler never places
+ * floats. `has_applied = false` is what the hotplug path sets, and for a float
+ * it is inert.
+ *
+ * The WHEN half: this decides that the window is stranded, and hands the move
+ * to window_clamp_into_monitor above. A no-op unless the window really is off
+ * every display, so callers do not have to check. Returns true when it moved
+ * something.
+ * =========================================================================== */
+bool window_rescue_offscreen(ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd)) return false;
+    if (IsIconic(mw->hwnd)) return false;
+
+    RECT cur;
+    if (!window_frame_rect(mw->hwnd, &cur)) return false;
+    if (!rect_off_screen(cur)) return false;   /* the gate; the move is shared */
+
+    int mon = mw->monitor;
+    if (mon < 0 || mon >= g.monitor_count) mon = g.primary_monitor;
+
+    if (!window_clamp_into_monitor(mw, mon)) return false;
+
+    log_msg(LOG_INFO, L"rescued %p from off-screen onto monitor %d",
+            (void *)mw->hwnd, mon);
     return true;
 }
 
