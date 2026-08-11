@@ -88,6 +88,50 @@ static const Tweak s_tweaks[] = {
       L"WindowArrangementActive", TW_SZ, 0, L"0",
       L"no Aero Snap — mshell owns window placement" },
 
+    /* --- apps: making applications survive being taken off the screen ---
+     *
+     * Chromium decides for itself whether anyone can see each of its windows —
+     * "native window occlusion" — and throttles or stops presenting the ones it
+     * believes are hidden. A tiling shell takes windows off the screen
+     * constantly, and every mechanism there is says "hidden" to that
+     * calculation: cloaked, SW_HIDE'd, moved off every display, or simply
+     * covered by the window you are looking at.
+     *
+     * Coming back is where it breaks. Measured on Chrome 151, tiled full
+     * screen, hidden and shown by desktop switches: the window comes back with
+     * its frame painted and nothing inside it — the whole window one flat
+     * #202020 — and stays that way. Not a repaint that was missed: an
+     * asynchronous RedrawWindow, a synchronous one (RDW_UPDATENOW), a 1px move,
+     * a real resize, SetForegroundWindow, SwitchToThisWindow and a full
+     * minimise/restore were each tried on such a window and none of them
+     * brought a single pixel back. The browser process, its GPU process and its
+     * renderers were all alive and the window answered WM_NULL. Only restarting
+     * the browser fixed it.
+     *
+     * So the fix is to stop it deciding. This is the same workaround every
+     * other Windows tiling WM ends up recommending, and there is a policy for
+     * it, which beats a command-line flag because it applies however the
+     * browser was started.
+     *
+     * NEEDS AN ADMINISTRATOR PROMPT, and there is nothing mshell can do about
+     * that: HKCU\Software\Policies is ACL'd read-only for the user who owns the
+     * hive, exactly like the Explorer policy keys in the input group. Without
+     * elevation this group is skipped and reported, and the no-admin route is
+     * the flag — see INSTALL.md:
+     *
+     *     chrome.exe --disable-features=CalculateNativeWinOcclusion
+     *
+     * Electron apps have no policy at all and need that flag either way. */
+    { L"apps", L"Software\\Policies\\Google\\Chrome",
+      L"NativeWindowOcclusionEnabled", TW_DWORD, 0, NULL,
+      L"Chrome stops drawing a window it thinks is hidden, and stays stopped" },
+    { L"apps", L"Software\\Policies\\Chromium",
+      L"NativeWindowOcclusionEnabled", TW_DWORD, 0, NULL,
+      L"the same, for a Chromium build" },
+    { L"apps", L"Software\\Policies\\Microsoft\\Edge",
+      L"NativeWindowOcclusionEnabled", TW_DWORD, 0, NULL,
+      L"the same, for Edge" },
+
     /* --- quiet: notifications and sounds a shell with no tray cannot show */
     { L"quiet", L"Software\\Microsoft\\Windows\\CurrentVersion\\PushNotifications",
       L"ToastEnabled", TW_DWORD, 0, NULL,

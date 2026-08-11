@@ -206,9 +206,20 @@ REM
 REM  Both .reg files are still copied next to the exe: they remain the way to
 REM  apply this without mshell, and uninstall.bat's fallback.
 "%DEST%\mshell.exe" --tweaks apply input
+
+REM  And the browser policy, for the same reason and with the same caveat: a
+REM  Chromium window that mshell takes off the screen can come back with its
+REM  frame painted and nothing inside it, permanently, because Chromium decided
+REM  nobody could see it. This turns that decision off. Its key is under
+REM  HKCU\Software\Policies too, so unelevated it is skipped like the two above
+REM  — the no-admin route is `--disable-features=CalculateNativeWinOcclusion`
+REM  on the browser's command line. See INSTALL.md.
+"%DEST%\mshell.exe" --tweaks apply apps
+
 net session >nul 2>&1 || (
-    echo  ^(Not an administrator prompt, so the two Policies values —
-    echo   the Win-key hotkey policy and Win+L — were left as they are.
+    echo  ^(Not an administrator prompt, so the three policy values were left
+    echo   alone: the Win-key hotkey policy, Win+L, and the Chromium
+    echo   occlusion policy that keeps a hidden browser window drawing.
     echo   Re-run this from an admin prompt to apply those.^)
 )
 copy /Y "%~dp0harden.reg"       "%DEST%\harden.reg"       >nul

@@ -830,7 +830,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             return 0;
         }
         console_print("usage: mshell --tweaks <list|apply|revert|reg|reg-undo> "
-                      "[input|visual|quiet|all]");
+                      "[input|visual|quiet|apps|all]");
         return 1;
     }
 

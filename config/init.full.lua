@@ -988,6 +988,23 @@ mshell.bind({mod, shft}, "q", "quit")
 -- strips WS_CAPTION frames), so there's no need to float them. Add a rule here
 -- only for apps you specifically want floating.
 --
+-- ONE THING TO DO FOR A CHROMIUM BROWSER, though, and it is not a rule. Chrome,
+-- Edge and Electron apps decide for themselves whether anyone can see each of
+-- their windows and stop drawing the ones they think are hidden — which, in a
+-- tiling shell, is most of them, most of the time. A window that comes back
+-- from that can come back with its frame painted and NOTHING inside it, for
+-- good: nothing outside the app repairs it, only restarting the app does.
+-- Turn the guessing off, either with the policy (needs an admin prompt once):
+--
+--     C:\mshell\mshell.exe --tweaks apply apps
+--
+-- or on the launch itself, which needs no rights and is the only option for an
+-- Electron app:
+--
+--     chrome.exe --disable-features=CalculateNativeWinOcclusion
+--
+-- `install.bat` already applies the policy when it is run elevated.
+--
 -- Match on `class`, `process` (the .exe name) and/or `path` (its full image
 -- path). Every one is a case-insensitive wildcard pattern — `*` matches any run
 -- of characters, `?` a single one, and `/` and `\` are interchangeable — so a
