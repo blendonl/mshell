@@ -732,6 +732,17 @@ void bar_toggle(void) {
     tile_current();
 }
 
+void bar_set_mode(BarMode mode) {
+    if (g.bar_enabled && g.bar_mode == mode) return;
+
+    g.bar_mode    = mode;
+    g.bar_enabled = true;
+
+    update_work_area();
+    bar_reconfigure();
+    tile_current();
+}
+
 void bar_reserve_work_area(void) {
     /* Floating reserves nothing: it is over the windows, not beside them. */
     if (!g.bar_enabled || g.bar_mode == BAR_MODE_FLOATING) return;

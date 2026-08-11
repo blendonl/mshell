@@ -236,6 +236,8 @@ static const ActionNameEntry action_names[] = {
     {"jump_urgent",      ACTION_JUMP_URGENT},
     {"launcher",         ACTION_LAUNCHER},
     {"toggle_bar",       ACTION_TOGGLE_BAR},
+    {"bar_top",          ACTION_BAR_TOP},
+    {"bar_floating",     ACTION_BAR_FLOATING},
     {"toggle_hdr",       ACTION_TOGGLE_HDR},
     {"cycle_refresh",    ACTION_CYCLE_REFRESH},
     {"split_h",          ACTION_SPLIT_H},
@@ -1512,6 +1514,9 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_TOGGLE_BAR:
         bar_toggle();
         break;
+
+    case ACTION_BAR_TOP:      bar_set_mode(BAR_MODE_TOP_BAR);  break;
+    case ACTION_BAR_FLOATING: bar_set_mode(BAR_MODE_FLOATING); break;
 
     /* The focused monitor, not the primary: on a two-monitor desk the display
      * you want HDR on is the one you are looking at. */
