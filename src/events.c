@@ -247,6 +247,23 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
              * and when the frame is already bare. */
             if (mw->is_floating) {
                 if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
+
+                /* Which display it is ON is not the app's business to tell us
+                 * and not something the layout decides for a float — it is
+                 * simply where the window now is, so it is read here, where
+                 * every move is observed.
+                 *
+                 * Only the keyboard nudge used to update it, which left the
+                 * other three ways a float can move (mod+drag, a native title
+                 * bar drag, the app moving itself) writing to a stale monitor
+                 * index. That index is not cosmetic: it picks the screen for
+                 * window_center_float and window_park_over_monitor, it becomes
+                 * g.focused_monitor on the next focus, and it is what the
+                 * one-fullscreen-per-monitor scan compares. Drag a float to
+                 * your second display and fullscreen it, and it grew on the
+                 * first one. */
+                window_set_monitor(mw, monitor_of_window(hwnd));
+
                 /* A native move/resize of the focused float fires here and
                  * nowhere else — keep the ring hugging it. */
                 if (hwnd == desktop_get_focused()) border_refresh();

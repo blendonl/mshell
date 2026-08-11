@@ -1462,6 +1462,13 @@ void     window_set_floating(HWND hwnd, bool floating);
  * A no-op on a window that is already fully managed. */
 void     window_promote(HWND hwnd);
 void     window_center_float(HWND hwnd);  /* no-op unless it should be centred */
+
+/* Put a window that has ended up on NO display back onto one — an unplugged
+ * monitor, or a `geometry` rule written for an arrangement this machine no
+ * longer has. Under a shell with no taskbar that window is otherwise
+ * unreachable, and for a floating one no tiling pass will ever put it back.
+ * A no-op unless the window really is off every display. */
+bool     window_rescue_offscreen(ManagedWindow *mw);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 /* The raising half of the pass on its own — floats into the topmost band (so
  * no ordinary window can ever cover one), then our overlays over them, then
@@ -1902,6 +1909,27 @@ static inline bool window_is_alive(HWND hwnd) {
 static inline bool window_is_screen_fullscreen(const ManagedWindow *mw) {
     return mw && (mw->fs_mode == FS_WINDOW || mw->fs_mode == FS_BOTH ||
                   mw->app_fullscreen);
+}
+
+/* Is this window a float in the sense the FLOAT TIER means — a window the user
+ * (or a rule) chose to keep out of the grid?
+ *
+ * `is_floating` alone cannot answer that, because it carries two meanings. One
+ * is the tier. The other is "exempt from the layout", which is why ADOPT_TRACK
+ * sets it on a window mshell is supposed to do nothing to beyond desktop
+ * membership: an owned dialog nobody opted into, a window too small to tile,
+ * one held disabled by its own modal.
+ *
+ * The distinction only matters where mshell ACTS on a float rather than merely
+ * declining to tile it — which today is the z-order pass. float_on_top parks
+ * floats in the topmost band, and reading the exemption as the tier put every
+ * stray dialog on the system above every other window, which is precisely the
+ * "otherwise untouched" the tracked tier promises (see ManagedWindow).
+ *
+ * Places that only want the exemption should keep testing `is_floating`
+ * directly — collect_clients and the layout tree do, deliberately. */
+static inline bool window_is_float_tier(const ManagedWindow *mw) {
+    return mw && mw->is_floating && !mw->tracked_only;
 }
 
 /* WinEvent suppression is a nesting counter, not a flag: repositioning a

@@ -92,7 +92,10 @@ void border_refresh(void) {
     /* Per-state colour: urgent beats floating beats focused, because "this
      * window wants you" is the more urgent fact than how it is laid out. */
     s_color = g.border_color;
-    if (fmw && fmw->is_floating) s_color = g.border_color_float;
+    /* The tier, not the exemption: a tracked window is not a float the user
+     * chose, and colouring it as one says the layout is doing something with it
+     * that it is not. */
+    if (window_is_float_tier(fmw))  s_color = g.border_color_float;
     if (fmw && fmw->urgent)      s_color = g.border_color_urgent;
 
     int x = r.left - bw;

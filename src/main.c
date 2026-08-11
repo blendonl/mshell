@@ -435,6 +435,22 @@ void monitors_update(void) {
                 CCHDEVICENAME - 1);
         mw->monitor_device[CCHDEVICENAME - 1] = L'\0';
     }
+
+    /* --- and rescue the floats ---
+     *
+     * Re-homing above only updates which monitor a window BELONGS to; the
+     * window is put there by the next tiling pass, which is why clearing
+     * has_applied is enough for a tiled one. The tiler never places a floating
+     * window, so for those the flag is inert and nothing moves them at all:
+     * unplug the display a float was on and its rect is still in that display's
+     * coordinate space, i.e. nowhere. With no taskbar there is then no way to
+     * reach it — the same stranding window_uncloak_strays exists to undo, but
+     * that only runs at startup.
+     *
+     * Deliberately after the whole loop, so every window's monitor is settled
+     * before any of them is measured against one. */
+    for (int i = 0; i < g.managed_count; i++)
+        if (g.managed[i].is_floating) window_rescue_offscreen(&g.managed[i]);
 }
 
 /* ---------------------------------------------------------------------------
