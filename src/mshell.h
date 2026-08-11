@@ -747,6 +747,12 @@ typedef struct {
                                       * per window so a policy change mid-
                                       * session still un-hides the way the
                                       * window was hidden.                     */
+    bool      sunk;                  /* ...or we did it by dropping the window
+                                      * below the backdrop in the z-order. The
+                                      * window does not move, is not hidden and
+                                      * keeps drawing; it is simply covered. The
+                                      * only mechanism a Chromium window
+                                      * survives — see window.c.               */
     bool      stashed;               /* ...or we did it by moving the window
                                       * clear of every display, because
                                       * cloaking was refused and SW_HIDE is

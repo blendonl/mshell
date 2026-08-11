@@ -231,13 +231,15 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             ManagedWindow *mw = window_find(hwnd);
             if (!mw || mw->desktop_id != g.current_desktop_id) break;
 
-            /* A stashed window is one WE moved off every display to take it off
-             * the screen (window.c). Its rect is deliberately nowhere near the
-             * tile it owns, so every check below would read it as a window that
-             * escaped and snap it back onto the desktop it is meant to be away
-             * from. Monocle and the scratchpad stash windows on the desktop you
-             * are looking at, so this is not the desktop_id test above. */
-            if (mw->stashed) break;
+            /* Sunk or stashed: WE took this one off the screen without hiding
+             * it (window.c). A stashed window's rect is deliberately nowhere
+             * near the tile it owns, and a sunk one can be moved by its app
+             * while it sits under the backdrop — either way every check below
+             * would read it as a window that escaped and haul it back in front
+             * of you. Monocle and the scratchpad do this to windows on the
+             * desktop you are looking at, so the desktop_id test above does not
+             * cover it. */
+            if (mw->stashed || mw->sunk) break;
 
             /* Floating means "you keep whatever geometry you like" — with one
              * exception. A window whose rule asked to be borderless or

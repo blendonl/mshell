@@ -601,7 +601,86 @@ bool window_on_screen(const ManagedWindow *mw) {
 }
 
 /* ===========================================================================
+ * SINKING — the mechanism that a Chromium window actually survives.
+ *
+ * Drop the window BELOW THE BACKDROP in the z-order. It does not move, it is
+ * not hidden, it keeps WS_VISIBLE, its surface, its size and its position — it
+ * is simply covered by an opaque window that fills the whole virtual screen.
+ * Coming back is one SetWindowPos to HWND_TOP.
+ *
+ * WHY, measured rather than assumed. Four ways of taking a window off the
+ * screen, each tried on a freshly launched Chrome tiled full width, cycled by
+ * desktop switches, sampling the window's own pixels:
+ *
+ *   ShowWindow(SW_HIDE)        blank on the first round trip, permanently
+ *   moved off every display    blank on the first round trip, permanently
+ *   --disable-gpu, off-screen  blank on the first round trip (so not the GPU)
+ *   sticky — never hidden      fine
+ *   sunk below the backdrop    fine
+ *
+ * "Blank" is the whole window painted in its own frame colour with nothing in
+ * it, and nothing recovers it: not RedrawWindow, not RDW_UPDATENOW, not a real
+ * resize, not SetForegroundWindow, not SwitchToThisWindow, not
+ * minimise/restore. Only restarting the browser. Which is why this is not a
+ * repaint problem with a repaint fix: the window has to never leave the
+ * composited desktop in the first place.
+ *
+ * And that is exactly what Windows' own virtual desktops do — they cloak, which
+ * keeps the window in place — and why none of this is visible under Explorer.
+ * Being merely COVERED is the case every windowing app on earth is tested
+ * against, because it happens every time you focus something else.
+ *
+ * WHAT IT NEEDS. The backdrop: an opaque window over the whole virtual screen,
+ * which background.c already maintains at the bottom of the z-order. No
+ * backdrop, no sinking — the fallbacks below take over.
+ *
+ * WHAT IT COSTS. Like stashing, a sunk window is still a window as far as
+ * Alt+Tab and capture-by-handle are concerned. Unlike stashing, nothing about
+ * it is fragile: it is where the layout put it, so there is no rect to
+ * remember, no coordinate space to run out of, and no way to strand it — if
+ * mshell dies its backdrop dies with it and every sunk window is on screen
+ * again, which is the recovery the other two mechanisms need code for.
+ * =========================================================================== */
+
+/* A window in the topmost band cannot go below a non-topmost backdrop. If WE
+ * put it there, take it back out — window_enforce_zorder puts it back when the
+ * window is on screen again. If the APP asked to be topmost, that is its
+ * business and sinking is refused instead. */
+static bool window_sink(ManagedWindow *mw) {
+    HWND bg = g.background_window;
+    if (!bg || !IsWindow(bg) || !IsWindowVisible(bg)) return false;
+
+    if (mw->made_topmost) {
+        mw->made_topmost = false;
+        window_set_band(mw->hwnd, HWND_NOTOPMOST, false);
+    }
+    if (GetWindowLongPtrW(mw->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) return false;
+
+    /* Inserting after the bottom-most window makes this the new bottom-most.
+     * No move, no size, no activation: the three things that cost a repaint or
+     * tell the app something changed. */
+    if (!SetWindowPos(mw->hwnd, bg, 0, 0, 0, 0,
+                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+        return false;
+
+    mw->sunk = true;
+    return true;
+}
+
+static void window_unsink(ManagedWindow *mw) {
+    if (!mw->sunk) return;
+    mw->sunk = false;
+    SetWindowPos(mw->hwnd, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+/* ===========================================================================
  * STASHING — taking a window off the screen without taking it off the screen.
+ *
+ * The second choice now, behind sinking, and kept for the windows sinking
+ * cannot have: one the app pinned topmost itself, or any window at all when
+ * there is no backdrop to hide behind. It is better than SW_HIDE and worse than
+ * sinking — see the table above.
  *
  * The third mechanism, and the one a refused cloak falls back to. The window is
  * MOVED clear of every display: still WS_VISIBLE, still composited, still
@@ -713,23 +792,33 @@ void window_hide(ManagedWindow *mw) {
      * is not one to lean on, and it costs nothing to make it hold outright. */
     mw->wm_hidden = true;
     mw->cloaked   = false;
+    mw->sunk      = false;
     mw->stashed   = false;
 
     if (g.hide_policy == HIDE_CLOAK) {
-        /* Cloak, then stash, then — only if the window cannot be moved either —
-         * SW_HIDE. The refusal itself is logged once, with its HRESULT, by
-         * window_set_cloaked; this is only about what to do instead.
+        /* Sink, then cloak, then stash, then SW_HIDE.
          *
-         * Stashing is preferred over SW_HIDE rather than the other way round
-         * because SW_HIDE is the mechanism that damages the window: WS_VISIBLE
-         * comes off, DWM drops the redirection surface, and a Chromium-class
-         * app rebuilds its compositor blank or offset on the way back, every
-         * round trip, until it is restarted. */
-        mw->cloaked = window_set_cloaked(mw->hwnd, true);
-        if (!mw->cloaked) mw->stashed = window_stash(mw);
+         * SINKING FIRST — ahead of the mechanism this policy is named after —
+         * because it is the only one measured to leave a Chromium window
+         * working. The window never leaves the composited desktop; it is
+         * covered, which is what happens to every window whenever you focus
+         * another one, and therefore the one path every app is tested on.
+         * Cloaking is what Windows' own virtual desktops use and is the next
+         * best thing, and is also refused outright on most machines (see
+         * window_set_cloaked) — which is how this ordering stopped being
+         * academic. Stashing and SW_HIDE both take the window out of the
+         * desktop, and a browser does not come back from either: the table
+         * above window_sink has the measurements.
+         *
+         * The refusal of a cloak is logged once, with its HRESULT, by
+         * window_set_cloaked; this is only about what to do instead. */
+        if (!window_sink(mw)) {
+            mw->cloaked = window_set_cloaked(mw->hwnd, true);
+            if (!mw->cloaked) mw->stashed = window_stash(mw);
+        }
     }
 
-    if (!mw->cloaked && !mw->stashed) {
+    if (!mw->cloaked && !mw->sunk && !mw->stashed) {
         /* Last resort: an iconic window (nothing to protect, and moving one
          * only edits the rect it will restore to), no room left in the
          * coordinate space to stash it in, or the "hide" policy outright. */
@@ -753,18 +842,19 @@ void window_hide(ManagedWindow *mw) {
             if (!warned) {
                 warned = true;
                 log_err(L"hide: %p could not be taken off the screen by any "
-                        L"means — not cloaked, not stashed, and SW_HIDE was "
-                        L"refused. It will be visible on every desktop. This is "
-                        L"what mshelld.exe exists for: run `install.bat /helper` "
-                        L"from an administrator prompt (see INSTALL.md).",
-                        (void *)mw->hwnd);
+                        L"means — not sunk, not cloaked, not stashed, and "
+                        L"SW_HIDE was refused. It will be visible on every "
+                        L"desktop. This is what mshelld.exe exists for: run "
+                        L"`install.bat /helper` from an administrator prompt "
+                        L"(see INSTALL.md).", (void *)mw->hwnd);
             }
             return;
         }
     }
 
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
-            mw->cloaked ? L"cloaked" : mw->stashed ? L"stashed" : L"SW_HIDE");
+            mw->sunk ? L"sunk" : mw->cloaked ? L"cloaked"
+                               : mw->stashed ? L"stashed" : L"SW_HIDE");
 }
 
 void window_show(ManagedWindow *mw) {
@@ -777,9 +867,11 @@ void window_show(ManagedWindow *mw) {
      * IsWindowVisible would call fine. Getting this wrong is what shipped:
      * the repaint below sat inside an `if (!IsWindowVisible)` and therefore
      * never ran for a cloaked window at all. */
-    bool was_off_screen = mw->wm_hidden || mw->cloaked || mw->stashed;
+    bool was_off_screen = mw->wm_hidden || mw->cloaked || mw->sunk ||
+                          mw->stashed;
     bool was_cloaked    = mw->cloaked;
     bool was_stashed    = mw->stashed;
+    bool was_sunk       = mw->sunk;
 
     /* Uncloak whenever we cloaked it, even if wm_hidden is already clear: the
      * two can drift apart if the policy changed under a hidden window, and a
@@ -792,6 +884,7 @@ void window_show(ManagedWindow *mw) {
                               L"invisible", (void *)mw->hwnd);
         mw->cloaked = false;
     }
+    window_unsink(mw);
     window_unstash(mw);
 
     if (!IsWindowVisible(mw->hwnd)) {
@@ -835,7 +928,7 @@ void window_show(ManagedWindow *mw) {
          * Skipped for a window that was stashed: the unstash above WAS the move,
          * with the same flags and a real distance behind it, which is strictly
          * the better version of this. */
-        if (mw->is_floating && !was_stashed) {
+        if (mw->is_floating && !was_stashed && !was_sunk) {
             RECT r;
             if (GetWindowRect(mw->hwnd, &r))
                 window_set_pos(mw->hwnd, r.left, r.top,
@@ -844,11 +937,15 @@ void window_show(ManagedWindow *mw) {
                                SWP_FRAMECHANGED | SWP_NOCOPYBITS);
             mw->needs_repaint = false;
         } else if (mw->is_floating) {
+            /* Stashed: the unstash was the move. Sunk: nothing was ever torn
+             * down, so there is nothing to shake loose — the window has been
+             * drawing the whole time it was under the backdrop. */
             mw->needs_repaint = false;
         }
 
         log_msg(LOG_DEBUG, L"show: %p (was %ls)", (void *)mw->hwnd,
-                was_cloaked ? L"cloaked" : was_stashed ? L"stashed" : L"hidden");
+                was_sunk ? L"sunk" : was_cloaked ? L"cloaked"
+                                   : was_stashed ? L"stashed" : L"hidden");
     }
 
     mw->wm_hidden = false;
@@ -889,7 +986,8 @@ void window_restore_all_visibility(void) {
          * because the user closed it there should stay there. */
         if (mw->app_hidden) continue;
 
-        if (mw->cloaked || mw->stashed || !IsWindowVisible(mw->hwnd)) shown++;
+        if (mw->cloaked || mw->sunk || mw->stashed ||
+            !IsWindowVisible(mw->hwnd)) shown++;
 
         /* Unconditional, not `if (mw->cloaked)`: this is the last chance any
          * of these windows get, and a bad flag here costs the user a window
@@ -899,9 +997,12 @@ void window_restore_all_visibility(void) {
         window_set_cloaked(mw->hwnd, false);
         mw->cloaked   = false;
 
-        /* And the same for the other mechanism: a stashed window is off every
-         * display, and once this process is gone nothing else knows where it
-         * came from. This is the only thing that does. */
+        /* And the same for the other two. A stashed window is off every
+         * display and nothing but this knows where it came from; a sunk one
+         * would surface by itself when the backdrop dies with us, but raising it
+         * here means the desktop looks right BEFORE we start tearing down
+         * rather than a frame later. */
+        window_unsink(mw);
         window_unstash(mw);
 
         mw->wm_hidden = false;
@@ -1871,6 +1972,27 @@ void window_enforce_zorder(void) {
     if (g.background_window)
         SetWindowPos(g.background_window, HWND_BOTTOM, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /* ...and everything we sank goes back under it. Not belt-and-braces: the
+     * line above is what makes this necessary. Pushing the backdrop to the
+     * bottom of the z-order lifts every sunk window above it — which is to say,
+     * back onto the screen, on a desktop you are not looking at. Re-asserting
+     * here rather than skipping the backdrop assert keeps one rule ("the
+     * backdrop is at the bottom, and hidden windows are under the backdrop")
+     * instead of two that have to agree.
+     *
+     * All managed windows, not the current desktop's: the sunk ones are by
+     * definition the windows of the desktops you left. Z-order-only moves, so
+     * this costs a kernel call each and no repaint, no WM_SIZE, nothing the app
+     * hears about. */
+    if (g.background_window) {
+        for (int i = 0; i < g.managed_count; i++) {
+            ManagedWindow *mw = &g.managed[i];
+            if (!mw->sunk || !IsWindow(mw->hwnd)) continue;
+            SetWindowPos(mw->hwnd, g.background_window, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
 
     Desktop *dt = desktop_current();
 
