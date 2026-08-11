@@ -9,6 +9,54 @@ All notable changes to mshell are documented here. This project adheres to
 
 ### Fixed
 
+- **Hidden windows are now sunk under the backdrop, and the blank browser is
+  gone.** A window mshell takes off the screen is no longer removed from the
+  desktop at all: it is dropped **below the backdrop in the z-order**. It does
+  not move, it keeps `WS_VISIBLE`, its surface, its size and its position, and
+  it goes on drawing — it is simply covered by an opaque window that fills the
+  virtual screen. Coming back is one `SetWindowPos` to the top.
+
+  This is the answer to "why does Chrome work under Explorer and not here", and
+  it took measuring five arms on the same machine — a freshly launched Chrome,
+  tiled, cycled by desktop switches, sampling the window's own pixels:
+
+  | how the window was taken off the screen | result |
+  | --- | --- |
+  | `ShowWindow(SW_HIDE)` | blank on the **first** round trip, permanently |
+  | moved off every display (0.14.6 stashing) | blank on the **first** round trip |
+  | `--disable-gpu`, moved off every display | blank on the **first** round trip |
+  | sticky — never taken off at all | fine |
+  | **sunk below the backdrop** | **fine** |
+
+  "Blank" means the whole window painted in its own frame colour with nothing in
+  it, and nothing gets it back: not `RedrawWindow`, not `RDW_UPDATENOW`, not a
+  real resize, not `SetForegroundWindow`, not `SwitchToThisWindow`, not
+  minimise/restore. Only restarting the browser. So this was never a repaint
+  that could be nudged — a Chromium window that leaves the composited desktop
+  does not come back, and the fix is to stop taking it out. Explorer's own
+  virtual desktops cloak, which keeps the window in place; being merely
+  *covered* is what happens every time you focus something else, which is why it
+  is the one path every app on Windows is tested against.
+
+  Sinking also costs less to get right than the mechanisms it replaces. There is
+  no rect to remember, nothing to strand — if mshell dies its backdrop dies with
+  it and every sunk window is on screen again — and the drift detector has
+  nothing to argue with, because nothing moved.
+
+  Cloaking is still tried when sinking cannot be used (a window the app pinned
+  topmost itself, or no backdrop), then stashing, then `SW_HIDE`.
+  `set_hide_policy("hide")` still means literal `SW_HIDE`.
+
+- **Correction to 0.14.8.** That release said the `apps` tweak — Chromium's
+  `NativeWindowOcclusionEnabled` policy — was the fix for the blank window. It
+  is not: an instance launched with `--disable-features=CalculateNativeWinOcclusion`
+  blanked on the first round trip exactly like a default one. Turning occlusion
+  detection off is still worth having in a tiling shell (it is what stops a
+  covered window being throttled to a standstill), and the tweak stays, but the
+  blank window was the hide mechanism and is fixed above.
+
+### Fixed
+
 - **The browser window that comes back as one flat grey rectangle.** Not the
   drifting frame 0.14.6 fixed — this one is the whole window: frame painted,
   nothing inside it, permanent. Chromium decides for itself whether anyone can
