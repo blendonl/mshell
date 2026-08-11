@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.14.8 — 2026-08-11
+
 ### Fixed
 
 - **The browser window that comes back as one flat grey rectangle.** Not the
