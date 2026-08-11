@@ -37,3 +37,20 @@ void split_span(int span, const float *facts, int n, int *out);
  * against it. `span <= 0` therefore also answers `origin`.
  */
 int center_axis(int origin, int span, int size);
+
+/*
+ * Where a box of `size` starts when it is pushed back inside the span that
+ * begins at `origin` and runs for `span` pixels — moved the least distance that
+ * gets it fully in, and left alone if it already was.
+ *
+ * This is the recovery half of center_axis: it answers "put it somewhere the
+ * user can reach" rather than "put it in the middle". A window is off every
+ * display when its monitor was unplugged, when a `geometry` rule was written
+ * for an arrangement the machine no longer has, or when a previous mshell died
+ * with it stashed — and under a shell with no taskbar, off-screen means gone.
+ *
+ * A box too big for the span is pinned to `origin`, exactly as center_axis does
+ * and for the same reason: hanging off the far edge is worse than flush against
+ * the near one. `span <= 0` therefore also answers `origin`.
+ */
+int clamp_axis(int origin, int span, int pos, int size);

@@ -202,6 +202,14 @@ mshell behaves exactly as it always has — those windows float and stay visible
 on every desktop — so this is entirely opt-in. `%TEMP%\mshelld.log` is the
 helper's own log if you need to see whether it started.
 
+**Do not add `/ru SYSTEM` to that task.** The helper's pipe is restricted to the
+user it runs as, and the command above has no `/ru`, so it runs as *you* —
+elevated, but still you, which is why your unelevated mshell can talk to it.
+Running it as SYSTEM grants the pipe to SYSTEM and no shell will ever connect;
+it would also put the helper in session 0, where it cannot touch your windows at
+all. The log says which identity it granted on the line above `listening on`, so
+if mshell is not connecting, start there.
+
 **What it does not do:** keybinds still stop responding while an elevated window
 has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
 deliberately left in mshell — moving it would mean putting the whole keymap

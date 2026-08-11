@@ -71,6 +71,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/layout_math.c \
               $(SRC_DIR)/whichkey_math.c \
               $(SRC_DIR)/log.c \
+              $(SRC_DIR)/pipe_sd.c \
               $(SRC_DIR)/overlay.c \
               $(SRC_DIR)/system.c \
               $(SRC_DIR)/screenshot.c \
@@ -137,9 +138,11 @@ TARGET   = mshell.exe
 # The privileged helper: a second, tiny binary with no Lua and no config. See
 # src/proto.h for why it exists and what was deliberately left out of it.
 HELPER        = mshelld.exe
-# log.c is shared with mshell.exe. It depends on nothing but the Win32 API —
-# in particular not on the MShell global — precisely so it can link here.
-HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c
+# log.c and pipe_sd.c are shared with mshell.exe. Both depend on nothing but the
+# Win32 API — in particular not on the MShell global — precisely so they can
+# link here. pipe_sd.c is the named pipe's security descriptor, shared so the
+# shell's pipe and the helper's cannot come to disagree about who may open one.
+HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
 HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
 
@@ -221,6 +224,13 @@ $(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h $(SRC_DIR)/log.h
 # log.c links into BOTH binaries, so like mshelld.o it must not pick up a
 # dependency on mshell.h — it deliberately has no access to the shell's state.
 $(SRC_DIR)/log.o: $(SRC_DIR)/log.c $(SRC_DIR)/log.h
+	@echo "  CC    $<"
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# pipe_sd.c likewise: shared by both binaries, and its own rule for the same
+# reason — the pattern rule below would make it depend on mshell.h, which the
+# helper must not be built against.
+$(SRC_DIR)/pipe_sd.o: $(SRC_DIR)/pipe_sd.c $(SRC_DIR)/pipe_sd.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 

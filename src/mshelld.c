@@ -33,13 +33,13 @@
 #endif
 
 #include <windows.h>
-#include <sddl.h>
 #include <dwmapi.h>
 #include <stdio.h>
 #include <stdbool.h>
 
 #include "proto.h"
 #include "log.h"
+#include "pipe_sd.h"    /* the DACL, shared with the shell — see that header */
 
 /* Cloaking postdates the mingw-w64 headers, same as in window.c: the id is
  * passed as a DWORD, so the raw value is all that is needed. */
@@ -71,18 +71,20 @@ static void pipe_name(wchar_t *out, size_t cap) {
     out[cap - 1] = L'\0';
 }
 
-/* The helper runs elevated, so its OWN token is the Administrators-flavoured
- * one — granting access to that would not let the unelevated shell connect.
- * What is wanted is the interactive user of this session, which is what the
- * shell runs as. SDDL's "IU" (INTERACTIVE) names exactly that. */
-static PSECURITY_DESCRIPTOR build_sd(void) {
-    PSECURITY_DESCRIPTOR sd = NULL;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GA;;;IU)(A;;GA;;;BA)(A;;GA;;;SY)",
-            SDDL_REVISION_1, &sd, NULL))
-        return NULL;
-    return sd;
-}
+/* The DACL now comes from pipe_sd.c, shared with the shell's own pipe.
+ *
+ * It used to be the SDDL literal "D:(A;;GA;;;IU)(A;;GA;;;BA)(A;;GA;;;SY)", on
+ * the reasoning that the helper's elevated token is the Administrators one and
+ * so granting that would not let the unelevated shell in. The first half of
+ * that is true and the conclusion was not: elevation changes a token's
+ * integrity level and groups, NOT its user, so the helper's own user SID is
+ * already exactly the interactive user the shell runs as.
+ *
+ * "IU" is every interactively logged-on user, which is a different and much
+ * larger set. The pipe name is per-session and entirely predictable, so with
+ * fast user switching a second signed-in user could open this pipe and move,
+ * hide or close the first user's windows — including the elevated ones this
+ * process exists to reach. */
 
 /* ---------------------------------------------------------------------------
  * The privileged operations. All three stay inside the same authority the DACL
@@ -96,9 +98,17 @@ static bool do_setpos(const ProtoMsg *m) {
      * resize. Not because the shell is untrusted, but because this is the
      * boundary: a request that could activate a window, or change its owner or
      * z-band, is more authority than "tile it" needs, and the narrowest surface
-     * that does the job is the one worth exposing. */
+     * that does the job is the one worth exposing.
+     *
+     * SWP_NOCOPYBITS is on that list even though it looks like a rendering
+     * detail, because it IS one and grants nothing: it only says "do not blit
+     * the old client area into the new position". The shell adds it to exactly
+     * the moves where those saved bits are stale — a window coming back from
+     * being hidden, or unstashed from off-screen. Masking it away meant the
+     * elevated windows this helper exists to serve were the only ones that kept
+     * the bug it fixes, coming back blank or mis-composited. */
     UINT flags = m->flags & (SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED |
-                             SWP_NOMOVE   | SWP_NOSIZE);
+                             SWP_NOMOVE   | SWP_NOSIZE     | SWP_NOCOPYBITS);
     flags |= SWP_NOACTIVATE | SWP_NOZORDER;
 
     return SetWindowPos(h, NULL, m->x, m->y, m->w, m->h, flags) != 0;
@@ -226,7 +236,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
         return 0;
     }
 
-    PSECURITY_DESCRIPTOR sd = build_sd();
+    wchar_t sid[256];
+    PSECURITY_DESCRIPTOR sd = pipe_sd_for_current_user(sid, 256);
     if (!sd) {
         logf_w(L"FATAL: could not build the pipe's security descriptor — "
                L"refusing to create an unrestricted pipe");
@@ -234,14 +245,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
     }
     SECURITY_ATTRIBUTES sa = { sizeof sa, sd, FALSE };
 
+    /* Say WHICH identity the pipe was handed to. When the shell cannot connect,
+     * this line is the whole diagnosis: the logon task INSTALL.md registers has
+     * no /ru and so runs as the interactive user, whose SID this should be. A
+     * task edited to run as SYSTEM grants SYSTEM instead, and no shell will
+     * ever reach it — that configuration is unsupported and would be in session
+     * 0 anyway, unable to touch these windows at all. */
+    logf_w(L"granting pipe access to %ls (and SYSTEM)", sid);
+
     wchar_t name[MAX_PATH];
     pipe_name(name, MAX_PATH);
     logf_w(L"listening on %ls", name);
 
+    /* FILE_FLAG_FIRST_PIPE_INSTANCE: refuse to start beside a pipe of this name
+     * that somebody else created, rather than quietly adding an instance to it
+     * and taking turns serving the shell's requests. PIPE_REJECT_REMOTE_CLIENTS:
+     * this pipe is otherwise reachable over SMB as \\host\pipe\mshelld-1, and
+     * nothing on the network has any business driving these operations. */
     for (;;) {
         HANDLE pipe = CreateNamedPipeW(
-            name, PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
+            PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             sizeof(ProtoMsg), sizeof(ProtoMsg), 0, &sa);
 

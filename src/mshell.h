@@ -679,7 +679,11 @@ typedef struct {
      * rule's `center` and set_float_placement — so it travels with the window
      * and Win+f years later still does what the config asked for. */
     bool      center_float;
-    bool      decorations_stripped;  /* did we strip WS_CAPTION etc?        */
+    bool      decorations_stripped;  /* did we strip WS_CAPTION etc? Verified
+                                      * by reading the style back, not assumed
+                                      * from the write — UIPI refuses one on a
+                                      * higher-integrity window in silence.  */
+    bool      decor_strip_refused;   /* ...and we already said so, once      */
     LONG_PTR  orig_style;            /* style before stripping              */
     LONG_PTR  orig_exstyle;          /* extended style before stripping     */
     float     cfact;                 /* size factor within its stack (1.0)  */
@@ -707,7 +711,17 @@ typedef struct {
                                       * locally and went via mshelld.exe. Kept
                                       * so later passes skip the batch for it —
                                       * one refused window would fail the whole
-                                      * DeferWindowPos group.                 */
+                                      * DeferWindowPos group. Cleared again the
+                                      * moment a local placement works, so a
+                                      * transient refusal does not pin a window
+                                      * to the pipe for good.                 */
+    bool      place_refused;         /* NOBODY could place it — not us, not the
+                                      * helper. Distinct from needs_helper,
+                                      * which means the helper succeeded. Two
+                                      * jobs: it stops the "float it instead"
+                                      * policy firing once per tiling pass, and
+                                      * it stops that policy recursing, since
+                                      * floating the window places it again.  */
     bool      always_on_top;         /* user asked for the topmost band      */
     bool      layout_hidden;         /* the LAYOUT hid it (monocle, or the
                                       * unshown side of a tabbed container) —
@@ -1448,6 +1462,13 @@ void     window_set_floating(HWND hwnd, bool floating);
  * A no-op on a window that is already fully managed. */
 void     window_promote(HWND hwnd);
 void     window_center_float(HWND hwnd);  /* no-op unless it should be centred */
+
+/* Put a window that has ended up on NO display back onto one — an unplugged
+ * monitor, or a `geometry` rule written for an arrangement this machine no
+ * longer has. Under a shell with no taskbar that window is otherwise
+ * unreachable, and for a floating one no tiling pass will ever put it back.
+ * A no-op unless the window really is off every display. */
+bool     window_rescue_offscreen(ManagedWindow *mw);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
 /* The raising half of the pass on its own — floats into the topmost band (so
  * no ordinary window can ever cover one), then our overlays over them, then
@@ -1642,9 +1663,49 @@ bool     helper_set_topmost(HWND hwnd, bool on);   /* the always-on-top band  */
 bool     helper_set_cloak(HWND hwnd, bool on);
 bool     helper_close_window(HWND hwnd);
 
+/* ---------------------------------------------------------------------------
+ * What became of a placement.
+ *
+ * A bool was not enough, and the difference is the whole of why this type
+ * exists: "it did not move" and "it moved, but only because mshelld.exe did it
+ * for us" are different facts, and BOTH of them matter to the caller. The first
+ * means nothing may be recorded about where the window is; the second means the
+ * window must stay out of the next DeferWindowPos batch, because one window the
+ * batch cannot move fails the batch for every other window on the desktop.
+ *
+ * Callers that only want the move (an animation frame, a stash) can still treat
+ * anything but PLACE_REFUSED as success.
+ * --------------------------------------------------------------------------- */
+typedef enum {
+    PLACE_OK = 0,      /* the local SetWindowPos took it                      */
+    PLACE_VIA_HELPER,  /* refused locally; mshelld.exe performed it           */
+    PLACE_REFUSED,     /* nobody could place it — the window did NOT move     */
+} PlaceResult;
+
 /* SetWindowPos that falls back to the helper when the local call is refused.
- * Use this for placement; the raw API is still right for our own overlays. */
-bool     window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
+ * Use this for placement; the raw API is still right for our own overlays.
+ *
+ * Pure I/O: it moves the window and reports which route worked. It deliberately
+ * records NOTHING about the window — see window_apply_rect for that half. */
+PlaceResult window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
+
+/* Place a managed window at a desired VISIBLE-FRAME rect, and record the result.
+ *
+ * The one door for "put this window here and remember that we did". It expands
+ * `want` for the invisible DWM border (window_adjust_for_frame), places it, and
+ * then — and only then — updates applied_rect / has_applied / needs_helper to
+ * match what actually happened.
+ *
+ * That ordering is the point. applied_rect is what the tiler's no-op skip, the
+ * drift detector and the drag-to-swap hit test all read, so a rect recorded for
+ * a placement that was refused is a window mshell has lost track of: it will
+ * never be offered that rect again, and a phantom cell becomes a drop target
+ * over empty screen. Recording used to be open-coded at every call site, and
+ * every one of them recorded unconditionally.
+ *
+ * `mw` must be non-NULL — recording IS the job. To place a window that has no
+ * ManagedWindow, call window_set_pos directly. */
+PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags);
 
 /* ===========================================================================
  * Prototypes — session.c
@@ -1848,6 +1909,27 @@ static inline bool window_is_alive(HWND hwnd) {
 static inline bool window_is_screen_fullscreen(const ManagedWindow *mw) {
     return mw && (mw->fs_mode == FS_WINDOW || mw->fs_mode == FS_BOTH ||
                   mw->app_fullscreen);
+}
+
+/* Is this window a float in the sense the FLOAT TIER means — a window the user
+ * (or a rule) chose to keep out of the grid?
+ *
+ * `is_floating` alone cannot answer that, because it carries two meanings. One
+ * is the tier. The other is "exempt from the layout", which is why ADOPT_TRACK
+ * sets it on a window mshell is supposed to do nothing to beyond desktop
+ * membership: an owned dialog nobody opted into, a window too small to tile,
+ * one held disabled by its own modal.
+ *
+ * The distinction only matters where mshell ACTS on a float rather than merely
+ * declining to tile it — which today is the z-order pass. float_on_top parks
+ * floats in the topmost band, and reading the exemption as the tier put every
+ * stray dialog on the system above every other window, which is precisely the
+ * "otherwise untouched" the tracked tier promises (see ManagedWindow).
+ *
+ * Places that only want the exemption should keep testing `is_floating`
+ * directly — collect_clients and the layout tree do, deliberately. */
+static inline bool window_is_float_tier(const ManagedWindow *mw) {
+    return mw && mw->is_floating && !mw->tracked_only;
 }
 
 /* WinEvent suppression is a nesting counter, not a flag: repositioning a

@@ -26,7 +26,7 @@
  */
 
 #include "mshell.h"
-#include <sddl.h>       /* ConvertStringSecurityDescriptorToSecurityDescriptorW */
+#include "pipe_sd.h"    /* the DACL, shared with mshelld.exe — see that header */
 
 #define IPC_REPLY_MAX    16384
 #define IPC_CMD_MAX      1024
@@ -52,49 +52,6 @@ static void ipc_pipe_name(wchar_t *out, size_t cap) {
     ProcessIdToSessionId(GetCurrentProcessId(), &sid);
     _snwprintf(out, cap, L"\\\\.\\pipe\\mshell-%lu", (unsigned long)sid);
     out[cap - 1] = L'\0';
-}
-
-/* ===========================================================================
- * Server: security
- *
- * A named pipe created with a NULL security descriptor is reachable by every
- * local account. This one is restricted to the user running the shell plus
- * SYSTEM, built from the process token's own SID so it is correct whoever that
- * is. Returns NULL on failure, and the caller then refuses to create the pipe
- * rather than falling back to something permissive.
- * =========================================================================== */
-static PSECURITY_DESCRIPTOR ipc_build_sd(void) {
-    HANDLE token = NULL;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return NULL;
-
-    DWORD len = 0;
-    GetTokenInformation(token, TokenUser, NULL, 0, &len);
-    if (!len) { CloseHandle(token); return NULL; }
-
-    TOKEN_USER *tu = (TOKEN_USER *)malloc(len);
-    if (!tu) { CloseHandle(token); return NULL; }
-
-    PSECURITY_DESCRIPTOR sd = NULL;
-    if (GetTokenInformation(token, TokenUser, tu, len, &len)) {
-        LPWSTR sid_str = NULL;
-        if (ConvertSidToStringSidW(tu->User.Sid, &sid_str)) {
-            /* GA = generic all, to the owning user and to SYSTEM. No other
-             * ACE, and no inheritance: nothing else may open this pipe. */
-            wchar_t sddl[512];
-            _snwprintf(sddl, 512, L"D:(A;;GA;;;%ls)(A;;GA;;;SY)", sid_str);
-            sddl[511] = L'\0';
-
-            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                    sddl, SDDL_REVISION_1, &sd, NULL))
-                sd = NULL;
-
-            LocalFree(sid_str);
-        }
-    }
-
-    free(tu);
-    CloseHandle(token);
-    return sd;
 }
 
 /* ===========================================================================
@@ -255,7 +212,7 @@ static DWORD WINAPI ipc_thread_proc(LPVOID param) {
     wchar_t name[MAX_PATH];
     ipc_pipe_name(name, MAX_PATH);
 
-    PSECURITY_DESCRIPTOR sd = ipc_build_sd();
+    PSECURITY_DESCRIPTOR sd = pipe_sd_for_current_user(NULL, 0);
     if (!sd) {
         log_err(L"ipc: could not build the pipe's security descriptor — "
                 L"refusing to create an unrestricted pipe. --msg is unavailable.");
@@ -264,12 +221,19 @@ static DWORD WINAPI ipc_thread_proc(LPVOID param) {
 
     SECURITY_ATTRIBUTES sa = { sizeof sa, sd, FALSE };
 
+    /* FILE_FLAG_FIRST_PIPE_INSTANCE: fail loudly if this name is already taken
+     * rather than quietly adding an instance beside somebody else's. Anything
+     * holding FILE_CREATE_PIPE_INSTANCE on an existing pipe can add one, and a
+     * squatter that got there first would take our clients' connections.
+     * PIPE_REJECT_REMOTE_CLIENTS: a named pipe is otherwise reachable over SMB
+     * as \\host\pipe\mshell-1. Nothing here should ever answer the network. */
     for (;;) {
         if (WaitForSingleObject(g_ipc_stop, 0) == WAIT_OBJECT_0) break;
 
         HANDLE pipe = CreateNamedPipeW(
-            name, PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
+            PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             IPC_REPLY_MAX, IPC_CMD_MAX * sizeof(wchar_t), 0, &sa);
 
