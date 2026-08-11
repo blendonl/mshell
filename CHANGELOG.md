@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.0 — 2026-08-11
+
 ### Added
 
 - **`mshell.set_smart_borders(true)` — no focus ring when there is nothing to
