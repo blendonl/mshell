@@ -446,11 +446,10 @@ void window_strip_decorations(HWND hwnd) {
     style &= ~(WS_CAPTION | WS_SYSMENU | WS_THICKFRAME |
                WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
 
-    /* A thin border separates adjacent tiled windows. A window whose rule asked
-     * for no decoration at all (decorate = false — games) gets nothing, so the
-     * image reaches the screen edge with no line drawn over it. */
-    if (mw->no_decor) style &= ~WS_BORDER;
-    else              style |= WS_BORDER;
+    /* Remove the thin border too — gaps and the focus ring handle visual
+     * separation. Leaving WS_BORDER causes DWM to draw a dark grey line in
+     * the non-client area (bottom, left, right) that the WM cannot control. */
+    style &= ~WS_BORDER;
 
     SetWindowLongPtrW(hwnd, GWL_STYLE, style);
 
