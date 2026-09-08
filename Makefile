@@ -73,6 +73,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/tree_algebra.c \
               $(SRC_DIR)/ipc_state.c \
+              $(SRC_DIR)/hide_policy.c \
               $(SRC_DIR)/update.c
 
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
@@ -145,7 +146,7 @@ CPPCHECK_FLAGS = --enable=warning,portability --quiet --error-exitcode=1 \
 HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
-               api_spec tree_algebra ipc_state
+               api_spec tree_algebra ipc_state hide_policy
 TEST_SUFFIX =
 HOST_CFLAGS = -O1 -Wall -Wextra
 ASAN_CFLAGS = -O1 -g -Wall -Wextra \
