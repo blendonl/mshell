@@ -261,6 +261,7 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
         L"mshell_WhichKey",     /* our own submap hint        */
         L"mshell_Notify",       /* our own toasts             */
         L"mshell_Launcher",     /* our own app launcher       */
+        L"mrun_Window",
         L"mshell_Dim",          /* our own unfocused scrim    */
         NULL
     };

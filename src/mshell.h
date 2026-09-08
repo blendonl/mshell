@@ -1585,6 +1585,7 @@ void     launcher_shutdown(void);
 void     launcher_open(void);
 void     launcher_close(void);
 void     launcher_key(DWORD vk, wchar_t ch);
+bool     launcher_spawn_mrun(void);
 #define NOTIFY_TEXT_CAP 512   /* matches notify.c's per-toast buffer */
 
 /* Destroy `slot` if it is empty and not the one you are on. Call after anything
