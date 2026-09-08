@@ -219,6 +219,56 @@ static bool tweak_write(const Tweak *t) {
     return r == ERROR_SUCCESS;
 }
 
+static bool tweak_is_set(const Tweak *t) {
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, t->key, 0, KEY_QUERY_VALUE, &k)
+            != ERROR_SUCCESS)
+        return false;
+
+    BYTE  buf[512];
+    DWORD sz = sizeof(buf), type = 0;
+    bool  ok = RegQueryValueExW(k, t->value, NULL, &type, buf, &sz)
+                 == ERROR_SUCCESS;
+    RegCloseKey(k);
+    if (!ok) return false;
+
+    if (t->type == TW_DWORD)
+        return type == REG_DWORD && sz == sizeof(DWORD) &&
+               *(const DWORD *)buf == t->dw;
+
+    if (type != REG_SZ) return false;
+    buf[sizeof(buf) - 2] = 0;
+    buf[sizeof(buf) - 1] = 0;
+    return wcscmp((const wchar_t *)buf, t->sz) == 0;
+}
+
+static bool tweak_has_backup(const Tweak *t) {
+    wchar_t name[512];
+    backup_name(t, name, 512);
+
+    HKEY bk;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, TWEAK_BACKUP_KEY, 0, KEY_READ, &bk)
+            != ERROR_SUCCESS)
+        return false;
+
+    bool have = RegQueryValueExW(bk, name, NULL, NULL, NULL, NULL)
+                  == ERROR_SUCCESS;
+    RegCloseKey(bk);
+    return have;
+}
+
+static void tweak_backup_forget(const Tweak *t) {
+    wchar_t name[512];
+    backup_name(t, name, 512);
+
+    HKEY bk;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, TWEAK_BACKUP_KEY, 0,
+                      KEY_READ | KEY_WRITE, &bk) != ERROR_SUCCESS)
+        return;
+    RegDeleteValueW(bk, name);
+    RegCloseKey(bk);
+}
+
 static bool tweak_restore(const Tweak *t) {
     wchar_t name[512];
     backup_name(t, name, 512);
@@ -268,10 +318,19 @@ int tweaks_apply(const wchar_t *group) {
     for (int i = 0; i < TWEAK_COUNT; i++) {
         const Tweak *t = &s_tweaks[i];
         if (!group_matches(group, t->group)) continue;
+
+        bool kept = tweak_has_backup(t);
         tweak_backup(t);                     /* read BEFORE write */
-        if (tweak_write(t)) n++;
-        else log_msg(LOG_WARN, L"tweak: could not set %ls\\%ls",
-                     t->key, t->value);
+        if (tweak_write(t)) { n++; continue; }
+
+        /* The write was refused — almost always HKCU\Software\Policies without
+         * an administrator prompt. A backup left behind for a value that was
+         * never set is what made --tweaks list report it as applied, and a
+         * later revert would then claim to undo something that never happened.
+         * Only this call's own backup is dropped; an earlier, real one stays. */
+        if (!kept) tweak_backup_forget(t);
+        log_msg(LOG_WARN, L"tweak: could not set %ls\\%ls — needs an "
+                          L"administrator prompt", t->key, t->value);
     }
     log_msg(LOG_INFO, L"tweaks: applied %d", n);
     return n;
@@ -290,23 +349,20 @@ int tweaks_revert(const wchar_t *group) {
 
 /* What is applied right now, which nothing previously recorded. */
 void tweaks_list(void) {
-    HKEY bk;
-    bool have_backup = RegOpenKeyExW(HKEY_CURRENT_USER, TWEAK_BACKUP_KEY, 0,
-                                     KEY_READ, &bk) == ERROR_SUCCESS;
-
     console_print("group    state    setting\n");
     console_print("-------- -------- ---------------------------------------\n");
+
+    int failed = 0;
 
     for (int i = 0; i < TWEAK_COUNT; i++) {
         const Tweak *t = &s_tweaks[i];
 
-        bool applied = false;
-        if (have_backup) {
-            wchar_t name[512];
-            backup_name(t, name, 512);
-            applied = RegQueryValueExW(bk, name, NULL, NULL, NULL, NULL)
-                        == ERROR_SUCCESS;
-        }
+        /* The LIVE value decides, not the backup. Reading the backup alone said
+         * "applied" for a write that had been refused, which is the one thing
+         * this table is asked. */
+        const char *state = "-";
+        if (tweak_is_set(t))          state = "applied";
+        else if (tweak_has_backup(t)) { state = "failed"; failed++; }
 
         char line[512];
         char why[256];
@@ -314,13 +370,15 @@ void tweaks_list(void) {
         char grp[32];
         WideCharToMultiByte(CP_UTF8, 0, t->group, -1, grp, 32, NULL, NULL);
 
-        _snprintf(line, 512, "%-8s %-8s %s\n", grp,
-                  applied ? "applied" : "-", why);
+        _snprintf(line, 512, "%-8s %-8s %s\n", grp, state, why);
         line[511] = '\0';
         console_print(line);
     }
 
-    if (have_backup) RegCloseKey(bk);
+    if (failed)
+        console_print("\n'failed' means mshell recorded the old value but could "
+                      "not write the new one.\nRe-run --tweaks apply from an "
+                      "administrator prompt.\n");
 }
 
 /* Emit the .reg files from this same table, so the shipped files and the
