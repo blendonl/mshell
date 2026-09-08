@@ -1,5 +1,6 @@
 CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
+OBJCOPY  = x86_64-w64-mingw32-objcopy
 
 VERSION  = 0.15.4
 
@@ -7,7 +8,7 @@ VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
 VER_PATCH := $(word 3,$(subst ., ,$(VERSION)))
 
-CFLAGS   = -O2 -s -flto -mwindows \
+CFLAGS   = -O2 -g -flto -mwindows \
            -DUNICODE -D_UNICODE \
            -DMSHELL_VERSION='"$(VERSION)"' \
            -Wall -Wextra -Wno-unused-parameter \
@@ -15,6 +16,8 @@ CFLAGS   = -O2 -s -flto -mwindows \
            $(CFLAGS_EXTRA)
 
 CFLAGS_EXTRA ?=
+
+STRICT_WARNINGS = -Wshadow -Wformat=2 -Wvla
 
 RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
@@ -57,6 +60,8 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/tweaks.c \
               $(SRC_DIR)/display.c \
               $(SRC_DIR)/update_parse.c \
+              $(SRC_DIR)/tree_algebra.c \
+              $(SRC_DIR)/ipc_state.c \
               $(SRC_DIR)/update.c
 
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
@@ -99,28 +104,46 @@ MSHELL_OBJS = $(MSHELL_SRCS:.c=.o)
 
 RES_OBJ  = $(SRC_DIR)/mshell.res.o
 
-TARGET   = mshell.exe
+TARGET        = mshell.exe
+TARGET_FULL   = mshell.unstripped.exe
 
 HELPER        = mshelld.exe
+HELPER_FULL   = mshelld.unstripped.exe
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
 HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
 
+SYMBOLS       = $(TARGET).debug $(HELPER).debug
+
 DISTNAME = mshell-$(VERSION)-win64
 DISTDIR  = dist/$(DISTNAME)
+SYMNAME  = $(DISTNAME)-symbols
+SYMDIR   = dist/$(SYMNAME)
 DIST_FILES = install.bat uninstall.bat \
              harden.reg harden-undo.reg \
              debloat.reg debloat-undo.reg \
              services.reg services-undo.reg \
              INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
 
-HOST_CC   = cc
-TEST_DIR  = test
-TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
-            $(TEST_DIR)/test_whichkey_math $(TEST_DIR)/test_update_parse \
-            $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
+CPPCHECK       = cppcheck
+CPPCHECK_DIR   = .github/cppcheck
+CPPCHECK_FLAGS = --enable=warning,portability --quiet --error-exitcode=1 \
+                 --suppress=missingIncludeSystem \
+                 --suppressions-list=$(CPPCHECK_DIR)/suppressions.txt
 
-.PHONY: all clean check-lua dist test regs msi print-version probe meta check-config
+HOST_CC     = cc
+TEST_DIR    = test
+TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
+               api_spec tree_algebra ipc_state
+TEST_SUFFIX =
+HOST_CFLAGS = -O1 -Wall -Wextra
+ASAN_CFLAGS = -O1 -g -Wall -Wextra \
+              -fsanitize=address,undefined -fno-omit-frame-pointer \
+              -fno-sanitize-recover=all
+TEST_BINS   = $(TEST_MODULES:%=$(TEST_DIR)/test_%$(TEST_SUFFIX))
+
+.PHONY: all clean check-lua dist test test-asan run-host-tests regs msi \
+        print-version probe meta check-config cppcheck symbols
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -135,29 +158,47 @@ $(VERSION_STAMP):
 
 $(MSHELL_OBJS) $(HELPER_OBJS) $(RES_OBJ): $(VERSION_STAMP)
 
-$(TARGET): $(ALL_OBJS) $(RES_OBJ)
+$(TARGET_FULL): $(ALL_OBJS) $(RES_OBJ)
 	@echo "  LINK  $@"
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(HELPER): $(HELPER_OBJS)
+$(HELPER_FULL): $(HELPER_OBJS)
 	@echo "  LINK  $@"
 	$(CC) $(CFLAGS) -o $@ $^ $(HELPER_LDLIBS)
 
+$(TARGET).debug: $(TARGET_FULL)
+	@echo "  SYMS  $@"
+	$(OBJCOPY) --only-keep-debug $< $@
+
+$(HELPER).debug: $(HELPER_FULL)
+	@echo "  SYMS  $@"
+	$(OBJCOPY) --only-keep-debug $< $@
+
+$(TARGET): $(TARGET_FULL) $(TARGET).debug
+	@echo "  STRIP $@"
+	$(OBJCOPY) --strip-all --add-gnu-debuglink=$(TARGET).debug $< $@
+
+$(HELPER): $(HELPER_FULL) $(HELPER).debug
+	@echo "  STRIP $@"
+	$(OBJCOPY) --strip-all --add-gnu-debuglink=$(HELPER).debug $< $@
+
+symbols: $(SYMBOLS)
+
 $(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h $(SRC_DIR)/log.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/log.o: $(SRC_DIR)/log.c $(SRC_DIR)/log.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/pipe_sd.o: $(SRC_DIR)/pipe_sd.c $(SRC_DIR)/pipe_sd.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(RES_OBJ): $(SRC_DIR)/mshell.rc $(SRC_DIR)/mshell.exe.manifest
 	@echo "  RC    $<"
@@ -211,12 +252,13 @@ msi: $(TARGET) $(HELPER)
 	    echo "  SKIP  msi — wixl not installed (apt install wixl)"; \
 	fi
 
-dist: $(TARGET) $(HELPER)
+dist: $(TARGET) $(HELPER) $(SYMBOLS)
 	@echo "  DIST  $(DISTNAME)"
-	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip"
-	mkdir -p "$(DISTDIR)/config" "$(DISTDIR)/meta"
+	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip" "$(SYMDIR)" "dist/$(SYMNAME).zip"
+	mkdir -p "$(DISTDIR)/config" "$(DISTDIR)/meta" "$(SYMDIR)"
 	cp $(TARGET)          "$(DISTDIR)/"
 	cp $(HELPER)          "$(DISTDIR)/"
+	cp $(SYMBOLS)         "$(SYMDIR)/"
 	cp config/init.lua      "$(DISTDIR)/config/"
 	cp config/init.full.lua "$(DISTDIR)/config/"
 	cp meta/mshell.lua      "$(DISTDIR)/meta/"
@@ -224,31 +266,13 @@ dist: $(TARGET) $(HELPER)
 	cp config/.luarc.json   "$(DISTDIR)/config/"
 	cp $(DIST_FILES)      "$(DISTDIR)/"
 	cd dist && python3 -m zipfile -c "$(DISTNAME).zip" "$(DISTNAME)"
+	cd dist && python3 -m zipfile -c "$(SYMNAME).zip" "$(SYMNAME)"
 	@echo "  ->    dist/$(DISTNAME).zip"
+	@echo "  ->    dist/$(SYMNAME).zip"
 
-$(TEST_DIR)/test_match: $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c $(SRC_DIR)/match.h
+$(TEST_DIR)/test_%$(TEST_SUFFIX): $(TEST_DIR)/test_%.c $(SRC_DIR)/%.c $(SRC_DIR)/%.h
 	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c
-
-$(TEST_DIR)/test_layout_math: $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c $(SRC_DIR)/layout_math.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c
-
-$(TEST_DIR)/test_whichkey_math: $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c $(SRC_DIR)/whichkey_math.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c
-
-$(TEST_DIR)/test_update_parse: $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c $(SRC_DIR)/update_parse.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c
-
-$(TEST_DIR)/test_desktop_list: $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/desktop_list.c $(SRC_DIR)/desktop_list.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/desktop_list.c
-
-$(TEST_DIR)/test_api_spec: $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c $(SRC_DIR)/api_spec.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_$*.c $(SRC_DIR)/$*.c
 
 GEN_META = tools/gen_lua_meta
 
@@ -291,14 +315,31 @@ check-config: $(HOST_LUA)
 	@./$(HOST_LUA) $(TEST_DIR)/check_config.lua $(SRC_DIR)/api_spec.c \
 	    config/init.lua config/init.full.lua README.md
 
-test: $(TEST_BINS) check-config
-	@echo "  TEST"
+cppcheck:
+	@if command -v $(CPPCHECK) >/dev/null 2>&1; then \
+	    echo "  CHECK $(SRC_DIR)"; \
+	    $(CPPCHECK) $(CPPCHECK_FLAGS) $(SRC_DIR)/; \
+	else \
+	    echo "  SKIP  cppcheck — not installed (apt install cppcheck)"; \
+	fi
+
+run-host-tests: $(TEST_BINS)
+	@echo "  TEST  $(if $(TEST_SUFFIX),sanitized,host)"
 	@fail=0; for t in $(TEST_BINS); do ./$$t || fail=1; done; \
 	 if [ $$fail -ne 0 ]; then echo "  TESTS FAILED"; exit 1; fi; \
 	 echo "  all tests passed"
 
+test: check-config run-host-tests
+
+test-asan:
+	@$(MAKE) --no-print-directory run-host-tests \
+	    TEST_SUFFIX=.asan HOST_CFLAGS="$(ASAN_CFLAGS)"
+
 clean:
-	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(PROBE) $(GEN_META) $(HOST_LUA)
+	rm -f $(TARGET) $(HELPER) $(TARGET_FULL) $(HELPER_FULL) $(SYMBOLS) \
+	      $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) \
+	      $(TEST_BINS) $(TEST_MODULES:%=$(TEST_DIR)/test_%.asan) \
+	      $(PROBE) $(GEN_META) $(HOST_LUA)
 	rm -f .version-*
 	rm -f $(LUA_DIR)/lua.o $(LUA_DIR)/luac.o $(LUA_DIR)/liblua.a \
 	      $(LUA_DIR)/lua $(LUA_DIR)/luac
