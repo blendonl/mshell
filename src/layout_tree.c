@@ -271,8 +271,9 @@ static void tree_sync(Tree *t, Desktop *dt, int mon) {
         tree_remove(t, stale);
     }
 
-    /* Then insert anything new, at the focused leaf. */
-    HWND focus = desktop_get_focused();
+    /* Then insert anything new, at the focused leaf — this desktop's focused
+     * leaf, which on a display you are not looking at is not the global one. */
+    HWND focus = desktop_focused_of(dt);
     for (int i = 0; i < dt->count; i++) {
         HWND h = dt->windows[i];
         if (!tree_owns_window(h, mon)) continue;
