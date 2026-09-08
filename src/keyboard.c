@@ -1490,6 +1490,14 @@ void execute_action(Action action, int arg, const wchar_t *command,
         display_cycle_refresh(g.focused_monitor, arg >= 0 ? +1 : -1);
         break;
 
+    case ACTION_CYCLE_ROTATION:
+        display_cycle_rotation(g.focused_monitor, arg >= 0 ? +1 : -1);
+        break;
+
+    case ACTION_TOGGLE_PORTRAIT:
+        display_toggle_portrait(g.focused_monitor);
+        break;
+
     /* -- manual (BSP) tiling ------------------------------------------- */
     case ACTION_SPLIT_H: layout_tree_set_split(SPLIT_H); break;
     case ACTION_SPLIT_V: layout_tree_set_split(SPLIT_V); break;

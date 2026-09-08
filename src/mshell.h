@@ -821,6 +821,9 @@ typedef struct {
  * Windows too old to be asked, which the caller treats identically. */
 enum { HDR_UNSUPPORTED = -1, HDR_OFF = 0, HDR_ON = 1 };
 
+enum { ROTATE_KEEP = -1, ROTATE_0 = 0, ROTATE_90 = 90, ROTATE_180 = 180,
+       ROTATE_270 = 270 };
+
 /* One monitor's configured overrides, matched by device name. Kept separate
  * from Monitor because a config is loaded before the displays it names are
  * necessarily attached, and has to survive them coming and going.
@@ -841,6 +844,7 @@ typedef struct {
     bool    set_resolution; int width, height;
     bool    set_refresh;    int refresh;
     bool    set_hdr;        bool hdr;
+    bool    set_rotation;   int rotation;
 } MonitorRule;
 
 /* ---------------------------------------------------------------------------
@@ -1230,12 +1234,17 @@ int      display_modes(const wchar_t *device, DisplayMode *out, int max);
  * first, so a resolution the panel cannot show costs a log line rather than a
  * black screen on a machine whose shell this is. Session-only: Windows' stored
  * display configuration is not written. */
-bool     display_set_mode(const wchar_t *device, const DisplayMode *want);
+bool     display_set_mode(const wchar_t *device, const DisplayMode *want,
+                          int rotation);
+
+int      display_rotation(const wchar_t *device);
+const wchar_t *rotation_name(int rotation);
 
 int      display_hdr_state(const wchar_t *device);  /* HDR_UNSUPPORTED/OFF/ON */
 bool     display_hdr_set(const wchar_t *device, bool on);
 
-/* Apply the monitor rules' resolution/refresh/hdr to the attached displays.
+/* Apply the monitor rules' resolution/refresh/rotation/hdr to the attached
+ * displays.
  * force = the config just said so (startup, reload): every display is
  * re-asserted. Otherwise only displays not seen before are touched, which is
  * the one that was just plugged in — see the comment in display.c for why the
@@ -1244,6 +1253,8 @@ void     displays_apply_rules(bool force);
 
 void     display_toggle_hdr(int mon);
 void     display_cycle_refresh(int mon, int dir);   /* dir < 0 = the other way */
+void     display_cycle_rotation(int mon, int dir);
+void     display_toggle_portrait(int mon);
 void     display_list(void);                        /* mshell.exe --displays  */
 
 /* ===========================================================================

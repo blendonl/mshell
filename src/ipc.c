@@ -103,9 +103,9 @@ static void ipc_build_state(char *out, size_t cap) {
 
         /* The device name is what a monitor rule is written against, and the
          * mode is what one asks for — so a script (or a person) can read both
-         * here instead of guessing. `refresh` and `hdr` come from the display
-         * itself rather than from anything cached, so they stay right when the
-         * user changes them outside mshell. */
+         * here instead of guessing. `refresh`, `rotation` and `hdr` come from
+         * the display itself rather than from anything cached, so they stay
+         * right when the user changes them outside mshell. */
         json_escape(m->device, esc, sizeof esc);
         DisplayMode mode = {0};
         display_current_mode(m->device, &mode);
@@ -122,12 +122,13 @@ static void ipc_build_state(char *out, size_t cap) {
                  "%s{\"index\":%d,\"device\":\"%s\",\"desktop\":\"%s\","
                  "\"x\":%ld,\"y\":%ld,"
                  "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
-                 "\"hdr\":%s,\"focused\":%s}",
+                 "\"rotation\":%d,\"hdr\":%s,\"focused\":%s}",
                  i ? "," : "", i, esc, dname,
                  (long)m->full.left, (long)m->full.top,
                  (long)(m->full.right - m->full.left),
                  (long)(m->full.bottom - m->full.top),
                  monitor_dpi(i), mode.refresh,
+                 display_rotation(m->device),
                  hdr == HDR_UNSUPPORTED ? "null" : hdr == HDR_ON ? "true"
                                                                  : "false",
                  i == g.focused_monitor ? "true" : "false");
