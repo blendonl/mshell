@@ -124,9 +124,13 @@ static HFONT bar_font(int mon) {
  * Content
  * =========================================================================== */
 
-/* "1 2 web*" — every live desktop, the current one marked. The marker is a
- * trailing '*' rather than only a colour so the bar still reads correctly in a
- * screenshot, at a glance, or for anyone who can't separate the two colours. */
+/* "1 2 web*" — every live desktop, with the ones on screen marked: '*' is the
+ * one you are driving, '+' is a desktop up on another display. Two markers
+ * because a display each showing its own desktop means more than one is
+ * visible at a time, and a bar that marked only the focused one would report
+ * the other monitor as empty. Trailing characters rather than only a colour so
+ * the bar still reads correctly in a screenshot, at a glance, or for anyone who
+ * can't separate the two colours. */
 static void build_desktops(wchar_t *out, size_t cap) {
     out[0] = L'\0';
     size_t used = 0;
@@ -134,10 +138,13 @@ static void build_desktops(wchar_t *out, size_t cap) {
     for (int i = 0; i < g.desktop_count; i++) {
         const Desktop *d  = &g.desktops[i];
         bool           cur = (d->id == g.current_desktop_id);
+        const wchar_t *mark = cur                       ? L"*"
+                            : desktop_is_visible(d->id) ? L"+"
+                                                        : L"";
 
         wchar_t chunk[DESKTOP_NAME_MAX + 8];
         _snwprintf(chunk, DESKTOP_NAME_MAX + 8, L"%ls%ls%ls",
-                   used ? L"  " : L"", d->name, cur ? L"*" : L"");
+                   used ? L"  " : L"", d->name, mark);
         chunk[DESKTOP_NAME_MAX + 7] = L'\0';
 
         size_t n = wcslen(chunk);

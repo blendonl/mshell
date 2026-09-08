@@ -301,7 +301,7 @@ static void layout_grid(const LayoutParams *lp, Client *cs, int n) {
  * windows are hidden so focus-cycling swaps which one shows.
  * =========================================================================== */
 static void layout_monocle(const LayoutParams *lp, Client *cs, int n) {
-    HWND focus  = desktop_get_focused();
+    HWND focus  = lp->focus;
     HWND target = cs[0].hwnd;
     for (int i = 0; i < n; i++)
         if (cs[i].hwnd == focus) { target = focus; break; }
@@ -386,6 +386,7 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
     lp.master_ratio = (M && M->master_ratio > 0.f) ? M->master_ratio
                                                     : dt->master_ratio;
     lp.n_master     = (M && M->n_master > 0) ? M->n_master : dt->n_master;
+    lp.focus        = desktop_focused_of(dt);
 
     s_inner = lp.inner;   /* emit() reads this for the per-cell half-gap */
 
@@ -450,11 +451,18 @@ static void flush_placements(void) {
      * the unshown side of a tabbed container) and is deliberately distinct from
      * app_hidden, which is the APP hiding itself to the tray — mshell must not
      * un-hide the latter. window_hide/window_show enforce that themselves. */
-    Desktop *cur = desktop_current();
-    for (int i = 0; i < cur->count; i++) {
-        ManagedWindow *mw = window_find(cur->windows[i]);
-        if (!mw || mw->is_floating) continue;
-        if (mw->layout_hidden) window_hide(mw);
+    /* Every desktop that is UP, not just the one you are driving: a pass now
+     * tiles each display from its own desktop, so the hide decisions it just
+     * made belong to more than one window list. Walking only the current
+     * desktop left the other display's monocle-hidden windows on screen. */
+    for (int d = 0; d < g.desktop_count; d++) {
+        Desktop *dt = &g.desktops[d];
+        if (!desktop_is_visible(dt->id)) continue;
+        for (int i = 0; i < dt->count; i++) {
+            ManagedWindow *mw = window_find(dt->windows[i]);
+            if (!mw || mw->is_floating) continue;
+            if (mw->layout_hidden) window_hide(mw);
+        }
     }
 
     /* Anything with a tile belongs on the screen. Note this runs AFTER the
@@ -585,37 +593,37 @@ static void flush_placements(void) {
 }
 
 /* ===========================================================================
- * Tile a specific desktop, by slot — valid only until the next desktop is
- * created or destroyed, so callers pass one they just looked up.
+ * Tile every display, each from the desktop IT is showing.
+ *
+ * The name is older than the per-monitor desktop set and is kept because every
+ * caller means the same thing by it: "the arrangement changed, put the screen
+ * back in order". What changed is that there is no longer a single current
+ * desktop to lay out — display 0 may be showing the terminal while display 1
+ * shows the browser, and both have to be tiled, from their own window lists,
+ * into their own work areas.
+ *
+ * One batch across all of them rather than one per display: flush_placements
+ * skips the windows already where they belong, so re-tiling a display nothing
+ * happened on costs a rect comparison each and no SetWindowPos at all.
  * =========================================================================== */
-void tile_desktop(int slot) {
-    if (slot < 0 || slot >= g.desktop_count) return;
-
-    Desktop *dt = &g.desktops[slot];
-
-    /* Suppress WinEvent callbacks while we move windows around. */
+void tile_current(void) {
     events_suppress_begin();
-
     place_reset();
 
     if (g.monitor_count <= 0) {
-        tile_monitor(dt, 0, g.work_area);           /* single-monitor fallback */
+        tile_monitor(desktop_current(), 0, g.work_area);  /* no displays yet */
     } else {
-        for (int m = 0; m < g.monitor_count; m++)
+        for (int m = 0; m < g.monitor_count; m++) {
+            Desktop *dt = desktop_by_id(desktop_on_monitor(m));
+            if (!dt) continue;            /* this display is showing nothing */
             tile_monitor(dt, m, g.monitors[m].work_area);
+        }
     }
 
     flush_placements();
     window_enforce_zorder();
-
     events_suppress_end();
-}
 
-/* ===========================================================================
- * Tile the current desktop
- * =========================================================================== */
-void tile_current(void) {
-    tile_desktop(desktop_current_slot());
     /* Window geometry just changed — move the focus ring to match, and let the
      * bar re-read the layout and window counts. bar_refresh() compares against
      * what is already drawn, so calling it from here (which is often) is

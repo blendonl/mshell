@@ -762,44 +762,114 @@ static int resolve_target(Desktop *dt, int from, Action action, bool cycle_prev)
  * Multi-monitor helpers
  * =========================================================================== */
 
-/* Move focus to a window on the next/prev monitor that has one. */
-static void focus_monitor(int delta) {
-    if (g.monitor_count < 2) return;
-    Desktop *dt = desktop_current();
-    HWND focus  = desktop_get_focused();
-    int  cur    = focus ? monitor_of_window(focus) : g.focused_monitor;
+/* Move the focus to the next/previous display.
+ *
+ * Each display shows its own desktop now, so this is no longer a search for a
+ * window of the current desktop that happens to sit on another monitor —
+ * there are none. It is a change of WHICH DESKTOP you are driving: the focused
+ * monitor moves, current_desktop_id follows it, and the window you were last
+ * on over there gets the keyboard back. */
+void focus_monitor_at(int mon) {
+    if (mon < 0 || mon >= g.monitor_count) return;
 
-    for (int step = 1; step <= g.monitor_count; step++) {
-        int m = (((cur + delta * step) % g.monitor_count) + g.monitor_count)
-                % g.monitor_count;
-        for (int i = 0; i < dt->count; i++) {
-            HWND h = dt->windows[i];
-            if (!h || !IsWindow(h)) continue;
-            if (monitor_of_window(h) == m) {
-                dt->focused = i;
-                g.focused_monitor = m;
-                window_focus(h);
-                if (dt->layout == LAYOUT_MONOCLE) tile_current();
-                return;
-            }
-        }
-    }
+    g.focused_monitor = mon;
+    desktop_sync_current();
+
+    HWND f = desktop_on_monitor(mon) ? desktop_get_focused() : NULL;
+    if (f) window_focus(f);
+    else   window_focus_none();
+
+    g.focused_monitor = mon;
+    desktop_sync_current();
+
+    if (desktop_current()->layout == LAYOUT_MONOCLE) tile_current();
+    border_refresh();
+    bar_refresh();
+    mouse_warp_focus();
 }
 
-/* Reassign the focused window to the next/prev monitor and re-tile both. */
+static void focus_monitor(int delta) {
+    if (g.monitor_count < 2) return;
+
+    int cur = g.focused_monitor;
+    if (cur < 0 || cur >= g.monitor_count) cur = 0;
+
+    int m = (((cur + delta) % g.monitor_count) + g.monitor_count)
+            % g.monitor_count;
+    focus_monitor_at(m);
+}
+
+/* `unknown` is filled in with the desktop name when the command named one that
+ * is not alive — the one failure the caller can describe usefully, and the one
+ * a bare "expected a monitor index" was misreporting. */
+static bool parse_desktop_monitor(const wchar_t *command, int arg,
+                                  int *slot, int *mon,
+                                  wchar_t *unknown, size_t unknown_cap) {
+    *slot = desktop_current_slot();
+    *mon  = arg;
+    if (unknown_cap) unknown[0] = L'\0';
+    if (!command || !command[0]) return true;
+
+    const wchar_t *p = command;
+    while (*p == L' ') p++;
+    const wchar_t *name = p;
+    while (*p && *p != L' ') p++;
+    size_t len = (size_t)(p - name);
+    while (*p == L' ') p++;
+
+    if (!*p) {
+        if (!len || (name[0] != L'-' && (name[0] < L'0' || name[0] > L'9')))
+            return false;
+        *mon = _wtoi(name);
+        return true;
+    }
+
+    if (!len || len >= DESKTOP_NAME_MAX) return false;
+    wchar_t dtname[DESKTOP_NAME_MAX];
+    memcpy(dtname, name, len * sizeof(wchar_t));
+    dtname[len] = L'\0';
+
+    int s = desktop_slot_by_name(dtname);
+    if (s < 0) {
+        if (unknown_cap) {
+            wcsncpy(unknown, dtname, unknown_cap - 1);
+            unknown[unknown_cap - 1] = L'\0';
+        }
+        return false;
+    }
+    *slot = s;
+    *mon  = _wtoi(p);
+    return true;
+}
+
+/* Send the focused window to the next/prev display.
+ *
+ * A window belongs to a desktop and a desktop belongs to a display, so putting
+ * a window on the other screen means putting it on the DESKTOP that screen is
+ * showing — reassigning its monitor alone would leave it owned by a desktop
+ * that lives somewhere else, and the next tiling pass would drag it back.
+ *
+ * A display showing nothing has no desktop to move it to, and this says so
+ * rather than half-moving the window. */
 static void move_focused_to_monitor(int delta) {
     if (g.monitor_count < 2) return;
-    HWND focus = desktop_get_focused();
-    ManagedWindow *mw = window_find(focus);
-    if (!mw) return;
 
-    int cur = mw->monitor;
+    HWND focus = desktop_get_focused();
+    if (!focus) return;
+
+    int cur = g.focused_monitor;
     if (cur < 0 || cur >= g.monitor_count) cur = 0;
-    window_set_monitor(mw, (((cur + delta) % g.monitor_count) +
-                            g.monitor_count) % g.monitor_count);
-    g.focused_monitor = mw->monitor;
-    tile_current();
-    if (focus) window_focus(focus);
+    int m = (((cur + delta) % g.monitor_count) + g.monitor_count)
+            % g.monitor_count;
+
+    Desktop *dst = desktop_by_id(desktop_on_monitor(m));
+    if (!dst) {
+        notify_show(L"that display is not showing a desktop — switch to one "
+                    L"there first", NOTIFY_WARN, 2500);
+        return;
+    }
+
+    desktop_move_window(focus, dst->name);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1064,6 +1134,35 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_MOVE_TO_MONITOR_NEXT: move_focused_to_monitor(+1); break;
     case ACTION_MOVE_TO_MONITOR_PREV: move_focused_to_monitor(-1); break;
 
+    case ACTION_DESKTOP_TO_MONITOR: {
+        int     slot, mon;
+        wchar_t unknown[DESKTOP_NAME_MAX];
+        if (!parse_desktop_monitor(command, arg, &slot, &mon,
+                                   unknown, DESKTOP_NAME_MAX)) {
+            if (unknown[0]) {
+                wchar_t msg[DESKTOP_NAME_MAX + 64];
+                _snwprintf(msg, DESKTOP_NAME_MAX + 63,
+                           L"desktop_to_monitor: no desktop named '%ls' "
+                           L"exists right now", unknown);
+                msg[DESKTOP_NAME_MAX + 63] = L'\0';
+                notify_show(msg, NOTIFY_WARN, 3000);
+            } else {
+                notify_show(L"desktop_to_monitor: expected a monitor index, "
+                            L"optionally after a desktop name",
+                            NOTIFY_WARN, 3000);
+            }
+            break;
+        }
+        if (!desktop_set_monitor(slot, mon)) {
+            wchar_t msg[96];
+            _snwprintf(msg, 96, L"monitor %d does not exist — %d attached",
+                       mon, g.monitor_count);
+            msg[95] = L'\0';
+            notify_show(msg, NOTIFY_WARN, 3000);
+        }
+        break;
+    }
+
     /* -- window lifetime ----------------------------------------------- */
     case ACTION_CLOSE:
         if (focus) window_close(focus);
@@ -1143,7 +1242,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
             old->user_hidden = false;
             /* Only if you would be able to see it: on another desktop the flag
              * is enough, and that desktop's next switch-in does the rest. */
-            if (old->desktop_id == g.current_desktop_id) {
+            if (desktop_is_visible(old->desktop_id)) {
                 events_suppress_begin();
                 window_show(old);
                 events_suppress_end();
@@ -1169,7 +1268,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
         }
         if (!IsWindow(sp->hwnd)) { sp->scratchpad = false; break; }
 
-        bool here    = (sp->desktop_id == g.current_desktop_id);
+        bool here    = desktop_is_visible(sp->desktop_id);
         bool showing = here && window_on_screen(sp);
 
         if (!showing) {
@@ -1409,7 +1508,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
             if (!mw->urgent || !IsWindow(mw->hwnd)) continue;
 
             Desktop *d = desktop_by_id(mw->desktop_id);
-            if (d && mw->desktop_id != g.current_desktop_id)
+            if (d && !desktop_is_visible(mw->desktop_id))
                 desktop_switch(d->name);
 
             desktop_focus_update(mw->hwnd);

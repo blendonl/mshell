@@ -32,6 +32,7 @@ static void config_apply_defaults(void) {
     g.background_color = DEFAULT_BACKGROUND_COLOR;
     g.mouse_enabled    = true;
     g.mouse_follow     = false;
+    g.mouse_warp       = false;
     g.mouse_mod_drag   = false;
     /* Not booleans: these three are Windows' settings, and "the config does not
      * mention it" has to mean LEAVE THE MACHINE ALONE rather than "set it to
@@ -150,7 +151,7 @@ typedef struct {
     COLORREF  background_color;
     bool      block_system_keys;
     bool      auto_reload;
-    bool      mouse_enabled, mouse_follow, mouse_mod_drag;
+    bool      mouse_enabled, mouse_follow, mouse_warp, mouse_mod_drag;
     bool      bar_enabled, bar_bottom;
     BarMode   bar_mode;
     int       bar_height;
@@ -217,6 +218,7 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->auto_reload       = g.auto_reload;
     s->mouse_enabled     = g.mouse_enabled;
     s->mouse_follow      = g.mouse_follow;
+    s->mouse_warp        = g.mouse_warp;
     s->mouse_mod_drag    = g.mouse_mod_drag;
     s->bar_enabled       = g.bar_enabled;
     s->bar_mode          = g.bar_mode;
@@ -329,6 +331,7 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.auto_reload       = s->auto_reload;
     g.mouse_enabled     = s->mouse_enabled;
     g.mouse_follow      = s->mouse_follow;
+    g.mouse_warp        = s->mouse_warp;
     g.mouse_mod_drag    = s->mouse_mod_drag;
     g.bar_enabled       = s->bar_enabled;
     g.bar_mode          = s->bar_mode;

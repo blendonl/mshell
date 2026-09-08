@@ -29,6 +29,64 @@
 /* ---------------------------------------------------------------------------
  * Focus follows mouse
  * --------------------------------------------------------------------------- */
+/* The pointer's last seen position, shared with the warp below: a warp moves
+ * the cursor without the user touching it, and the poll must not then read its
+ * own jump as a movement and re-decide the focus from underneath the keybind
+ * that caused it. */
+static POINT s_last_pointer;
+
+/* ===========================================================================
+ * Warping the pointer to the focus.
+ *
+ * The counterpart to `follow`, and the reason the two are separate switches:
+ * follow lets the POINTER drive the focus, this lets the FOCUS drive the
+ * pointer. With two displays and no warp, moving the focus to the other
+ * monitor with the keyboard leaves the cursor behind on the one you just left,
+ * so the next click, scroll or hover goes to the wrong screen.
+ *
+ * Only when the focus CROSSES DISPLAYS. Within one monitor the pointer is
+ * where you left it and the window you are typing into is under your eyes, not
+ * under your hand; yanking the cursor to the middle of every window you focused
+ * would be motion sickness, and with follow on it would also fight every focus
+ * you set by hand.
+ * =========================================================================== */
+void mouse_warp_focus(void) {
+    if (!g.mouse_warp) return;
+    if (g.drag_hwnd || g.mod_drag_hwnd) return;   /* the drag owns the pointer */
+
+    int mon = g.focused_monitor;
+    if (mon < 0 || mon >= g.monitor_count) return;
+
+    POINT p;
+    if (!GetCursorPos(&p)) return;
+
+    RECT mr = g.monitors[mon].full;
+    if (PtInRect(&mr, p)) return;    /* already on that display — leave it be */
+
+    /* The focused window if it is actually on screen, the display itself
+     * otherwise (an empty desktop still deserves the pointer). */
+    RECT target = g.monitors[mon].work_area;
+    HWND focus  = desktop_get_focused();
+    if (focus && IsWindow(focus)) {
+        ManagedWindow *mw = window_find(focus);
+        RECT wr;
+        if (mw && window_on_screen(mw) && GetWindowRect(focus, &wr))
+            target = wr;
+    }
+
+    POINT c = { (target.left + target.right) / 2,
+                (target.top + target.bottom) / 2 };
+
+    /* A window can hang off its display (a float dragged half off, a stale
+     * rect). The pointer belongs on the monitor we are focusing either way. */
+    if (!PtInRect(&mr, c)) {
+        c.x = (mr.left + mr.right) / 2;
+        c.y = (mr.top + mr.bottom) / 2;
+    }
+
+    if (SetCursorPos(c.x, c.y)) s_last_pointer = c;
+}
+
 void mouse_poll_focus(void) {
     if (!g.mouse_follow) return;
 
@@ -38,9 +96,8 @@ void mouse_poll_focus(void) {
     /* Nothing to do until the pointer actually moves. Without this, focus
      * would be re-asserted every tick, which fights any focus the user set
      * with the keyboard while the cursor sits still over another window. */
-    static POINT last;
-    if (p.x == last.x && p.y == last.y) return;
-    last = p;
+    if (p.x == s_last_pointer.x && p.y == s_last_pointer.y) return;
+    s_last_pointer = p;
 
     /* A drag in progress owns the pointer; stealing focus mid-drag would drop
      * whatever is being dragged. */
@@ -55,7 +112,7 @@ void mouse_poll_focus(void) {
     if (!top || top == GetForegroundWindow()) return;
 
     ManagedWindow *mw = window_find(top);
-    if (!mw || mw->desktop_id != g.current_desktop_id) return;
+    if (!mw || !desktop_is_visible(mw->desktop_id)) return;
 
     desktop_focus_update(top);
     window_focus(top);

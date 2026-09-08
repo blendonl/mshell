@@ -98,6 +98,11 @@
 #define TIMER_FOLLOW_MOUSE       2
 #define TIMER_ANIM               3
 #define FOLLOW_MOUSE_MS          120   /* human-speed; see mouse.c */
+/* The float pass walks the system z-order from the TOP, where every window on
+ * the machine is, rather than from the bottom where the sunk ones cluster. It
+ * stops as soon as it has found the floats it is looking for; this is the
+ * backstop for the case where one of them is not in the z-order at all. */
+#define ZORDER_WALK_MAX          512
 #define WM_MSHELL_SUBMAP  (WM_APP + 2)
 #define WM_MSHELL_CONFIG_CHANGED  (WM_APP + 3)
 
@@ -276,6 +281,13 @@ typedef struct {
     int   inner;         /* inner gap in effect (0 under smart gaps)        */
     float master_ratio;
     int   n_master;
+    /* The focused window OF THE DESKTOP BEING LAID OUT, which is not the same
+     * thing as the focused window: a tiling pass now covers every display, and
+     * the desktop on the display you are not looking at has its own idea of
+     * which window is on top. monocle picking the global focus meant laying
+     * out a background desktop showed whichever window happened to be first
+     * and hid the one that was actually up. */
+    HWND  focus;
 } LayoutParams;
 
 /* ---------------------------------------------------------------------------
@@ -675,6 +687,7 @@ typedef struct {
     int     outer_gap;
     bool    float_all;      /* windows opened here start floating         */
     int     monitor;        /* pinned display, or -1 for "wherever it opens" */
+    int     monitor_override;
     wchar_t app[MAX_PATH];  /* auto-launch while empty; "" = none         */
     wchar_t app_args[SPAWN_ARGS_MAX];  /* its arguments; "" = none        */
     wchar_t app_cwd[MAX_PATH];         /* its working directory; "" = ours */
@@ -869,7 +882,20 @@ typedef struct {
     /* --- desktops (dynamic; see the Desktop comment) --- */
     Desktop  desktops[MAX_DESKTOPS];
     int      desktop_count;      /* how many are alive right now             */
-    int      current_desktop_id; /* the one you are on — by id, not by slot  */
+    int      current_desktop_id; /* the one you are on — by id, not by slot.
+                                  * DERIVED: always monitor_desktop[focused_
+                                  * monitor]. Kept because most of the code
+                                  * asking it means "the desktop the user is
+                                  * driving", which is still one desktop.     */
+
+    /* Which desktop each display is SHOWING — the per-monitor set. A desktop
+     * appears on at most one display at a time, so this is also the answer to
+     * "where is desktop X", and switching to a desktop that is already up
+     * somewhere else swaps the two displays rather than cloning it.
+     *
+     * 0 means "this display is showing nothing". Visibility is no longer "==
+     * the current desktop" but "is on SOME display" — desktop_is_visible(). */
+    int      monitor_desktop[MAX_MONITORS];
     int      next_desktop_id;    /* monotonic id source; never wraps in a session */
 
     /* "Go back" and "start here" are both stored as NAMES rather than as a
@@ -1062,6 +1088,8 @@ typedef struct {
      * window a drag is in progress on, NULL when none. */
     bool     mouse_enabled;      /* drag a tile onto another to swap them     */
     bool     mouse_follow;       /* focus follows the pointer (polled)        */
+    bool     mouse_warp;         /* pointer jumps to the focus when it crosses
+                                  * to another display                        */
     bool     mouse_mod_drag;     /* Win+drag moves / Win+right-drag resizes a
                                   * FLOATING window. Opt-in: it is the one part
                                   * that needs a WH_MOUSE_LL hook, on the thread
@@ -1223,6 +1251,7 @@ Action   action_name_to_enum(const char *name);
 const char *action_enum_to_name(Action action); /* reverse lookup (or NULL)        */
 void     execute_action(Action action, int arg, const wchar_t *command,
                         const wchar_t *args, const wchar_t *cwd);
+void     focus_monitor_at(int mon);
 
 /* Launch `cmd` with `args` (either may be NULL/empty). ShellExecuteW, so PATH
  * is resolved and .lnk shortcuts work — which is why arguments have to be a
@@ -1287,6 +1316,14 @@ ManagedWindow *window_find(HWND hwnd);
 /* Assign a window's display AND remember it by name — see the definition for
  * why an index alone does not survive a hotplug. */
 bool     window_set_monitor(ManagedWindow *mw, int mon);
+
+/* The display a window belongs to (its desktop's), and the pair that make an
+ * assignment real for a float: window_set_monitor only records, and the tiler
+ * that would act on the record never places floats. window_float_moved is the
+ * other direction — a float that moved on its own, recorded or sent home. */
+int      window_home_monitor(const ManagedWindow *mw);
+bool     window_follow_monitor(ManagedWindow *mw, int mon);
+void     window_float_moved(ManagedWindow *mw);
 void     window_manage_existing(void);
 void     window_restore_all_decorations(void);
 
@@ -1365,7 +1402,6 @@ bool     window_covers_monitor(HWND hwnd);    /* does its frame reach every edge
 /* ===========================================================================
  * Prototypes — tiling.c
  * =========================================================================== */
-void     tile_desktop(int slot);   /* slot, not id — see desktop.c prototypes */
 
 /* ---------------------------------------------------------------------------
  * Prototypes — layout_tree.c (manual/BSP tiling and tabbed containers)
@@ -1418,6 +1454,20 @@ int      desktop_slot_by_name(const wchar_t *name);  /* -1 when not alive */
 int      desktop_slot_by_id(int id);                 /* -1 when not alive */
 Desktop *desktop_by_id(int id);                      /* NULL when not alive */
 int      desktop_current_slot(void);
+
+/* The focused window of a GIVEN desktop, background ones included. Unlike
+ * desktop_get_focused it does not move dt->focused — it is a question, not a
+ * repair, and the desktop it is asked about may not be the one you are on. */
+HWND     desktop_focused_of(const Desktop *dt);
+
+/* The per-monitor desktop set. */
+int      desktop_on_monitor(int mon);        /* desktop id, or 0 for none    */
+int      desktop_monitor_showing(int id);    /* display, or -1 if not up     */
+bool     desktop_is_visible(int id);         /* on screen on ANY display     */
+int      desktop_monitor_of_window(const ManagedWindow *mw);
+void     desktop_place_on_monitor(int id, int mon);
+int      desktop_target_monitor(const Desktop *dt);  /* pin, else focused    */
+void     desktop_sync_current(void);         /* current_desktop_id <- focus  */
 Desktop *desktop_current(void);          /* never NULL once desktop_init ran */
 
 /* Look the name up, creating the desktop when it isn't alive. Returns its slot,
@@ -1500,6 +1550,7 @@ void     desktop_gc(int slot);
 void     desktop_apply_rules(int slot);  /* defaults, then every matching rule */
 void     desktop_monitors_changed(void); /* re-resolve monitor pins after a
                                           * display was added or removed      */
+bool     desktop_set_monitor(int slot, int mon);
 void     desktop_reapply(void);           /* re-assert show/hide + tiling after reload */
 HWND     desktop_get_focused(void);
 void     desktop_launch_app_if_empty(int slot); /* spawn the desktop's `app` */
@@ -1586,6 +1637,11 @@ PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags);
 void     mouse_drag_begin(HWND hwnd);
 void     mouse_poll_focus(void);
 bool     mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held);
+
+/* Put the pointer on the focused window when the focus has just crossed to a
+ * different display. No-op when mouse_warp is off, and when the pointer is
+ * already on that display. */
+void     mouse_warp_focus(void);
 void     mouse_mod_drag_apply(int dx, int dy);
 void     mouse_sync_hook(void);   /* install/remove the WH_MOUSE_LL hook */
 void     mouse_drag_end(HWND hwnd);

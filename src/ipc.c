@@ -111,11 +111,19 @@ static void ipc_build_state(char *out, size_t cap) {
         display_current_mode(m->device, &mode);
         int hdr = display_hdr_state(m->device);
 
+        /* Which desktop this display is SHOWING — the per-monitor set, and
+         * the one piece of state you cannot infer from the desktop list. */
+        char dname[4 * DESKTOP_NAME_MAX];
+        const Desktop *shown = desktop_by_id(desktop_on_monitor(i));
+        if (shown) json_escape(shown->name, dname, sizeof dname);
+        else       dname[0] = '\0';
+
         o += (size_t)snprintf(out + o, cap - o,
-                 "%s{\"index\":%d,\"device\":\"%s\",\"x\":%ld,\"y\":%ld,"
+                 "%s{\"index\":%d,\"device\":\"%s\",\"desktop\":\"%s\","
+                 "\"x\":%ld,\"y\":%ld,"
                  "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
                  "\"hdr\":%s,\"focused\":%s}",
-                 i ? "," : "", i, esc,
+                 i ? "," : "", i, esc, dname,
                  (long)m->full.left, (long)m->full.top,
                  (long)(m->full.right - m->full.left),
                  (long)(m->full.bottom - m->full.top),

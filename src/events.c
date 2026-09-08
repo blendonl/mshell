@@ -7,6 +7,53 @@
 
 #include "mshell.h"
 
+#define FG_BOUNCE_WINDOW_MS   2000
+#define FG_BOUNCE_LIMIT       4
+#define FG_BOUNCE_COOLDOWN_MS 10000
+
+static bool foreground_bounce_allowed(HWND hwnd) {
+    static HWND  offender;
+    static DWORD since;
+    static int   bounces;
+    static bool  backed_off;
+    static bool  warned;
+
+    DWORD now = GetTickCount();
+
+    if (hwnd != offender) {
+        offender   = hwnd;
+        since      = now;
+        bounces    = 0;
+        backed_off = false;
+    }
+
+    DWORD elapsed = now - since;
+
+    if (backed_off) {
+        if (elapsed < FG_BOUNCE_COOLDOWN_MS) return false;
+        since      = now;
+        bounces    = 0;
+        backed_off = false;
+    } else if (elapsed > FG_BOUNCE_WINDOW_MS) {
+        since   = now;
+        bounces = 0;
+    }
+
+    if (++bounces <= FG_BOUNCE_LIMIT) return true;
+
+    backed_off = true;
+    since      = now;
+    if (!warned) {
+        warned = true;
+        log_msg(LOG_WARN, L"foreground: %p keeps taking the foreground from a "
+                          L"desktop that is not on screen. Backing off rather "
+                          L"than trading activations with it — it keeps the "
+                          L"foreground until you focus something else.",
+                (void *)hwnd);
+    }
+    return false;
+}
+
 /* ===========================================================================
  * WinEvent callback
  * =========================================================================== */
@@ -54,7 +101,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                 mw->app_hidden  = false;
                 mw->has_applied = false;
                 events_suppress_begin();
-                if (mw->desktop_id == g.current_desktop_id) {
+                if (desktop_is_visible(mw->desktop_id)) {
                     /* Clear anything WE were also doing to keep it off the
                      * screen. A window can be both app-hidden and cloaked: the
                      * app trayed it while it sat on a desktop we had hidden,
@@ -66,7 +113,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                     window_hide(mw);
                 }
                 events_suppress_end();
-                if (mw->desktop_id == g.current_desktop_id) tile_current();
+                if (desktop_is_visible(mw->desktop_id)) tile_current();
             }
         }
         break;
@@ -86,11 +133,16 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
          * LOCATIONCHANGE case below has the same problem and solves it the same
          * way: compare state, don't trust the counter.
          *
-         * wm_hidden is that state — window_hide() sets it before the SW_HIDE and
-         * window_show() clears it only once the window is back — and `cloaked`
-         * narrows it to the hides that can produce this event at all: cloaking
-         * leaves the visible bit alone and is silent here, which is why the
-         * default policy never sees this and set_hide_policy("hide") does.
+         * window_hidden_by_showwindow() is that state (see mshell.h). wm_hidden
+         * alone is not enough, because window_hide() has four mechanisms and
+         * only ShowWindow(SW_HIDE) clears WS_VISIBLE — so only SW_HIDE can
+         * produce this event for a window WE took off the screen. Sinking,
+         * which has been the first choice since hiding stopped breaking
+         * Chromium, leaves the visible bit alone; so do cloaking and stashing.
+         * Testing wm_hidden against `cloaked` alone was therefore right only
+         * while cloaking was the only silent mechanism: once sinking arrived,
+         * every tray-hide on a background desktop read as mshell's own, was
+         * never recorded, and the next switch back un-trayed the app.
          *
          * Getting it wrong loses the window for good. app_hidden means "not
          * ours to reveal", so window_show() refuses it, the desktop-switch show
@@ -116,7 +168,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                 mw->has_applied = false;
                 log_w(L"app hid its own window: %p — leaving the layout",
                       (void *)hwnd);
-                if (mw->desktop_id == g.current_desktop_id) tile_current();
+                if (desktop_is_visible(mw->desktop_id)) tile_current();
             }
         }
         break;
@@ -175,7 +227,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         {
             ManagedWindow *mw = window_find(hwnd);
             if (mw && !mw->is_floating &&
-                mw->desktop_id == g.current_desktop_id) {
+                desktop_is_visible(mw->desktop_id)) {
                 mw->has_applied = false;
                 tile_current();
             }
@@ -210,9 +262,26 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
          * like the keybind doing nothing. */
         if (IsWindow(hwnd) && window_index_of(hwnd) >= 0) {
             ManagedWindow *mw = window_find(hwnd);
+            /* Off-screen desktops only. A window on a desktop that IS up —
+             * on the other display — is a perfectly good thing to activate,
+             * and bouncing the focus off it would make the second monitor
+             * unclickable. */
+            if (mw && !desktop_is_visible(mw->desktop_id)) {
+                if (foreground_bounce_allowed(hwnd)) {
+                    HWND back = desktop_get_focused();
+                    if (back && back != hwnd && IsWindow(back))
+                        window_focus(back);
+                }
+                break;
+            }
             desktop_focus_update(hwnd);
-            if (mw && mw->monitor >= 0 && mw->monitor < g.monitor_count)
-                g.focused_monitor = mw->monitor;
+            int mon = desktop_monitor_of_window(mw);
+            if (mon >= 0 && mon < g.monitor_count) {
+                /* Focus crossed to another display, so the desktop you are
+                 * driving is that display's, not the one you left. */
+                g.focused_monitor = mon;
+                desktop_sync_current();
+            }
             /* Whoever was activated is now on top of its band. Clicking a tiled
              * window therefore buries the floats, and this is the only place
              * that hears about it — window_focus() never ran. */
@@ -229,7 +298,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
          * storm. Floating windows are exempt — bar the rule re-assert below. */
         {
             ManagedWindow *mw = window_find(hwnd);
-            if (!mw || mw->desktop_id != g.current_desktop_id) break;
+            if (!mw || !desktop_is_visible(mw->desktop_id)) break;
 
             /* Sunk or stashed: WE took this one off the screen without hiding
              * it (window.c). A stashed window's rect is deliberately nowhere
@@ -248,23 +317,16 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
              * monitor we parked it on. Re-assert; it no-ops when nothing moved
              * and when the frame is already bare. */
             if (mw->is_floating) {
-                if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
+                /* Which display it is on, decided here because this is where
+                 * every move a float makes is observed — a title-bar drag,
+                 * mod+drag, or the app moving itself. An ordinary float takes
+                 * its record with it; one parked over a whole display by a rule
+                 * is sent back to its desktop's display instead. The reasoning
+                 * for both, and the guard that stops mshell fighting an app
+                 * that insists, are in window_float_moved. */
+                window_float_moved(mw);
 
-                /* Which display it is ON is not the app's business to tell us
-                 * and not something the layout decides for a float — it is
-                 * simply where the window now is, so it is read here, where
-                 * every move is observed.
-                 *
-                 * Only the keyboard nudge used to update it, which left the
-                 * other three ways a float can move (mod+drag, a native title
-                 * bar drag, the app moving itself) writing to a stale monitor
-                 * index. That index is not cosmetic: it picks the screen for
-                 * window_center_float and window_park_over_monitor, it becomes
-                 * g.focused_monitor on the next focus, and it is what the
-                 * one-fullscreen-per-monitor scan compares. Drag a float to
-                 * your second display and fullscreen it, and it grew on the
-                 * first one. */
-                window_set_monitor(mw, monitor_of_window(hwnd));
+                if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
 
                 /* A native move/resize of the focused float fires here and
                  * nowhere else — keep the ring hugging it. */
