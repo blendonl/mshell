@@ -139,7 +139,12 @@ local kovaaks = "steam://rungameid/824270"
 ----------------------------------------------------------------------
 mshell.layout.gaps(6, 6)            -- inner (between windows), outer (screen edge)
 -- mshell.layout.smart_gaps(true)      -- drop gaps when a monitor has a single window
-mshell.appearance.border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
+mshell.appearance.border {                 -- the focused-window ring, and the bar that
+    width  = 2,                            -- makes it legible. The ring is drawn outside
+    focused = 0xffffff,                    -- the frame, so at the screen edge it gets
+    accent = "bottom",                     -- clamped to a hairline; the bar is drawn
+    accent_width = 3,                      -- inside, where nothing can clip it.
+}                                          -- accent = "none" goes back to a bare ring.
 -- mshell.appearance.smart_borders(true)   -- hide the ring when a monitor shows a single
                                     -- window: nothing to tell apart, so nothing to
                                     -- point at. Counts floats too, and monocle

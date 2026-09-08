@@ -58,12 +58,40 @@ static int monitor_visible_count(int mon) {
     return n;
 }
 
+static BorderRect border_rect(const RECT *r) {
+    BorderRect out = { r->left, r->top, r->right, r->bottom };
+    return out;
+}
+
+static HRGN border_region(const BorderGeometry *geo, int w, int h) {
+    HRGN rgn = CreateRectRgn(0, 0, 0, 0);
+    if (!rgn) return NULL;
+
+    if (geo->has_ring) {
+        HRGN outer = CreateRectRgn(0, 0, w, h);
+        HRGN inner = CreateRectRgn(geo->hole.left, geo->hole.top,
+                                   geo->hole.right, geo->hole.bottom);
+        CombineRgn(outer, outer, inner, RGN_DIFF);
+        CombineRgn(rgn, rgn, outer, RGN_OR);
+        DeleteObject(inner);
+        DeleteObject(outer);
+    }
+
+    if (geo->has_accent) {
+        HRGN bar = CreateRectRgn(geo->accent.left, geo->accent.top,
+                                 geo->accent.right, geo->accent.bottom);
+        CombineRgn(rgn, rgn, bar, RGN_OR);
+        DeleteObject(bar);
+    }
+
+    return rgn;
+}
+
 void border_refresh(void) {
     anim_dim_refresh();
 
     if (!g.border_window) return;
 
-    int bw = g.cfg.border_width;
     HWND focus = desktop_get_focused();
 
     ManagedWindow *fmw = focus ? window_find(focus) : NULL;
@@ -82,8 +110,18 @@ void border_refresh(void) {
     }
 
     RECT r;
-    if (bw <= 0 || !focus || !IsWindow(focus) || IsIconic(focus) ||
+    if (!focus || !IsWindow(focus) || IsIconic(focus) ||
         !window_frame_rect(focus, &r)) {
+        border_hide();
+        return;
+    }
+
+    BorderGeometry geo = border_geometry(
+        border_rect(&r),
+        border_rect(&g.monitors[monitor_of_window(focus)].work_area),
+        g.cfg.border_width, g.cfg.border_accent, g.cfg.border_accent_width);
+
+    if (!geo.visible) {
         border_hide();
         return;
     }
@@ -92,32 +130,17 @@ void border_refresh(void) {
     if (window_is_float_tier(fmw))  s_color = g.cfg.border_color_float;
     if (fmw && fmw->urgent)      s_color = g.cfg.border_color_urgent;
 
-    RECT ring = { r.left - bw, r.top - bw, r.right + bw, r.bottom + bw };
+    int w = geo.bounds.right  - geo.bounds.left;
+    int h = geo.bounds.bottom - geo.bounds.top;
 
-    RECT limit;
-    UnionRect(&limit, &g.monitors[monitor_of_window(focus)].work_area, &r);
-    if (ring.left   < limit.left)   ring.left   = limit.left;
-    if (ring.top    < limit.top)    ring.top    = limit.top;
-    if (ring.right  > limit.right)  ring.right  = limit.right;
-    if (ring.bottom > limit.bottom) ring.bottom = limit.bottom;
-
-    int x = ring.left;
-    int y = ring.top;
-    int w = ring.right  - ring.left;
-    int h = ring.bottom - ring.top;
-
-    if (w <= bw * 2 || h <= bw * 2) {
+    HRGN rgn = border_region(&geo, w, h);
+    if (!rgn) {
         border_hide();
         return;
     }
+    SetWindowRgn(g.border_window, rgn, FALSE);
 
-    HRGN outer = CreateRectRgn(0, 0, w, h);
-    HRGN inner = CreateRectRgn(bw, bw, w - bw, h - bw);
-    CombineRgn(outer, outer, inner, RGN_DIFF);
-    DeleteObject(inner);
-    SetWindowRgn(g.border_window, outer, FALSE);
-
-    SetWindowPos(g.border_window, focus, x, y, w, h,
+    SetWindowPos(g.border_window, focus, geo.bounds.left, geo.bounds.top, w, h,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(g.border_window, NULL, TRUE);
 }

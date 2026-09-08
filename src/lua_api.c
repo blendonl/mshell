@@ -385,6 +385,25 @@ static int lua_mshell_set_border(lua_State *L) {
             }
         }
         lua_pop(L, 1);
+
+        lua_getfield(L, 1, "accent");
+        if (lua_isstring(L, -1)) {
+            const char *a = lua_tostring(L, -1);
+            if      (!strcmp(a, "bottom")) g.cfg.border_accent = BORDER_ACCENT_BOTTOM;
+            else if (!strcmp(a, "top"))    g.cfg.border_accent = BORDER_ACCENT_TOP;
+            else if (!strcmp(a, "none"))   g.cfg.border_accent = BORDER_ACCENT_NONE;
+            else {
+                lua_pop(L, 1);
+                return luaL_error(L, "set_border: unknown accent '%s' "
+                                     "(top|bottom|none)", a);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "accent_width");
+        if (lua_isnumber(L, -1))
+            g.cfg.border_accent_width = clamp_i((int)lua_tointeger(L, -1), 0, 20);
+        lua_pop(L, 1);
         return 0;
     }
 

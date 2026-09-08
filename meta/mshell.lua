@@ -488,7 +488,7 @@ function mshell.bar.floating() end
 ---@class mshell.appearance
 mshell.appearance = {}
 
----The focus ring: width and colours.
+---The focus ring: width, colours and the accent bar.
 ---@param width integer|mshell.BorderOpts
 ---@param color? integer
 function mshell.appearance.border(width, color) end
