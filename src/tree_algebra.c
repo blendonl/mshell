@@ -35,6 +35,12 @@ static void node_free(Tree *t, TreeNode *n) {
     t->in_use--;
 }
 
+void tree_node_set_mode(TreeNode *n, TreeSplit mode) {
+    if (!n) return;
+    if (mode == TREE_SPLIT_V || mode == TREE_SPLIT_H) n->split = mode;
+    n->mode = mode;
+}
+
 static TreeNode *find_from(TreeNode *n, const void *window) {
     if (!n) return NULL;
     if (n->window == window) return n;
@@ -100,9 +106,9 @@ bool tree_insert(Tree *t, TreeNode *at, void *window, TreeSplit mode) {
     at->window = NULL;
     at->a      = moved;
     at->b      = fresh;
-    at->mode   = mode;
     at->ratio  = 0.5f;
     at->active = 1;
+    tree_node_set_mode(at, mode);
     return true;
 }
 
@@ -121,6 +127,7 @@ bool tree_remove(Tree *t, const void *window) {
 
     p->window = sib->window;
     p->mode   = sib->mode;
+    p->split  = sib->split;
     p->ratio  = sib->ratio;
     p->active = sib->active;
     p->a      = sib->a;
@@ -188,7 +195,35 @@ bool tree_rotate(Tree *t, const void *window) {
     if (!n || !n->parent) return false;
 
     TreeNode *p = n->parent;
-    p->mode = (p->mode == TREE_SPLIT_V) ? TREE_SPLIT_H : TREE_SPLIT_V;
+    tree_node_set_mode(p, (p->mode == TREE_SPLIT_V) ? TREE_SPLIT_H
+                                                    : TREE_SPLIT_V);
+    return true;
+}
+
+bool tree_set_container(Tree *t, const void *window, TreeSplit mode) {
+    TreeNode *n = tree_find(t, window);
+    if (!n || !n->parent) return false;
+
+    TreeNode *p = n->parent;
+    tree_node_set_mode(p, (p->mode == mode) ? p->split : mode);
+    p->active = (p->b == n) ? 1 : 0;
+    return true;
+}
+
+bool tree_cycle_container(Tree *t, const void *window, int delta,
+                          void **focus_out) {
+    TreeNode *n = tree_find(t, window);
+    while (n && n->parent &&
+           n->parent->mode != TREE_SPLIT_TABBED &&
+           n->parent->mode != TREE_SPLIT_STACKED)
+        n = n->parent;
+    if (!n || !n->parent) return false;
+
+    TreeNode *p = n->parent;
+    p->active = (p->active + delta) & 1;
+
+    TreeNode *leaf = tree_first_leaf(p->active ? p->b : p->a);
+    if (focus_out) *focus_out = (leaf && leaf->window) ? leaf->window : NULL;
     return true;
 }
 
