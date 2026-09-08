@@ -865,6 +865,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
                                      DWORD idEventThread, DWORD dwmsEventTime);
 
+void     config_apply_defaults(MShellConfig *c);
 bool     config_load(const wchar_t *path);
 void     config_reload(void);
 bool     config_init(void);
