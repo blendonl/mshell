@@ -126,9 +126,9 @@ DWORD mod_name_to_flag(const char *name) {
 }
 
 KeyMap *keymap_new(const wchar_t *name, bool persist) {
-    if (g.keymap_count >= MAX_KEYMAPS) return NULL;
+    if (g.cfg.keymap_count >= MAX_KEYMAPS) return NULL;
 
-    KeyMap *km = &g.keymaps[g.keymap_count++];
+    KeyMap *km = &g.cfg.keymaps[g.cfg.keymap_count++];
     km->name     = _wcsdup(name);
     km->capacity = 64;
     km->bindings = (KeyBinding *)calloc((size_t)km->capacity, sizeof(KeyBinding));
@@ -355,7 +355,7 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         kb_lock();
         if (!win_used) {
             if (g.current_map == g.root_map) {
-                if (g.leader_map) g.current_map = g.leader_map;
+                if (g.cfg.leader_map) g.current_map = g.cfg.leader_map;
             } else {
                 g.current_map = g.root_map;
             }
@@ -434,7 +434,7 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         goto done;
     }
 
-    if (g.block_system_keys) {
+    if (g.cfg.block_system_keys) {
         bool ctrl_shift_esc = (vk == VK_ESCAPE) && mod_ctrl && mod_shift;
         if (!ctrl_shift_esc) {
             if (mod_alt && (vk == VK_TAB ||
@@ -638,8 +638,8 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     if (resize) {
         w += dx;
         h += dy;
-        if (w < g.min_win_w) w = g.min_win_w;
-        if (h < g.min_win_h) h = g.min_win_h;
+        if (w < g.cfg.min_win_w) w = g.cfg.min_win_w;
+        if (h < g.cfg.min_win_h) h = g.cfg.min_win_h;
     } else {
         x += dx;
         y += dy;
@@ -978,7 +978,7 @@ void execute_action_on(Action action, HWND target, int arg,
         if (mw->tracked_only) {
             window_promote(focus);
             tile_current();
-        } else if (g.float_policy != FLOAT_NEVER) {
+        } else if (g.cfg.float_policy != FLOAT_NEVER) {
             window_set_floating(focus, !mw->is_floating);
             tile_current();
         }
@@ -1180,13 +1180,13 @@ static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 }
 
 static void mouse_sync_hook_here(void) {
-    if (g.mouse_mod_drag && !g.mouse_hook) {
+    if (g.cfg.mouse_mod_drag && !g.mouse_hook) {
         g.mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_hook_proc,
                                          g.hinst, 0);
         if (g.mouse_hook) log_msg(LOG_INFO, L"mouse: Mod+drag on");
         else log_msg(LOG_WARN, L"SetWindowsHookEx(WH_MOUSE_LL) failed: %lu",
                      GetLastError());
-    } else if (!g.mouse_mod_drag && g.mouse_hook) {
+    } else if (!g.cfg.mouse_mod_drag && g.mouse_hook) {
         UnhookWindowsHookEx(g.mouse_hook);
         g.mouse_hook    = NULL;
         g.mod_drag_hwnd = NULL;

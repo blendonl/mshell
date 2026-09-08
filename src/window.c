@@ -73,8 +73,8 @@ bool window_is_dialog(HWND hwnd) {
 }
 
 static bool any_dialog_rule(void) {
-    for (int i = 0; i < g.rule_count; i++)
-        if (g.rules[i].set_dialog) return true;
+    for (int i = 0; i < g.cfg.rule_count; i++)
+        if (g.cfg.rules[i].set_dialog) return true;
     return false;
 }
 
@@ -96,7 +96,7 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
 
     if (GetAncestor(hwnd, GA_ROOT) != hwnd) return ADOPT_NO;
 
-    if (!g.manage_owned && GetWindow(hwnd, GW_OWNER) != NULL) {
+    if (!g.cfg.manage_owned && GetWindow(hwnd, GW_OWNER) != NULL) {
         if (!any_dialog_rule()) return ADOPT_TRACK;
         rule = window_rule_lookup(hwnd);
         looked_up = true;
@@ -145,7 +145,7 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
         if (!GetWindowRect(hwnd, &r)) return ADOPT_TRACK;
         int w = r.right  - r.left;
         int h = r.bottom - r.top;
-        if (w < g.min_win_w || h < g.min_win_h) return ADOPT_TRACK;
+        if (w < g.cfg.min_win_w || h < g.cfg.min_win_h) return ADOPT_TRACK;
     }
 
     int cloaked = 0;
@@ -168,7 +168,7 @@ bool window_is_manageable(HWND hwnd) {
 }
 
 const WindowRule *window_rule_lookup(HWND hwnd) {
-    if (g.rule_count <= 0) return NULL;
+    if (g.cfg.rule_count <= 0) return NULL;
 
     wchar_t cls[256]       = {0};
     wchar_t path[MAX_PATH] = {0};
@@ -181,8 +181,8 @@ const WindowRule *window_rule_lookup(HWND hwnd) {
     wchar_t title[256];
     int     have_title = 0;
 
-    for (int i = 0; i < g.rule_count; i++) {
-        WindowRule *r = &g.rules[i];
+    for (int i = 0; i < g.cfg.rule_count; i++) {
+        WindowRule *r = &g.cfg.rules[i];
 
         if (r->class_match[0]   && !wildcard_match(r->class_match, cls))    continue;
         if (r->process_match[0] && !wildcard_match(r->process_match, proc)) continue;
@@ -230,7 +230,7 @@ ManagedWindow *window_find(HWND hwnd) {
 }
 
 static void window_apply_flat(HWND hwnd) {
-    DWORD corner = (DWORD)g.corner_pref;
+    DWORD corner = (DWORD)g.cfg.corner_pref;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
     BOOL disable = TRUE;
@@ -496,7 +496,7 @@ void window_hide(ManagedWindow *mw) {
     mw->sunk      = false;
     mw->stashed   = false;
 
-    if (g.hide_policy == HIDE_CLOAK) {
+    if (g.cfg.hide_policy == HIDE_CLOAK) {
         if (!window_sink(mw)) {
             mw->cloaked = window_set_cloaked(mw->hwnd, true);
             if (!mw->cloaked) mw->stashed = window_stash(mw);
@@ -619,13 +619,13 @@ static void window_grant_full(ManagedWindow *mw, const WindowRule *rule) {
     mw->fullscreen = rule ? rule->fullscreen : false;
     mw->center_float = (rule && rule->set_center)
                        ? rule->center
-                       : (g.float_placement == FLOAT_PLACE_CENTER);
+                       : (g.cfg.float_placement == FLOAT_PLACE_CENTER);
 
     window_apply_flat(hwnd);
 
     Desktop *dt = desktop_by_id(mw->desktop_id);
     mw->is_floating =
-        (rule && rule->action == RULE_FLOAT && g.float_policy != FLOAT_NEVER)
+        (rule && rule->action == RULE_FLOAT && g.cfg.float_policy != FLOAT_NEVER)
         || (dt && dt->float_all);
 
     if (mw->is_floating) {
@@ -832,7 +832,7 @@ static void window_placement_refused(ManagedWindow *mw) {
         return;
     }
 
-    if (!mw->is_floating && g.float_policy == FLOAT_NEVER) {
+    if (!mw->is_floating && g.cfg.float_policy == FLOAT_NEVER) {
         log_msg(LOG_WARN, L"%p cannot be placed (UIPI) and float_policy is "
                           L"'never' — it stays in the layout without moving",
                 (void *)mw->hwnd);
@@ -1300,7 +1300,7 @@ void window_reassert_rule(HWND hwnd) {
 
 static bool zorder_wants_topmost(const ManagedWindow *mw) {
     return window_is_screen_fullscreen(mw) || mw->always_on_top ||
-           (g.float_on_top && window_is_float_tier(mw));
+           (g.cfg.float_on_top && window_is_float_tier(mw));
 }
 
 static bool window_set_band(HWND hwnd, HWND after, bool topmost) {
@@ -1340,7 +1340,7 @@ static void zorder_raise_over_floats(void) {
 }
 
 void window_raise_floats(void) {
-    if (!g.float_on_top) { zorder_raise_over_floats(); return; }
+    if (!g.cfg.float_on_top) { zorder_raise_over_floats(); return; }
 
     HWND floats[MAX_WINDOWS_PER_DESKTOP];
     int  n = 0;

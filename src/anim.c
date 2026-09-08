@@ -27,7 +27,7 @@ static int lerp(int a, int b, float t) {
 }
 
 static RECT anim_rect_at(const Anim *a, ULONGLONG now) {
-    float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
+    float t = g.cfg.anim_ms ? (float)(now - a->start) / (float)g.cfg.anim_ms : 1.f;
     if (t < 0.f) t = 0.f;
     if (t > 1.f) t = 1.f;
     float e = ease(t);
@@ -41,7 +41,7 @@ static RECT anim_rect_at(const Anim *a, ULONGLONG now) {
 }
 
 bool anim_begin(HWND hwnd, RECT from, RECT to) {
-    if (!g.anim_ms) return false;
+    if (!g.cfg.anim_ms) return false;
 
     for (int i = 0; i < s_anim_n; i++) {
         if (s_anims[i].active && s_anims[i].hwnd == hwnd) {
@@ -86,7 +86,7 @@ void anim_tick(void) {
 
         if (!IsWindow(a->hwnd)) { a->active = false; continue; }
 
-        float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
+        float t = g.cfg.anim_ms ? (float)(now - a->start) / (float)g.cfg.anim_ms : 1.f;
 
         RECT r   = anim_rect_at(a, now);
         RECT adj = window_adjust_for_frame(a->hwnd, r);
@@ -133,7 +133,7 @@ static LRESULT CALLBACK dim_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        overlay_fill(dc, &rc, g.dim_color);
+        overlay_fill(dc, &rc, g.cfg.dim_color);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -161,7 +161,7 @@ void anim_dim_shutdown(void) {
 }
 
 void anim_dim_refresh(void) {
-    if (!g.dim_enabled) {
+    if (!g.cfg.dim_enabled) {
         for (int i = 0; i < MAX_MONITORS; i++)
             if (s_dim[i]) ShowWindow(s_dim[i], SW_HIDE);
         return;
@@ -192,7 +192,7 @@ void anim_dim_refresh(void) {
             }
         }
         SetWindowRgn(d, rgn, FALSE);
-        SetLayeredWindowAttributes(d, 0, g.dim_alpha, LWA_ALPHA);
+        SetLayeredWindowAttributes(d, 0, g.cfg.dim_alpha, LWA_ALPHA);
 
         SetWindowPos(d, focus ? focus : HWND_TOP,
                      area.left, area.top, w, h,

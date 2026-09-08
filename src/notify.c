@@ -28,7 +28,7 @@ COLORREF notify_kind_color(NotifyKind k) {
     switch (k) {
     case NOTIFY_ERROR: return RGB(0xf3, 0x8b, 0xa8);
     case NOTIFY_WARN:  return RGB(0xf9, 0xe2, 0xaf);
-    default:           return g.whichkey_key_fg;
+    default:           return g.cfg.whichkey_key_fg;
     }
 }
 
@@ -133,7 +133,7 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         int  accent = overlay_scale(N_ACCENT_W, dpi);
 
         RECT all = { 0, 0, op.w, op.h };
-        overlay_fill(mdc, &all, g.whichkey_bg);
+        overlay_fill(mdc, &all, g.cfg.whichkey_bg);
 
         HFONT of = (HFONT)SelectObject(mdc, s_font.font);
         SetBkMode(mdc, TRANSPARENT);
@@ -150,7 +150,7 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             overlay_fill(mdc, &stripe, notify_kind_color(s_toasts[i].kind));
 
             RECT tr = { accent + pad, y + pad, op.w - pad, y + h - pad };
-            SetTextColor(mdc, g.whichkey_fg);
+            SetTextColor(mdc, g.cfg.whichkey_fg);
             DrawTextW(mdc, s_toasts[i].text, -1, &tr,
                       DT_WORDBREAK | DT_NOPREFIX);
 
@@ -167,7 +167,7 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
 
 void notify_show(const wchar_t *text, NotifyKind kind, int ms) {
     if (!g.notify_window || !text || !text[0]) return;
-    if (!g.notify_enabled) return;
+    if (!g.cfg.notify_enabled) return;
     if (ms <= 0) ms = 4000;
 
     int n = notify_compact();

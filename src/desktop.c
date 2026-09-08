@@ -110,8 +110,8 @@ int desktop_of_window(HWND hwnd) {
 
 static void desktop_resolve_monitor(Desktop *dt) {
     dt->monitor = -1;
-    for (int i = 0; i < g.desktop_rule_count; i++) {
-        const DesktopRule *r = &g.desktop_rules[i];
+    for (int i = 0; i < g.cfg.desktop_rule_count; i++) {
+        const DesktopRule *r = &g.cfg.desktop_rules[i];
         if (!r->set_monitor) continue;
         if (r->name_match[0] && !wildcard_match(r->name_match, dt->name)) continue;
         dt->monitor = r->monitor;
@@ -202,10 +202,10 @@ void desktop_apply_rules(int slot) {
     if (slot < 0 || slot >= g.desktop_count) return;
     Desktop *dt = &g.desktops[slot];
 
-    dt->layout       = g.default_layout;
-    dt->master_ratio = g.default_master_ratio > 0.f ? g.default_master_ratio
+    dt->layout       = g.cfg.default_layout;
+    dt->master_ratio = g.cfg.default_master_ratio > 0.f ? g.cfg.default_master_ratio
                                                     : DEFAULT_MASTER_RATIO;
-    dt->n_master     = g.default_nmaster > 0 ? g.default_nmaster : DEFAULT_NMASTER;
+    dt->n_master     = g.cfg.default_nmaster > 0 ? g.cfg.default_nmaster : DEFAULT_NMASTER;
     dt->inner_gap    = -1;
     dt->outer_gap    = -1;
     dt->float_all    = false;
@@ -213,8 +213,8 @@ void desktop_apply_rules(int slot) {
     dt->app_args[0]  = L'\0';
     dt->app_cwd[0]   = L'\0';
 
-    for (int i = 0; i < g.desktop_rule_count; i++) {
-        const DesktopRule *r = &g.desktop_rules[i];
+    for (int i = 0; i < g.cfg.desktop_rule_count; i++) {
+        const DesktopRule *r = &g.cfg.desktop_rules[i];
         if (r->name_match[0] && !wildcard_match(r->name_match, dt->name)) continue;
 
         if (r->app[0]) {
@@ -324,7 +324,7 @@ void desktop_gc(int slot) {
 }
 
 void desktop_init(void) {
-    const wchar_t *name = g.start_desktop[0] ? g.start_desktop
+    const wchar_t *name = g.cfg.start_desktop[0] ? g.cfg.start_desktop
                                              : DEFAULT_START_DESKTOP;
 
     g.desktop_count      = 0;
@@ -466,7 +466,7 @@ void desktop_switch(const wchar_t *name) {
 
     mouse_warp_focus();
 
-    if (g.notify_desktop) {
+    if (g.cfg.notify_desktop) {
         const Desktop *landed = desktop_by_id(target_id);
         if (landed) {
             wchar_t msg[DESKTOP_NAME_MAX + 16];
@@ -594,7 +594,7 @@ bool desktop_add_window(HWND hwnd, int slot) {
         return false;
     }
 
-    int idx = desktop_attach_index(g.attach_policy, dt->focused, dt->count);
+    int idx = desktop_attach_index(g.cfg.attach_policy, dt->focused, dt->count);
 
     if (idx < dt->count)
         memmove(&dt->windows[idx + 1], &dt->windows[idx],
