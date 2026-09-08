@@ -3,7 +3,7 @@
 static POINT s_last_pointer;
 
 void mouse_warp_focus(void) {
-    if (!g.mouse_warp) return;
+    if (!g.cfg.mouse_warp) return;
     if (g.drag_hwnd || g.mod_drag_hwnd) return;
 
     int mon = g.focused_monitor;
@@ -36,7 +36,7 @@ void mouse_warp_focus(void) {
 }
 
 void mouse_poll_focus(void) {
-    if (!g.mouse_follow) return;
+    if (!g.cfg.mouse_follow) return;
 
     POINT p;
     if (!GetCursorPos(&p)) return;
@@ -71,10 +71,10 @@ void mouse_mod_drag_apply(int dx, int dy) {
     if (s_resizing) {
         want.right  += dx;
         want.bottom += dy;
-        if (want.right - want.left < g.min_win_w)
-            want.right = want.left + g.min_win_w;
-        if (want.bottom - want.top < g.min_win_h)
-            want.bottom = want.top + g.min_win_h;
+        if (want.right - want.left < g.cfg.min_win_w)
+            want.right = want.left + g.cfg.min_win_w;
+        if (want.bottom - want.top < g.cfg.min_win_h)
+            want.bottom = want.top + g.cfg.min_win_h;
     } else {
         want.left += dx; want.right  += dx;
         want.top  += dy; want.bottom += dy;
@@ -159,9 +159,9 @@ static void pointer_set_swap(bool swapped) {
 }
 
 void mouse_sync_pointer(void) {
-    bool want_speed = g.mouse_speed > 0;
-    bool want_accel = g.mouse_accel >= 0;
-    bool want_swap  = g.mouse_swap  >= 0;
+    bool want_speed = g.cfg.mouse_speed > 0;
+    bool want_accel = g.cfg.mouse_accel >= 0;
+    bool want_swap  = g.cfg.mouse_swap  >= 0;
 
     if (!want_speed && !want_accel && !want_swap &&
         !s_ptr_own_speed && !s_ptr_own_accel && !s_ptr_own_swap)
@@ -170,7 +170,7 @@ void mouse_sync_pointer(void) {
     pointer_snapshot();
 
     if (want_speed) {
-        pointer_set_speed(g.mouse_speed);
+        pointer_set_speed(g.cfg.mouse_speed);
         s_ptr_own_speed = true;
     } else if (s_ptr_own_speed) {
         pointer_set_speed(s_ptr_prev_speed);
@@ -178,7 +178,7 @@ void mouse_sync_pointer(void) {
     }
 
     if (want_accel) {
-        pointer_set_accel(g.mouse_accel ? PTR_ACCEL_ON : PTR_ACCEL_OFF);
+        pointer_set_accel(g.cfg.mouse_accel ? PTR_ACCEL_ON : PTR_ACCEL_OFF);
         s_ptr_own_accel = true;
     } else if (s_ptr_own_accel) {
         pointer_set_accel(s_ptr_prev_accel);
@@ -186,7 +186,7 @@ void mouse_sync_pointer(void) {
     }
 
     if (want_swap) {
-        pointer_set_swap(g.mouse_swap != 0);
+        pointer_set_swap(g.cfg.mouse_swap != 0);
         s_ptr_own_swap = true;
     } else if (s_ptr_own_swap) {
         pointer_set_swap(s_ptr_prev_swap);

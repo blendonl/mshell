@@ -228,8 +228,8 @@ void monitors_apply_rules(void) {
         m->master_ratio = -1.f;
         m->layout       = LAYOUT_COUNT;
 
-        for (int r = 0; r < g.monitor_rule_count; r++) {
-            const MonitorRule *mr = &g.monitor_rules[r];
+        for (int r = 0; r < g.cfg.monitor_rule_count; r++) {
+            const MonitorRule *mr = &g.cfg.monitor_rules[r];
 
             bool hit = (mr->device[0])
                      ? wildcard_match(mr->device, m->device)
@@ -629,8 +629,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                      "ok: %s\n  %d root bindings, %d keymaps, %d window rules, "
                      "%d desktop rules, %d startup programs",
                      path_u8, g.root_map ? g.root_map->count : 0,
-                     g.keymap_count, g.rule_count, g.desktop_rule_count,
-                     g.startup_count);
+                     g.cfg.keymap_count, g.cfg.rule_count, g.cfg.desktop_rule_count,
+                     g.cfg.startup_count);
             console_print(msg);
             return 0;
         }
@@ -672,28 +672,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
         log_w(L"SetPriorityClass(ABOVE_NORMAL) failed: %lu", GetLastError());
 
-    g.inner_gap        = DEFAULT_INNER_GAP;
-    g.outer_gap        = DEFAULT_OUTER_GAP;
-    g.smart_gaps       = false;
-    g.smart_borders    = false;
-    g.border_width     = DEFAULT_BORDER_WIDTH;
-    g.border_color     = DEFAULT_BORDER_COLOR;
-    g.background_color = DEFAULT_BACKGROUND_COLOR;
-    g.float_policy     = FLOAT_RULES;
-    g.fullscreen_policy = FS_CONTENT;
-    g.float_placement  = FLOAT_PLACE_CENTER;
-    g.attach_policy    = ATTACH_END;
-    g.manage_owned     = false;
-    g.float_on_top     = true;
-    g.min_win_w        = DEFAULT_MIN_WIN_W;
-    g.min_win_h        = DEFAULT_MIN_WIN_H;
-    g.block_system_keys = true;
-    g.whichkey_enabled = true;
-    g.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
-    g.whichkey_bg      = DEFAULT_WHICHKEY_BG;
-    g.whichkey_fg      = DEFAULT_WHICHKEY_FG;
-    g.whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
-    g.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
+    g.cfg.inner_gap        = DEFAULT_INNER_GAP;
+    g.cfg.outer_gap        = DEFAULT_OUTER_GAP;
+    g.cfg.smart_gaps       = false;
+    g.cfg.smart_borders    = false;
+    g.cfg.border_width     = DEFAULT_BORDER_WIDTH;
+    g.cfg.border_color     = DEFAULT_BORDER_COLOR;
+    g.cfg.background_color = DEFAULT_BACKGROUND_COLOR;
+    g.cfg.float_policy     = FLOAT_RULES;
+    g.cfg.fullscreen_policy = FS_CONTENT;
+    g.cfg.float_placement  = FLOAT_PLACE_CENTER;
+    g.cfg.attach_policy    = ATTACH_END;
+    g.cfg.manage_owned     = false;
+    g.cfg.float_on_top     = true;
+    g.cfg.min_win_w        = DEFAULT_MIN_WIN_W;
+    g.cfg.min_win_h        = DEFAULT_MIN_WIN_H;
+    g.cfg.block_system_keys = true;
+    g.cfg.whichkey_enabled = true;
+    g.cfg.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
+    g.cfg.whichkey_bg      = DEFAULT_WHICHKEY_BG;
+    g.cfg.whichkey_fg      = DEFAULT_WHICHKEY_FG;
+    g.cfg.whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
+    g.cfg.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
     g.current_map  = NULL;
     g.root_map     = NULL;
 
@@ -757,8 +757,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     log_err(L"config loaded: %d root bindings, %d keymaps, %d desktop rules, "
             L"%d startup programs — starting on desktop '%ls'",
-            g.root_map ? g.root_map->count : -1, g.keymap_count,
-            g.desktop_rule_count, g.startup_count, desktop_current()->name);
+            g.root_map ? g.root_map->count : -1, g.cfg.keymap_count,
+            g.cfg.desktop_rule_count, g.cfg.startup_count, desktop_current()->name);
 
     helper_init();
     ipc_start();
@@ -777,11 +777,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     tile_current();
 
-    for (int i = 0; i < g.startup_count; i++) {
-        if (g.startup_commands[i].cmd)
-            spawn_command(g.startup_commands[i].cmd,
-                          g.startup_commands[i].args,
-                          g.startup_commands[i].cwd, L"startup");
+    for (int i = 0; i < g.cfg.startup_count; i++) {
+        if (g.cfg.startup_commands[i].cmd)
+            spawn_command(g.cfg.startup_commands[i].cmd,
+                          g.cfg.startup_commands[i].args,
+                          g.cfg.startup_commands[i].cwd, L"startup");
     }
 
     desktop_launch_app_if_empty(desktop_current_slot());

@@ -402,8 +402,8 @@ static void arrangement_apply(void) {
     bool any     = false;
 
     for (int i = 0; i < n; i++) {
-        for (int r = 0; r < g.monitor_rule_count; r++) {
-            const MonitorRule *mr = &g.monitor_rules[r];
+        for (int r = 0; r < g.cfg.monitor_rule_count; r++) {
+            const MonitorRule *mr = &g.cfg.monitor_rules[r];
             bool hit = (mr->device[0])
                            ? wildcard_match(mr->device, g.monitors[i].device)
                            : (mr->index == i);
@@ -483,8 +483,8 @@ void displays_apply_rules(bool force) {
         bool set_hdr = false, hdr = false;
         bool any     = false;
 
-        for (int r = 0; r < g.monitor_rule_count; r++) {
-            const MonitorRule *mr = &g.monitor_rules[r];
+        for (int r = 0; r < g.cfg.monitor_rule_count; r++) {
+            const MonitorRule *mr = &g.cfg.monitor_rules[r];
             bool hit = (mr->device[0]) ? wildcard_match(mr->device, m->device)
                                        : (mr->index == i);
             if (!hit) continue;
