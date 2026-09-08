@@ -249,10 +249,10 @@ static void tile_monitor(Desktop *dt, int mon, RECT work) {
     const Monitor *M = (mon >= 0 && mon < g.monitor_count) ? &g.monitors[mon]
                                                            : NULL;
     int inner = (dt->inner_gap >= 0) ? dt->inner_gap
-              : (M && M->inner_gap >= 0) ? M->inner_gap : g.inner_gap;
+              : (M && M->inner_gap >= 0) ? M->inner_gap : g.cfg.inner_gap;
     int outer = (dt->outer_gap >= 0) ? dt->outer_gap
-              : (M && M->outer_gap >= 0) ? M->outer_gap : g.outer_gap;
-    if (g.smart_gaps && n == 1) { inner = 0; outer = 0; }
+              : (M && M->outer_gap >= 0) ? M->outer_gap : g.cfg.outer_gap;
+    if (g.cfg.smart_gaps && n == 1) { inner = 0; outer = 0; }
 
     int pre = outer - inner / 2;
     if (pre < 0) pre = 0;

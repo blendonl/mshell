@@ -33,15 +33,15 @@ static int     s_pad, s_key_gap, s_col_gap, s_row_vpad, s_hdr_gap, s_border_w;
 #define wk_dpi_scale(px, dpi) overlay_scale((px), (dpi))
 
 static void wk_apply_dpi(UINT dpi) {
-    s_pad      = wk_dpi_scale(g.whichkey_padding,  dpi);
-    s_key_gap  = wk_dpi_scale(g.whichkey_key_gap,  dpi);
-    s_col_gap  = wk_dpi_scale(g.whichkey_col_gap,  dpi);
-    s_row_vpad = wk_dpi_scale(g.whichkey_row_gap,  dpi);
-    s_hdr_gap  = wk_dpi_scale(g.whichkey_hdr_gap,  dpi);
-    s_border_w = wk_dpi_scale(g.whichkey_border_w, dpi);
+    s_pad      = wk_dpi_scale(g.cfg.whichkey_padding,  dpi);
+    s_key_gap  = wk_dpi_scale(g.cfg.whichkey_key_gap,  dpi);
+    s_col_gap  = wk_dpi_scale(g.cfg.whichkey_col_gap,  dpi);
+    s_row_vpad = wk_dpi_scale(g.cfg.whichkey_row_gap,  dpi);
+    s_hdr_gap  = wk_dpi_scale(g.cfg.whichkey_hdr_gap,  dpi);
+    s_border_w = wk_dpi_scale(g.cfg.whichkey_border_w, dpi);
 
-    overlay_font_face(&s_font, dpi, wk_dpi_scale(g.whichkey_font_size, dpi),
-                      g.whichkey_font);
+    overlay_font_face(&s_font, dpi, wk_dpi_scale(g.cfg.whichkey_font_size, dpi),
+                      g.cfg.whichkey_font);
 }
 
 static int wk_resolve_max(float v, int mon_px, UINT dpi) {
@@ -164,19 +164,19 @@ static void whichkey_show(KeyMap *map) {
     int  mon_w = mon.right - mon.left;
     int  mon_h = mon.bottom - mon.top;
 
-    int margin = (g.whichkey_margin >= 0)
-                 ? wk_dpi_scale(g.whichkey_margin, dpi)
+    int margin = (g.cfg.whichkey_margin >= 0)
+                 ? wk_dpi_scale(g.cfg.whichkey_margin, dpi)
                  : mon_h / 20;
     if (margin * 2 >= mon_w || margin * 2 >= mon_h) margin = 0;
 
-    int max_w = wk_resolve_max(g.whichkey_max_w, mon_w, dpi);
-    int max_h = wk_resolve_max(g.whichkey_max_h, mon_h, dpi);
+    int max_w = wk_resolve_max(g.cfg.whichkey_max_w, mon_w, dpi);
+    int max_h = wk_resolve_max(g.cfg.whichkey_max_h, mon_h, dpi);
     if (max_w <= 0 || max_w > mon_w - margin * 2) max_w = mon_w - margin * 2;
     if (max_h <= 0 || max_h > mon_h - margin * 2) max_h = mon_h - margin * 2;
 
     WkMetrics wm = {
         .count     = s_count,
-        .max_rows  = g.whichkey_max_rows,
+        .max_rows  = g.cfg.whichkey_max_rows,
         .key_w     = s_key_w,
         .label_w   = s_label_w,
         .header_w  = hsz.cx,
@@ -204,7 +204,7 @@ static void whichkey_show(KeyMap *map) {
     }
 
     int halign, valign;
-    switch (g.whichkey_pos) {
+    switch (g.cfg.whichkey_pos) {
     case WK_POS_LEFT: case WK_POS_TOP_LEFT: case WK_POS_BOTTOM_LEFT:
         halign = 0; break;
     case WK_POS_RIGHT: case WK_POS_TOP_RIGHT: case WK_POS_BOTTOM_RIGHT:
@@ -212,7 +212,7 @@ static void whichkey_show(KeyMap *map) {
     default:
         halign = 1; break;
     }
-    switch (g.whichkey_pos) {
+    switch (g.cfg.whichkey_pos) {
     case WK_POS_TOP: case WK_POS_TOP_LEFT: case WK_POS_TOP_RIGHT:
         valign = 0; break;
     case WK_POS_CENTER: case WK_POS_LEFT: case WK_POS_RIGHT:
@@ -225,9 +225,9 @@ static void whichkey_show(KeyMap *map) {
     wk_anchor(halign, valign, mon.left, mon.top, mon_w, mon_h, w, h, margin,
               &x, &y);
 
-    SetLayeredWindowAttributes(g.whichkey_window, 0, g.whichkey_opacity,
+    SetLayeredWindowAttributes(g.whichkey_window, 0, g.cfg.whichkey_opacity,
                                LWA_ALPHA);
-    DWORD corner = g.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
+    DWORD corner = g.cfg.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
     DwmSetWindowAttribute(g.whichkey_window, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
 
@@ -239,7 +239,7 @@ static void whichkey_show(KeyMap *map) {
 void whichkey_notify(void) {
     if (!g.whichkey_window) return;
     KillTimer(g.whichkey_window, WK_TIMER_ID);
-    if (!g.whichkey_enabled) { whichkey_hide(); return; }
+    if (!g.cfg.whichkey_enabled) { whichkey_hide(); return; }
 
     kb_lock();
     KeyMap *m = (g.current_map && g.current_map != g.root_map)
@@ -247,8 +247,8 @@ void whichkey_notify(void) {
     kb_unlock();
 
     if (!m) { whichkey_hide(); return; }
-    if (g.whichkey_delay <= 0) whichkey_show(m);
-    else SetTimer(g.whichkey_window, WK_TIMER_ID, (UINT)g.whichkey_delay, NULL);
+    if (g.cfg.whichkey_delay <= 0) whichkey_show(m);
+    else SetTimer(g.whichkey_window, WK_TIMER_ID, (UINT)g.cfg.whichkey_delay, NULL);
 }
 
 static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -274,17 +274,17 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int  W = op.w, H = op.h;
         RECT rc = { 0, 0, W, H };
 
-        overlay_fill(mdc, &rc, g.whichkey_bg);
+        overlay_fill(mdc, &rc, g.cfg.whichkey_bg);
 
         int bw = s_border_w;
         if (bw > 0) {
             if (bw * 2 > H) bw = H / 2;
             if (bw * 2 > W) bw = W / 2;
             RECT e;
-            e = (RECT){ 0, 0, W, bw };          overlay_fill(mdc, &e, g.whichkey_border);
-            e = (RECT){ 0, H - bw, W, H };      overlay_fill(mdc, &e, g.whichkey_border);
-            e = (RECT){ 0, 0, bw, H };          overlay_fill(mdc, &e, g.whichkey_border);
-            e = (RECT){ W - bw, 0, W, H };      overlay_fill(mdc, &e, g.whichkey_border);
+            e = (RECT){ 0, 0, W, bw };          overlay_fill(mdc, &e, g.cfg.whichkey_border);
+            e = (RECT){ 0, H - bw, W, H };      overlay_fill(mdc, &e, g.cfg.whichkey_border);
+            e = (RECT){ 0, 0, bw, H };          overlay_fill(mdc, &e, g.cfg.whichkey_border);
+            e = (RECT){ W - bw, 0, W, H };      overlay_fill(mdc, &e, g.cfg.whichkey_border);
         }
 
         HFONT of = (HFONT)SelectObject(mdc, s_font.font);
@@ -294,7 +294,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                          DT_TOP | DT_LEFT;
         const int  right = W - s_pad;
 
-        SetTextColor(mdc, g.whichkey_key_fg);
+        SetTextColor(mdc, g.cfg.whichkey_key_fg);
         RECT hr = { s_pad, s_pad, right, s_pad + s_header_h };
         DrawTextW(mdc, s_title, -1, &hr, fmt);
 
@@ -309,7 +309,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SIZE ksz;
             GetTextExtentPoint32W(mdc, s_rows[i].key,
                                   (int)wcslen(s_rows[i].key), &ksz);
-            SetTextColor(mdc, g.whichkey_key_fg);
+            SetTextColor(mdc, g.cfg.whichkey_key_fg);
             TextOutW(mdc, cx + (s_key_w - ksz.cx), cy,
                      s_rows[i].key, (int)wcslen(s_rows[i].key));
 
@@ -317,7 +317,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             int lr = cx + cell_w;
             if (lr > right) lr = right;
             if (lx < lr) {
-                SetTextColor(mdc, g.whichkey_fg);
+                SetTextColor(mdc, g.cfg.whichkey_fg);
                 RECT rr = { lx, cy, lr, cy + s_row_h };
                 DrawTextW(mdc, s_rows[i].label, -1, &rr, fmt);
             }
@@ -339,10 +339,10 @@ bool whichkey_init(void) {
         WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
     if (!g.whichkey_window) return false;
 
-    SetLayeredWindowAttributes(g.whichkey_window, 0, g.whichkey_opacity,
+    SetLayeredWindowAttributes(g.whichkey_window, 0, g.cfg.whichkey_opacity,
                                LWA_ALPHA);
 
-    DWORD corner = g.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
+    DWORD corner = g.cfg.whichkey_rounded ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
     DwmSetWindowAttribute(g.whichkey_window, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
 
