@@ -256,6 +256,15 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     case EVENT_SYSTEM_FOREGROUND:
         window_resink();
 
+        /* A window we have never seen just took the foreground. Both events
+         * that would have adopted it — CREATE and SHOW — are dropped while a
+         * pass is suppressed, and nothing else ever looks again: an unadopted
+         * window belongs to no desktop, so it is never hidden with one and
+         * stares back from every desktop until its app closes it. Activation
+         * is the second chance, and costs the adoption test only for a window
+         * that is not managed yet. */
+        if (IsWindow(hwnd) && window_index_of(hwnd) < 0) window_manage(hwnd);
+
         /* Focus changed behind our back — the user clicked a window, or an app
          * activated itself on startup. Re-sync our idea of who is focused:
          * every focus keybind computes its target *relative to* that index, so

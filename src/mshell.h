@@ -1347,6 +1347,12 @@ void     window_restore_all_decorations(void);
  * cloaked windows and would otherwise leave them stranded and invisible. */
 void     window_uncloak_strays(void);
 
+/* Restore the frame of any window a previous mshell stripped and died before
+ * giving back. Also called by window_manage_existing(), first: the styles are
+ * recorded on the windows themselves, so this is the only thing that knows
+ * what they were. */
+void     window_recover_frames(void);
+
 /* Re-show everything mshell hid (other desktops, monocle's non-focused
  * windows). A hidden window has no taskbar button and no Alt+Tab entry, so
  * without this they are unreachable once mshell exits. Call it before
