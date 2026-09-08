@@ -513,6 +513,8 @@ void update_work_area(void) {
     g.work_area = g.monitors[g.primary_monitor].work_area;
 }
 
+static int s_resink_left;
+
 static int s_spi_broadcast_depth;
 
 BOOL spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param) {
@@ -617,6 +619,8 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         background_update();
         bar_reconfigure();     /* monitor set or geometry changed */
         tile_current();
+        s_resink_left = RESINK_RETRIES;
+        SetTimer(hwnd, TIMER_RESINK, RESINK_RETRY_MS, NULL);
         return 0;
 
     case WM_SETTINGCHANGE:
@@ -684,8 +688,26 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_TIMER:
-        if (wp == TIMER_FOLLOW_MOUSE) { mouse_poll_focus(); return 0; }
+        if (wp == TIMER_FOLLOW_MOUSE) { mouse_poll_focus();  return 0; }
+        if (wp == TIMER_SINK_VERIFY) {
+            /* One janitor tick for the two things a pass asserts and something
+             * else can undo: the hides and shows a hung app would not take, and
+             * the order under the backdrop. The retry runs first, so a window it
+             * has just sunk is part of what the verify then checks. */
+            window_verify_visibility();
+            window_verify_sink();
+            return 0;
+        }
         if (wp == TIMER_ANIM)          { anim_tick();        return 0; }
+        if (wp == TIMER_RESINK) {
+            update_work_area();
+            background_update();
+            bar_reconfigure();
+            tile_current();
+            window_resink();
+            if (--s_resink_left <= 0) KillTimer(hwnd, TIMER_RESINK);
+            return 0;
+        }
         /* We have been up long enough to count as a healthy run, so the
          * launches recorded before this one were not a loop. One-shot: kill the
          * timer so this is the only time it fires. */
@@ -1066,6 +1088,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * runs unconditionally and the poll returns immediately when the feature is
      * off, so a reload can turn it on without touching the timer. */
     SetTimer(g.message_window, TIMER_FOLLOW_MOUSE, FOLLOW_MOUSE_MS, NULL);
+    SetTimer(g.message_window, TIMER_SINK_VERIFY, SINK_VERIFY_MS, NULL);
 
     if (!g.test_mode) {
         warn_if_no_autorestart();

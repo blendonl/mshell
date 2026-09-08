@@ -97,7 +97,13 @@
 #define TIMER_CRASHLOOP_HEALTHY  1
 #define TIMER_FOLLOW_MOUSE       2
 #define TIMER_ANIM               3
+#define TIMER_RESINK             4
+#define TIMER_SINK_VERIFY        5
 #define FOLLOW_MOUSE_MS          120   /* human-speed; see mouse.c */
+#define RESINK_RETRY_MS          500
+#define RESINK_RETRIES           6
+#define SINK_VERIFY_MS           250
+#define SINK_WALK_MAX            512
 /* The float pass walks the system z-order from the TOP, where every window on
  * the machine is, rather than from the bottom where the sunk ones cluster. It
  * stops as soon as it has found the floats it is looking for; this is the
@@ -600,6 +606,15 @@ typedef struct {
      * NOT honoured by window_restore_all_visibility(): on the way out every
      * window mshell hid has to come back, including this one. */
     bool      user_hidden;
+    /* A hide or a show was SKIPPED because the window's thread was not
+     * answering. Everything the hide/show path does — SetWindowPos, ShowWindow,
+     * RedrawWindow — sends to the owning thread and blocks until it replies, so
+     * touching a hung window freezes the shell itself; skipping it is the
+     * lesser evil. This is what remembers that we still owe it the move, so
+     * window_verify_visibility can finish the job once the app answers again.
+     * Deliberately NOT set when a hide fails for any other reason — an elevated
+     * window nothing can hide must not be retried four times a second. */
+    bool      vis_deferred;
     bool      wm_hidden;             /* MSHELL has it off the screen: another
                                       * desktop, monocle, a stowed scratchpad.
                                       * Tracked rather than derived, because
@@ -1374,6 +1389,12 @@ bool     window_rescue_offscreen(ManagedWindow *mw);
  * calls it directly for FLOATS, which no tiling pass will ever place. */
 bool     window_clamp_into_monitor(ManagedWindow *mw, int mon);
 void     window_enforce_zorder(void);     /* backdrop at bottom, floats on top */
+void     window_resink(void);  /* backdrop at bottom, sunk windows under it */
+int      window_sunk_count(void);
+void     window_verify_sink(void);  /* re-sink if anything surfaced above it */
+/* Finish any hide or show a hung window made us skip. Rides the same timer as
+ * window_verify_sink; an in-memory scan that costs nothing until it finds one. */
+void     window_verify_visibility(void);
 /* The raising half of the pass on its own — floats into the topmost band (so
  * no ordinary window can ever cover one), then our overlays over them, then
  * fullscreen and pinned windows over both. Every focus change re-asserts the
@@ -1823,6 +1844,24 @@ static inline bool window_is_alive(HWND hwnd) {
 static inline bool window_is_screen_fullscreen(const ManagedWindow *mw) {
     return mw && (mw->fs_mode == FS_WINDOW || mw->fs_mode == FS_BOTH ||
                   mw->app_fullscreen);
+}
+
+/* Did MSHELL take this window off the screen with ShowWindow(SW_HIDE)?
+ *
+ * The question the EVENT_OBJECT_HIDE handler has to answer is "did we hide
+ * this, or did the app tray itself?", and wm_hidden alone cannot say: it is set
+ * for all four mechanisms window_hide() can use, and only ONE of them produces
+ * this event at all. Sinking, cloaking and stashing each leave WS_VISIBLE
+ * alone — the window is covered, or composited-but-invisible, or parked
+ * off-screen, but never un-shown — so a hide event arriving for a window in any
+ * of those states is the application, every time.
+ *
+ * Spelled out here rather than at the call site because getting it wrong is
+ * expensive in both directions: read the app's hide as ours and switching back
+ * to the desktop drags a trayed window out of the tray; read ours as the app's
+ * and the window is disowned off-screen with nothing left to reveal it. */
+static inline bool window_hidden_by_showwindow(const ManagedWindow *mw) {
+    return mw && mw->wm_hidden && !mw->cloaked && !mw->sunk && !mw->stashed;
 }
 
 /* Is this window a float in the sense the FLOAT TIER means — a window the user

@@ -162,7 +162,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
          * straight back onto the screen. */
         {
             ManagedWindow *mw = window_find(hwnd);
-            if (mw && mw->wm_hidden && !mw->cloaked) break;   /* our own hide */
+            if (window_hidden_by_showwindow(mw)) break;   /* our own hide */
             if (mw && !mw->app_hidden) {
                 mw->app_hidden  = true;
                 mw->has_applied = false;
@@ -254,6 +254,8 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     }
 
     case EVENT_SYSTEM_FOREGROUND:
+        window_resink();
+
         /* Focus changed behind our back — the user clicked a window, or an app
          * activated itself on startup. Re-sync our idea of who is focused:
          * every focus keybind computes its target *relative to* that index, so

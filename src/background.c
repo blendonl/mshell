@@ -54,8 +54,21 @@ void background_update(void) {
 
     int x, y, w, h;
     virtual_screen_rect(&x, &y, &w, &h);
-    SetWindowPos(g.background_window, HWND_BOTTOM, x, y, w, h,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+    bool visible = IsWindowVisible(g.background_window) != 0;
+    RECT cur;
+    bool placed = visible && GetWindowRect(g.background_window, &cur) &&
+                  cur.left == x && cur.top == y &&
+                  cur.right - cur.left == w && cur.bottom - cur.top == h;
+
+    if (!placed) {
+        bool sunk = window_sunk_count() > 0;
+        SetWindowPos(g.background_window, sunk ? NULL : HWND_BOTTOM, x, y, w, h,
+                     SWP_NOACTIVATE | (visible ? 0u : SWP_SHOWWINDOW) |
+                     (sunk ? SWP_NOZORDER : 0u));
+    }
+
+    window_resink();
     InvalidateRect(g.background_window, NULL, TRUE);
 }
 

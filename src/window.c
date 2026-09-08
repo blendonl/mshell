@@ -66,6 +66,11 @@ static bool window_set_band(HWND hwnd, HWND after, bool topmost);
  * the file than the floats do. */
 static void window_park_float_if_fullscreen(ManagedWindow *mw);
 
+/* Declared here because window_resink gates its expensive half on it and is
+ * defined first — the two belong next to each other and one of them has to
+ * come second. */
+static bool window_sink_intact(void);
+
 /* The file name inside a path, or the whole string when there is no separator. */
 static const wchar_t *path_basename(const wchar_t *path) {
     const wchar_t *back = wcsrchr(path, L'\\');
@@ -577,18 +582,18 @@ static bool window_set_cloaked(HWND hwnd, bool on) {
     static bool warned;
     if (!warned) {
         warned = true;
-        log_err(L"cloak: refused for %p — DwmSetWindowAttribute returned "
-                L"0x%08lX and mshelld.exe %ls. Hiding falls back to "
-                L"ShowWindow(SW_HIDE), which Chromium-based apps come back from "
-                L"blank or mis-composited.%ls",
-                (void *)hwnd, (unsigned long)hr,
-                helper_available() ? L"could not do it either"
-                                   : L"is not running",
-                helper_available()
-                    ? L" The helper IS connected, so this is not a missing "
-                      L"install: DWM will not cloak a foreign window at all here."
-                    : L" Run `install.bat /helper` from an administrator prompt "
-                      L"— see INSTALL.md.");
+        log_msg(LOG_INFO,
+                L"cloak: refused for %p (DwmSetWindowAttribute returned 0x%08lX). "
+                L"Expected, and not an integrity boundary the helper can cross: "
+                L"DWMWA_CLOAK is owner-only, so no process cloaks another's "
+                L"window with it. The shell cloak that Windows' own virtual "
+                L"desktops use is IApplicationView::SetCloak, reached through "
+                L"CLSID_ImmersiveShell — which explorer.exe registers at "
+                L"runtime and mshell replaced, so it is unreachable here "
+                L"(tools/probe_shellcloak.c measures this). Hiding sinks the "
+                L"window under the backdrop instead, which is what it does by "
+                L"default anyway.",
+                (void *)hwnd, (unsigned long)hr);
     }
     return false;
 }
@@ -772,6 +777,37 @@ static void window_unstash(ManagedWindow *mw) {
                    SWP_NOCOPYBITS);
 }
 
+/* Is this window's thread refusing to answer, and if so, remember that we still
+ * owe it the move.
+ *
+ * Every mechanism below sends synchronously to the window's own thread —
+ * SetWindowPos and ShowWindow both do, and RedrawWindow queues to it. A thread
+ * that has stopped pumping blocks the caller, and the caller here is the shell's
+ * only message loop: one frozen app on the desktop you are leaving takes the
+ * whole desktop switch with it, and under mshell there is no taskbar to escape
+ * to. Skipping leaves the window on screen where it does not belong, which is
+ * visible and recoverable; blocking is not.
+ *
+ * wm_hidden is deliberately NOT set on the way out. It is what
+ * window_on_screen() answers from, and a window still sitting on the display
+ * while the flag claims otherwise is the same class of bug as the elevated
+ * window that could not be hidden at all — see the end of window_hide. */
+static bool window_defer_if_hung(ManagedWindow *mw, const wchar_t *what) {
+    if (!IsHungAppWindow(mw->hwnd)) return false;
+
+    mw->vis_deferred = true;
+
+    static bool warned;
+    if (!warned) {
+        warned = true;
+        log_msg(LOG_WARN, L"%ls: %p is not answering — skipped rather than "
+                          L"blocking the shell on it. window_verify_visibility "
+                          L"retries once its thread starts pumping again.",
+                what, (void *)mw->hwnd);
+    }
+    return true;
+}
+
 void window_hide(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->wm_hidden) return;      /* already ours and already gone */
@@ -780,6 +816,7 @@ void window_hide(ManagedWindow *mw) {
      * leave it alone and let the EVENT_OBJECT_SHOW handler deal with it when
      * the app brings it back. */
     if (mw->app_hidden) return;
+    if (window_defer_if_hung(mw, L"hide")) return;
 
     /* The flags go up BEFORE the window is touched, never after.
      *
@@ -851,6 +888,8 @@ void window_hide(ManagedWindow *mw) {
         }
     }
 
+    mw->vis_deferred = false;
+
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
             mw->sunk ? L"sunk" : mw->cloaked ? L"cloaked"
                                : mw->stashed ? L"stashed" : L"SW_HIDE");
@@ -859,6 +898,7 @@ void window_hide(ManagedWindow *mw) {
 void window_show(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->app_hidden) return;     /* not ours to reveal */
+    if (window_defer_if_hung(mw, L"show")) return;
 
     /* Was it actually off the screen? Asked before anything is undone, and of
      * our own bookkeeping rather than of IsWindowVisible — a cloaked window is
@@ -947,7 +987,8 @@ void window_show(ManagedWindow *mw) {
                                    : was_stashed ? L"stashed" : L"hidden");
     }
 
-    mw->wm_hidden = false;
+    mw->wm_hidden    = false;
+    mw->vis_deferred = false;
 }
 
 /* ===========================================================================
@@ -2172,6 +2213,183 @@ void window_raise_floats(void) {
     zorder_raise_over_floats();
 }
 
+int window_sunk_count(void) {
+    int n = 0;
+    for (int i = 0; i < g.managed_count; i++)
+        if (g.managed[i].sunk && IsWindow(g.managed[i].hwnd)) n++;
+    return n;
+}
+
+/* ===========================================================================
+ * Everything we sank goes to the bottom of the z-order, under the backdrop.
+ *
+ * The backdrop is NOT sent to HWND_BOTTOM while anything is sunk. Sunk windows
+ * live BELOW it, so bottoming the backdrop lifts every one of them back onto a
+ * screen you are not looking at, and the loop that follows puts them back one
+ * SetWindowPos at a time. Each of those is a separately composed frame, so a
+ * hidden window blinks on and off every single time this runs — once per focus
+ * change, per tiling pass and per backdrop update, which is fast enough to read
+ * as a window flickering on the monitor you are not using.
+ *
+ * Sinking downwards never uncovers anything, so the sunk windows go first, and
+ * the backdrop only follows them down far enough to sit directly above the
+ * block: low enough to cover nothing it should not, high enough to still cover
+ * them.
+ *
+ * All managed windows, not the current desktop's: the sunk ones are by
+ * definition the windows of the desktops you left. Z-order-only moves, so this
+ * costs a kernel call each and no repaint, no WM_SIZE, nothing the app hears
+ * about.
+ * =========================================================================== */
+void window_resink(void) {
+    HWND bg = g.background_window;
+    if (!bg || !IsWindow(bg)) return;
+
+    int sunk = window_sunk_count();
+
+    if (sunk == 0) {
+        SetWindowPos(bg, HWND_BOTTOM, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return;
+    }
+
+    /* The expensive half, and the reason it is now gated: one cross-process
+     * SetWindowPos per hidden window on EVERY desktop, and this runs from
+     * window_enforce_zorder, which every one of the tiler's callers reaches.
+     * Right after a desktop switch it is pure repetition — window_sink() has
+     * just inserted each of those windows directly below the backdrop — so a
+     * six-desktop session was paying three times over for a job already done,
+     * each call a synchronous round trip into another process's message loop.
+     *
+     * The backdrop still follows below, unconditionally: that is one call on
+     * our own window, and pinning it under everything is the first promise
+     * window_enforce_zorder makes. Only the per-window repair is skipped. */
+    if (!window_sink_intact()) {
+        for (int i = 0; i < g.managed_count; i++) {
+            ManagedWindow *mw = &g.managed[i];
+            if (!mw->sunk || !IsWindow(mw->hwnd)) continue;
+            SetWindowPos(mw->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+
+    HWND top      = GetTopWindow(NULL);
+    HWND top_sunk = NULL;
+    int  steps    = 0;
+    for (HWND h = top ? GetWindow(top, GW_HWNDLAST) : NULL;
+         h && steps < SINK_WALK_MAX;
+         h = GetWindow(h, GW_HWNDPREV), steps++) {
+        if (h == bg) continue;
+        ManagedWindow *mw = window_find(h);
+        if (mw && mw->sunk) { top_sunk = h; continue; }
+        break;
+    }
+    if (!top_sunk) return;
+
+    HWND anchor = GetWindow(top_sunk, GW_HWNDPREV);
+    if (anchor && anchor != bg)
+        SetWindowPos(bg, anchor, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+/* ===========================================================================
+ * Is every sunk window still under the backdrop?
+ *
+ * Cheap because of WHERE sunk windows live. They are at the very bottom of the
+ * z-order, so walking up from the bottom meets all of them and then the
+ * backdrop, and the walk stops there — a handful of steps when the invariant
+ * holds, and no steps at all when nothing is sunk. Reaching the backdrop with
+ * sunk windows still unaccounted for means one of them was lifted above it, and
+ * a window we took off the screen is back on it.
+ * =========================================================================== */
+static bool window_sink_intact(void) {
+    HWND bg = g.background_window;
+    if (!bg || !IsWindow(bg)) return true;
+
+    int sunk = window_sunk_count();
+    if (sunk == 0) return true;
+
+    HWND top = GetTopWindow(NULL);
+    if (!top) return true;
+
+    int seen = 0, steps = 0;
+    for (HWND h = GetWindow(top, GW_HWNDLAST);
+         h && steps < SINK_WALK_MAX;
+         h = GetWindow(h, GW_HWNDPREV), steps++) {
+        if (h == bg) return seen >= sunk;
+        ManagedWindow *mw = window_find(h);
+        if (mw && mw->sunk) seen++;
+    }
+
+    /* The backdrop was not found below the cap. Say the invariant holds rather
+     * than re-asserting on every tick against a z-order we cannot read. */
+    return true;
+}
+
+/* Finish any hide or show that a hung window made us skip.
+ *
+ * Something has to come back for these, and the tiling pass cannot: it walks
+ * only the desktop you are looking at, while the window that was skipped is
+ * usually on the one you left. This rides the same 250 ms timer as the sink
+ * check, and costs nothing until it finds a window actually owed something —
+ * vis_deferred is set only by window_defer_if_hung, so an elevated window that
+ * simply cannot be hidden is never retried here.
+ *
+ * The direction is re-decided from where the window lives NOW rather than
+ * remembered, because the desktop may well have changed while its app was
+ * busy. */
+void window_verify_visibility(void) {
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+        if (!mw->vis_deferred) continue;
+        if (!IsWindow(mw->hwnd)) { mw->vis_deferred = false; continue; }
+        if (IsHungAppWindow(mw->hwnd)) continue;   /* still busy; try later */
+        if (mw->app_hidden || mw->user_hidden) { mw->vis_deferred = false; continue; }
+
+        bool here = desktop_is_visible(mw->desktop_id);
+
+        events_suppress_begin();
+        if (!here)                        window_hide(mw);
+        else if (!mw->layout_hidden)      window_show(mw);
+        else                              mw->vis_deferred = false;
+        events_suppress_end();
+    }
+}
+
+static void window_rehide_surfaced(void) {
+    HWND bg = g.background_window;
+    if (!bg || !IsWindow(bg)) return;
+
+    int steps = 0;
+    for (HWND h = GetWindow(bg, GW_HWNDPREV);
+         h && steps < SINK_WALK_MAX;
+         h = GetWindow(h, GW_HWNDPREV), steps++) {
+        ManagedWindow *mw = window_find(h);
+        if (!mw || !mw->sunk) continue;
+        if (desktop_is_visible(mw->desktop_id)) continue;
+
+        log_msg(LOG_WARN, L"sink: %p will not stay under the backdrop — "
+                          L"taking it off the screen another way", (void *)h);
+
+        mw->sunk      = false;
+        mw->wm_hidden = false;
+
+        events_suppress_begin();
+        window_hide(mw);
+        events_suppress_end();
+    }
+}
+
+void window_verify_sink(void) {
+    if (window_sink_intact()) return;
+
+    log_msg(LOG_DEBUG, L"sink: a hidden window surfaced above the backdrop — "
+                       L"re-asserting");
+    window_resink();
+
+    if (!window_sink_intact()) window_rehide_surfaced();
+}
+
 /* ===========================================================================
  * Enforce a sane z-order after a tiling pass:
  *   - the solid backdrop stays pinned to the very bottom so it can never rise
@@ -2183,30 +2401,7 @@ void window_raise_floats(void) {
  * Tiled windows never overlap each other, so their relative order is moot.
  * =========================================================================== */
 void window_enforce_zorder(void) {
-    if (g.background_window)
-        SetWindowPos(g.background_window, HWND_BOTTOM, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
-    /* ...and everything we sank goes back under it. Not belt-and-braces: the
-     * line above is what makes this necessary. Pushing the backdrop to the
-     * bottom of the z-order lifts every sunk window above it — which is to say,
-     * back onto the screen, on a desktop you are not looking at. Re-asserting
-     * here rather than skipping the backdrop assert keeps one rule ("the
-     * backdrop is at the bottom, and hidden windows are under the backdrop")
-     * instead of two that have to agree.
-     *
-     * All managed windows, not the current desktop's: the sunk ones are by
-     * definition the windows of the desktops you left. Z-order-only moves, so
-     * this costs a kernel call each and no repaint, no WM_SIZE, nothing the app
-     * hears about. */
-    if (g.background_window) {
-        for (int i = 0; i < g.managed_count; i++) {
-            ManagedWindow *mw = &g.managed[i];
-            if (!mw->sunk || !IsWindow(mw->hwnd)) continue;
-            SetWindowPos(mw->hwnd, g.background_window, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-    }
+    window_resink();
 
     /* Everything that goes UP happens in here: the floats, then our overlays,
      * then the fullscreen and pinned windows over both. */
