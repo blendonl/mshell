@@ -11,10 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mingw-w64
+      - name: Install mingw-w64 and cppcheck
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
+          sudo apt-get install -y gcc-mingw-w64-x86-64 cppcheck
+          cppcheck --version
 
       - name: Fetch vendored Lua
         run: |
@@ -27,6 +28,9 @@ jobs:
 
       - name: Host-side unit tests under ASan/UBSan
         run: make test-asan
+
+      - name: Static analysis
+        run: make cppcheck
 
       - name: Editor types are up to date
         run: |
