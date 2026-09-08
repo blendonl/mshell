@@ -1325,6 +1325,10 @@ static int lua_mshell_set_mouse_tbl(lua_State *L) {
     if (!lua_isnil(L, -1)) g.mouse_follow = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
+    lua_getfield(L, 1, "warp");
+    if (!lua_isnil(L, -1)) g.mouse_warp = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
     lua_getfield(L, 1, "mod_drag");
     if (!lua_isnil(L, -1)) g.mouse_mod_drag = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
