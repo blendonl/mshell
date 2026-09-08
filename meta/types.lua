@@ -11,6 +11,7 @@
 ---@alias mshell.Event "window_open"|"window_close"|"desktop_switch"|"focus"
 ---@alias mshell.BarMode "top_bar"|"floating"
 ---@alias mshell.BarModule "desktops"|"layout"|"title"|"clock"|"notifications"
+---@alias mshell.BorderAccent "top"|"bottom"|"none"
 ---@alias mshell.Corners "square"|"round"|"small"|"default"
 ---@alias mshell.WhichKeyPos "center"|"top"|"bottom"|"left"|"right"|"top_left"|"top_right"|"bottom_left"|"bottom_right"
 
@@ -188,6 +189,8 @@ function Window:restore() end
 ---@field floating integer?
 ---@field urgent integer?
 ---@field corners mshell.Corners?
+---@field accent mshell.BorderAccent? Extra bar on one edge, so focus reads at a glance.
+---@field accent_width integer? Thickness of that bar. 0 turns it off.
 
 ---@class mshell.DimOpts
 ---@field enabled boolean?
