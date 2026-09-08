@@ -184,8 +184,7 @@ static void pointer_snapshot(void) {
 }
 
 static void pointer_set_speed(int speed) {
-    if (!SystemParametersInfoW(SPI_SETMOUSESPEED, 0, (PVOID)(UINT_PTR)speed,
-                               SPIF_SENDCHANGE))
+    if (!spi_set_broadcast(SPI_SETMOUSESPEED, 0, (PVOID)(UINT_PTR)speed))
         log_err(L"mouse: SPI_SETMOUSESPEED(%d) failed: %lu",
                 speed, GetLastError());
 }
@@ -194,13 +193,12 @@ static void pointer_set_accel(const int v[3]) {
     /* pvParam is not const in the SDK and SPI_SETMOUSE does not write through
      * it — copy rather than cast the const off a static. */
     int tmp[3] = { v[0], v[1], v[2] };
-    if (!SystemParametersInfoW(SPI_SETMOUSE, 0, tmp, SPIF_SENDCHANGE))
+    if (!spi_set_broadcast(SPI_SETMOUSE, 0, tmp))
         log_err(L"mouse: SPI_SETMOUSE failed: %lu", GetLastError());
 }
 
 static void pointer_set_swap(bool swapped) {
-    if (!SystemParametersInfoW(SPI_SETMOUSEBUTTONSWAP, swapped ? 1 : 0, NULL,
-                               SPIF_SENDCHANGE))
+    if (!spi_set_broadcast(SPI_SETMOUSEBUTTONSWAP, swapped ? 1 : 0, NULL))
         log_err(L"mouse: SPI_SETMOUSEBUTTONSWAP(%d) failed: %lu",
                 (int)swapped, GetLastError());
 }

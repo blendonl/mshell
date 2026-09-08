@@ -1345,6 +1345,8 @@ void     monitors_apply_rules(void);  /* per-display overrides, by device name *
 void     update_work_area(void);
 int      monitor_of_window(HWND hwnd);    /* index into g.monitors, or 0      */
 
+BOOL     spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param);
+
 /* Effective DPI of a monitor (96 when unknown). mshell is per-monitor DPI
  * aware, so coordinates are physical pixels and anything drawn at a fixed size
  * must scale itself — MulDiv(px, monitor_dpi(m), 96). */

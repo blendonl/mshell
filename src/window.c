@@ -2207,8 +2207,7 @@ void window_focus(HWND hwnd) {
      * the entry point Alt+Tab itself uses, which activates across processes
      * without merging input queues. */
     if (GetForegroundWindow() != hwnd) {
-        SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
-                              (PVOID)(UINT_PTR)0, SPIF_SENDCHANGE);
+        spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)(UINT_PTR)0);
         claim_foreground_rights();
         SetForegroundWindow(hwnd);
 
