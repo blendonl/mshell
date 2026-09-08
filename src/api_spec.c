@@ -525,7 +525,7 @@ const ApiEntry api_spec[] = {
       "", NULL },
     { "appearance.border", NULL, ACTION_NONE,
       API_SETTER, 0,
-      "The focus ring: width and colours.",
+      "The focus ring: width, colours and the accent bar.",
       "width: integer|mshell.BorderOpts, color: integer?", NULL },
     { "appearance.background", NULL, ACTION_NONE,
       API_SETTER, 0,
