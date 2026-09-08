@@ -25,6 +25,9 @@ jobs:
       - name: Host-side unit tests
         run: make test
 
+      - name: Host-side unit tests under ASan/UBSan
+        run: make test-asan
+
       - name: Editor types are up to date
         run: |
           make meta
