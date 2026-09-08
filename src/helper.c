@@ -5,11 +5,29 @@
 #define HELPER_FAIL_LIMIT      3
 #define HELPER_BACKOFF_MS      5000
 
+static CRITICAL_SECTION g_cs;
+static INIT_ONCE        g_cs_once = INIT_ONCE_STATIC_INIT;
+
 static HANDLE    g_pipe = INVALID_HANDLE_VALUE;
 static HANDLE    g_event;
 static bool      g_tried;
 static int       g_timeouts;
 static ULONGLONG g_blocked_until;
+
+static BOOL CALLBACK helper_cs_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once; (void)param; (void)ctx;
+    InitializeCriticalSection(&g_cs);
+    return TRUE;
+}
+
+static void helper_lock(void) {
+    InitOnceExecuteOnce(&g_cs_once, helper_cs_init, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+}
+
+static void helper_unlock(void) {
+    LeaveCriticalSection(&g_cs);
+}
 
 static bool helper_backed_off(void) {
     if (!g_blocked_until) return false;
@@ -111,7 +129,7 @@ static bool helper_connect(void) {
     return true;
 }
 
-void helper_init(void) {
+static void helper_open(void) {
     g_tried = true;
     if (!helper_connect())
         log_w(L"helper: mshelld.exe is not running. Windows owned by elevated "
@@ -124,13 +142,24 @@ void helper_init(void) {
               L"regardless (see window_hide).");
 }
 
+void helper_init(void) {
+    helper_lock();
+    helper_open();
+    helper_unlock();
+}
+
 void helper_shutdown(void) {
+    helper_lock();
     helper_disconnect();
     if (g_event) { CloseHandle(g_event); g_event = NULL; }
+    helper_unlock();
 }
 
 bool helper_available(void) {
-    return g_pipe != INVALID_HANDLE_VALUE;
+    helper_lock();
+    bool up = g_pipe != INVALID_HANDLE_VALUE;
+    helper_unlock();
+    return up;
 }
 
 static bool helper_exchange(ProtoMsg *req) {
@@ -150,7 +179,7 @@ static bool helper_exchange(ProtoMsg *req) {
 }
 
 static bool helper_ready(const wchar_t *op, bool *warned) {
-    if (!g_tried) helper_init();
+    if (!g_tried) helper_open();
 
     if (helper_connect()) return true;
 
@@ -163,9 +192,15 @@ static bool helper_ready(const wchar_t *op, bool *warned) {
     return false;
 }
 
+static bool helper_request(ProtoMsg *req, const wchar_t *op, bool *warned) {
+    helper_lock();
+    bool ok = helper_ready(op, warned) && helper_exchange(req);
+    helper_unlock();
+    return ok;
+}
+
 bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
     static bool warned;
-    if (!helper_ready(L"a window could not be placed", &warned)) return false;
 
     ProtoMsg req = {
         .type    = PROTO_SETPOS,
@@ -174,13 +209,11 @@ bool helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags) {
         .x = x, .y = y, .w = w, .h = h,
         .flags   = flags,
     };
-    return helper_exchange(&req);
+    return helper_request(&req, L"a window could not be placed", &warned);
 }
 
 bool helper_set_topmost(HWND hwnd, bool on) {
     static bool warned;
-    if (!helper_ready(L"a floating window could not be kept on top", &warned))
-        return false;
 
     ProtoMsg req = {
         .type    = PROTO_ZORDER,
@@ -188,12 +221,12 @@ bool helper_set_topmost(HWND hwnd, bool on) {
         .hwnd    = (uint64_t)(uintptr_t)hwnd,
         .flags   = on ? 1u : 0u,
     };
-    return helper_exchange(&req);
+    return helper_request(&req, L"a floating window could not be kept on top",
+                          &warned);
 }
 
 bool helper_set_cloak(HWND hwnd, bool on) {
     static bool warned;
-    if (!helper_ready(L"a window could not be hidden", &warned)) return false;
 
     ProtoMsg req = {
         .type    = PROTO_CLOAK,
@@ -201,19 +234,18 @@ bool helper_set_cloak(HWND hwnd, bool on) {
         .hwnd    = (uint64_t)(uintptr_t)hwnd,
         .flags   = on ? 1u : 0u,
     };
-    return helper_exchange(&req);
+    return helper_request(&req, L"a window could not be hidden", &warned);
 }
 
 bool helper_close_window(HWND hwnd) {
     static bool warned;
-    if (!helper_ready(L"a window could not be closed", &warned)) return false;
 
     ProtoMsg req = {
         .type    = PROTO_CLOSE,
         .version = MSHELLD_PROTO_VERSION,
         .hwnd    = (uint64_t)(uintptr_t)hwnd,
     };
-    return helper_exchange(&req);
+    return helper_request(&req, L"a window could not be closed", &warned);
 }
 
 #define HELPER_TASK_NAME  L"mshelld"
@@ -269,7 +301,9 @@ static bool helper_schtasks(const wchar_t *verb, DWORD *exit_code) {
 static DWORD WINAPI helper_restart_thread(LPVOID unused) {
     (void)unused;
 
+    helper_lock();
     helper_disconnect();
+    helper_unlock();
 
     DWORD rc = 1;
     if (!helper_schtasks(L"end", &rc))
@@ -288,8 +322,12 @@ static DWORD WINAPI helper_restart_thread(LPVOID unused) {
     }
     Sleep(HELPER_SETTLE_MS);
 
+    helper_lock();
     g_tried = false;
-    if (helper_connect())
+    bool reconnected = helper_connect();
+    helper_unlock();
+
+    if (reconnected)
         helper_notify(NOTIFY_INFO, L"helper restarted — the mshelld.exe on "
                                    L"disk is now the one running.");
     else
