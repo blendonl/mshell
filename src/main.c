@@ -468,7 +468,7 @@ void monitors_update(void) {
  * --------------------------------------------------------------------------- */
 typedef HRESULT (WINAPI *GetDpiForMonitorFn)(HMONITOR, int, UINT *, UINT *);
 
-UINT monitor_dpi(int mon) {
+UINT monitor_dpi_of(HMONITOR handle) {
     static GetDpiForMonitorFn fn     = NULL;
     static bool               probed = false;
 
@@ -482,14 +482,17 @@ UINT monitor_dpi(int mon) {
             log_w(L"GetDpiForMonitor unavailable — assuming 96 DPI everywhere");
     }
 
-    if (!fn || mon < 0 || mon >= g.monitor_count || !g.monitors[mon].handle)
-        return 96;
+    if (!fn || !handle) return 96;
 
     UINT dpi_x = 96, dpi_y = 96;
-    if (FAILED(fn(g.monitors[mon].handle, 0 /* MDT_EFFECTIVE_DPI */,
-                  &dpi_x, &dpi_y)))
+    if (FAILED(fn(handle, 0 /* MDT_EFFECTIVE_DPI */, &dpi_x, &dpi_y)))
         return 96;
     return dpi_x ? dpi_x : 96;
+}
+
+UINT monitor_dpi(int mon) {
+    if (mon < 0 || mon >= g.monitor_count) return 96;
+    return monitor_dpi_of(g.monitors[mon].handle);
 }
 
 /* Which monitor index a window currently sits on (nearest, so off-screen
@@ -695,6 +698,7 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
              * the order under the backdrop. The retry runs first, so a window it
              * has just sunk is part of what the verify then checks. */
             window_verify_visibility();
+            window_verify_placement();
             window_verify_sink();
             return 0;
         }

@@ -435,9 +435,7 @@ static void place_one(HWND hwnd, RECT want, UINT flags) {
     ManagedWindow *mw = window_find(hwnd);
     if (mw) { window_apply_rect(mw, want, flags); return; }
 
-    RECT adj = window_adjust_for_frame(hwnd, want);
-    window_set_pos(hwnd, adj.left, adj.top, adj.right - adj.left,
-                   adj.bottom - adj.top, flags);
+    window_place_settled(hwnd, want, flags);
 }
 
 /* Apply the whole placement buffer in one deferred batch. */
@@ -499,6 +497,9 @@ static void flush_placements(void) {
         if (mw && mw->has_applied && !mw->needs_repaint &&
             rect_eq(mw->applied_rect, want)) continue;
 
+        bool crosses_dpi = window_placement_crosses_dpi(hwnd, want);
+        if (crosses_dpi) anim_cancel(hwnd);
+
         /* --- animation ---
          * anim_begin takes over the move and drives it over the next few
          * frames. applied_rect is still set to the TARGET below, not to the
@@ -514,7 +515,8 @@ static void flush_placements(void) {
          * minimize, a rule re-assert). Placing it outright then would fight the
          * animation still running — one teleport per pass — where handing it
          * back to anim_begin simply re-targets the motion in progress. */
-        if (mw && (mw->has_applied || anim_is_animating(hwnd)) &&
+        if (!crosses_dpi &&
+            mw && (mw->has_applied || anim_is_animating(hwnd)) &&
             anim_begin(hwnd, mw->applied_rect, want)) {
             mw->applied_rect = want;
             continue;
@@ -541,7 +543,7 @@ static void flush_placements(void) {
          * individual path, which falls back to the privileged helper and
          * records the outcome honestly. A window with no ManagedWindow has
          * nothing to record either way, so it may as well ride the batch. */
-        if (hdwp && !mw_needs_helper) {
+        if (hdwp && !mw_needs_helper && !crosses_dpi) {
             RECT adj = window_adjust_for_frame(hwnd, want);
             HDWP next = DeferWindowPos(hdwp, hwnd, NULL, adj.left, adj.top,
                                        adj.right - adj.left,

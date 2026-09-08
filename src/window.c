@@ -1573,6 +1573,93 @@ static void window_placement_refused(ManagedWindow *mw) {
     }
 }
 
+#define DPI_SETTLE_TRIES 4
+#define DPI_SETTLE_TICKS 4
+#define PLACE_SETTLE_EPS 4
+
+static bool rect_settled_at(RECT got, RECT want) {
+    return abs((int)(got.left - want.left)) <= PLACE_SETTLE_EPS &&
+           abs((int)(got.top  - want.top))  <= PLACE_SETTLE_EPS &&
+           abs((int)((got.right  - got.left) -
+                     (want.right  - want.left)))  <= PLACE_SETTLE_EPS &&
+           abs((int)((got.bottom - got.top) -
+                     (want.bottom - want.top)))   <= PLACE_SETTLE_EPS;
+}
+
+bool window_placement_crosses_dpi(HWND hwnd, RECT want) {
+    if (!hwnd) return false;
+    HMONITOR from = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    HMONITOR to   = MonitorFromRect(&want, MONITOR_DEFAULTTONEAREST);
+    if (!from || !to || from == to) return false;
+    return monitor_dpi_of(from) != monitor_dpi_of(to);
+}
+
+static int monitor_of_rect(RECT r) {
+    HMONITOR hmon = MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST);
+    for (int i = 0; i < g.monitor_count; i++)
+        if (g.monitors[i].handle == hmon) return i;
+    return g.primary_monitor;
+}
+
+static void window_settle_onto_monitor(HWND hwnd, RECT want, UINT flags) {
+    RECT got;
+    if (!window_frame_rect(hwnd, &got)) return;
+
+    RECT fixed = got;
+    if (!rect_clamp_into_monitor(&fixed, monitor_of_rect(want))) return;
+    if (fixed.left == got.left && fixed.top == got.top) return;
+
+    RECT adj = window_adjust_for_frame(hwnd, fixed);
+    window_set_pos(hwnd, adj.left, adj.top, 0, 0,
+                   (flags & ~(UINT)SWP_NOMOVE) | SWP_NOSIZE);
+
+    log_msg(LOG_INFO, L"%p kept its own size and was moved back onto monitor "
+                      L"%d at %ld,%ld", (void *)hwnd, monitor_of_rect(want),
+            (long)fixed.left, (long)fixed.top);
+}
+
+PlaceResult window_place_settled(HWND hwnd, RECT want, UINT flags) {
+    if (!hwnd || !IsWindow(hwnd)) return PLACE_REFUSED;
+
+    int tries = 1;
+    if (window_placement_crosses_dpi(hwnd, want)) {
+        tries  = DPI_SETTLE_TRIES;
+        flags |= SWP_NOCOPYBITS;
+    }
+
+    PlaceResult res       = PLACE_REFUSED;
+    bool        unsettled = true;
+
+    for (int i = 0; i < tries; i++) {
+        RECT adj = window_adjust_for_frame(hwnd, want);
+        res = window_set_pos(hwnd, adj.left, adj.top, adj.right - adj.left,
+                             adj.bottom - adj.top, flags);
+        if (res == PLACE_REFUSED) return res;
+        if (tries == 1) break;
+
+        RECT got;
+        if (!window_frame_rect(hwnd, &got) || rect_settled_at(got, want)) {
+            unsettled = false;
+            break;
+        }
+    }
+
+    if (tries > 1) {
+        RedrawWindow(hwnd, NULL, NULL,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+        if (unsettled) {
+            log_msg(LOG_WARN, L"%p would not settle at %ldx%ld after crossing "
+                              L"to a display of a different scale — it keeps "
+                              L"re-sizing itself to the DPI it was given.",
+                    (void *)hwnd, (long)(want.right - want.left),
+                    (long)(want.bottom - want.top));
+            window_settle_onto_monitor(hwnd, want, flags);
+        }
+    }
+
+    return res;
+}
+
 /* ===========================================================================
  * Place a managed window and record the result. See the contract in mshell.h.
  * =========================================================================== */
@@ -1580,10 +1667,9 @@ PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags) {
     HWND hwnd = mw ? mw->hwnd : NULL;
     if (!hwnd || !IsWindow(hwnd)) return PLACE_REFUSED;
 
-    RECT adj = window_adjust_for_frame(hwnd, want);
-    PlaceResult res = window_set_pos(hwnd, adj.left, adj.top,
-                                     adj.right - adj.left,
-                                     adj.bottom - adj.top, flags);
+    bool crossed_dpi = window_placement_crosses_dpi(hwnd, want);
+
+    PlaceResult res = window_place_settled(hwnd, want, flags);
 
     if (res == PLACE_REFUSED) {
         /* Record nothing. has_applied is left exactly as it was, so the next
@@ -1593,9 +1679,10 @@ PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags) {
         return res;
     }
 
-    mw->applied_rect  = want;
-    mw->has_applied   = true;
-    mw->place_refused = false;
+    mw->applied_rect     = want;
+    mw->has_applied      = true;
+    mw->place_refused    = false;
+    mw->dpi_settle_left  = crossed_dpi ? DPI_SETTLE_TICKS : 0;
     /* Set when the helper had to do it, cleared when the local call worked
      * again — an elevated window that closes and reopens unelevated, or one
      * whose refusal was transient, rejoins the batch on its own. */
@@ -1615,8 +1702,9 @@ PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags) {
  *
  * The monitor's WORK AREA, not its full bounds: the bar is reserved space, and
  * a centred window that slid under it would be centred against something the
- * user cannot see. The size is only ever clamped down to fit — this decides
- * where a float is, never how big it is.
+ * user cannot see. The size is rescaled to the target monitor's DPI and then
+ * clamped down to fit — this decides where a float is, never how big it is
+ * in the app's own terms.
  *
  * Safe to call on anything: it is a no-op for a tiled window, for one that
  * opted out, and for every state where an explicit rect is the wrong answer.
@@ -1648,6 +1736,15 @@ void window_center_float(HWND hwnd) {
     int w  = (int)(cur.right - cur.left);
     int h  = (int)(cur.bottom - cur.top);
     if (w <= 0 || h <= 0 || aw <= 0 || ah <= 0) return;
+
+    UINT from_dpi = monitor_dpi_of(MonitorFromWindow(hwnd,
+                                                     MONITOR_DEFAULTTONEAREST));
+    UINT to_dpi   = monitor_dpi(mon);
+    if (from_dpi > 0 && to_dpi > 0 && from_dpi != to_dpi) {
+        w = MulDiv(w, (int)to_dpi, (int)from_dpi);
+        h = MulDiv(h, (int)to_dpi, (int)from_dpi);
+    }
+
     if (w > aw) w = aw;
     if (h > ah) h = ah;
 
@@ -2506,6 +2603,45 @@ void window_verify_visibility(void) {
         else if (!mw->layout_hidden)      window_show(mw);
         else                              mw->vis_deferred = false;
         events_suppress_end();
+    }
+}
+
+void window_verify_placement(void) {
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+        if (mw->dpi_settle_left <= 0) continue;
+
+        if (!IsWindow(mw->hwnd) || !mw->has_applied || mw->is_floating ||
+            mw->layout_hidden || mw->wm_hidden || mw->app_hidden ||
+            mw->user_hidden) {
+            mw->dpi_settle_left = 0;
+            continue;
+        }
+
+        if (IsHungAppWindow(mw->hwnd) || anim_is_animating(mw->hwnd)) continue;
+
+        RECT got;
+        if (!window_frame_rect(mw->hwnd, &got)) { mw->dpi_settle_left = 0; continue; }
+        if (rect_settled_at(got, mw->applied_rect)) {
+            mw->dpi_settle_left = 0;
+            continue;
+        }
+
+        if (--mw->dpi_settle_left <= 0) {
+            log_msg(LOG_WARN, L"%p is still %ldx%ld after crossing to a display "
+                              L"of a different scale, where the layout gave it "
+                              L"%ldx%ld — recording the size it insists on "
+                              L"rather than fighting it.", (void *)mw->hwnd,
+                    (long)(got.right - got.left), (long)(got.bottom - got.top),
+                    (long)(mw->applied_rect.right - mw->applied_rect.left),
+                    (long)(mw->applied_rect.bottom - mw->applied_rect.top));
+            mw->applied_rect = got;
+            continue;
+        }
+
+        window_place_settled(mw->hwnd, mw->applied_rect,
+                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED |
+                             SWP_NOCOPYBITS);
     }
 }
 

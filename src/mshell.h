@@ -553,6 +553,7 @@ typedef struct {
      * behaving. */
     ULONGLONG snap_first_at;         /* when this burst of drift started    */
     int       snap_tries;            /* snap-backs attempted inside it      */
+    int       dpi_settle_left;
 
     /* --- fullscreen (see FullscreenMode) --- */
     FullscreenMode fs_mode;          /* explicit mode set from a keybinding  */
@@ -1216,6 +1217,7 @@ BOOL     spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param);
  * aware, so coordinates are physical pixels and anything drawn at a fixed size
  * must scale itself — MulDiv(px, monitor_dpi(m), 96). */
 UINT     monitor_dpi(int mon);
+UINT     monitor_dpi_of(HMONITOR handle);
 
 /* ===========================================================================
  * Prototypes — display.c (the physical display: resolution, refresh, HDR)
@@ -1401,6 +1403,7 @@ void     window_verify_sink(void);  /* re-sink if anything surfaced above it */
 /* Finish any hide or show a hung window made us skip. Rides the same timer as
  * window_verify_sink; an in-memory scan that costs nothing until it finds one. */
 void     window_verify_visibility(void);
+void     window_verify_placement(void);
 /* The raising half of the pass on its own — floats into the topmost band (so
  * no ordinary window can ever cover one), then our overlays over them, then
  * fullscreen and pinned windows over both. Every focus change re-asserts the
@@ -1456,6 +1459,7 @@ void     layout_tree_forget(int desktop_id);
 bool     anim_begin(HWND hwnd, RECT from, RECT to);
 void     anim_tick(void);
 bool     anim_is_animating(HWND hwnd);
+void     anim_cancel(HWND hwnd);
 void     anim_cancel_all(void);
 bool     anim_dim_init(void);
 void     anim_dim_shutdown(void);
@@ -1655,6 +1659,8 @@ PlaceResult window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
  * ManagedWindow, call window_set_pos directly. */
 PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags);
 
+bool window_placement_crosses_dpi(HWND hwnd, RECT want);
+PlaceResult window_place_settled(HWND hwnd, RECT want, UINT flags);
 
 /* ===========================================================================
  * Prototypes — bar.c (status bar)

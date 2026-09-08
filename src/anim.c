@@ -194,6 +194,11 @@ bool anim_is_animating(HWND hwnd) {
     return false;
 }
 
+void anim_cancel(HWND hwnd) {
+    for (int i = 0; i < s_anim_n; i++)
+        if (s_anims[i].hwnd == hwnd) s_anims[i].active = false;
+}
+
 void anim_cancel_all(void) {
     s_anim_n = 0;
     if (g.message_window) KillTimer(g.message_window, TIMER_ANIM);
