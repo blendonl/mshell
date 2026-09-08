@@ -256,3 +256,44 @@ void mouse_restore_pointer(void) {
         s_ptr_own_swap = false;
     }
 }
+
+void mouse_drag_begin(HWND hwnd) {
+    if (!g.cfg.mouse_enabled) return;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || mw->is_floating) return;
+
+    g.drag_hwnd = hwnd;
+    GetCursorPos(&g.drag_start);
+}
+
+void mouse_drag_end(HWND hwnd) {
+    if (!g.cfg.mouse_enabled || g.drag_hwnd != hwnd) { g.drag_hwnd = NULL; return; }
+    g.drag_hwnd = NULL;
+
+    POINT drop;
+    if (!GetCursorPos(&drop)) { tile_current(); return; }
+
+    Desktop *dt = desktop_current();
+
+    int from = -1, to = -1;
+    for (int i = 0; i < dt->count; i++) {
+        ManagedWindow *mw = window_find(dt->windows[i]);
+        if (!mw || mw->is_floating || !mw->has_applied) continue;
+
+        if (dt->windows[i] == hwnd) { from = i; continue; }
+
+        RECT r = mw->applied_rect;
+        if (drop.x >= r.left && drop.x < r.right &&
+            drop.y >= r.top  && drop.y < r.bottom)
+            to = i;
+    }
+
+    if (from >= 0 && to >= 0 && from != to) {
+        hwnd_swap(&dt->windows[from], &dt->windows[to]);
+        dt->focused = to;
+        log_w(L"mouse: swapped tiles %d <-> %d", from, to);
+    }
+
+    tile_current();
+}

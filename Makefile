@@ -29,8 +29,19 @@ SRC_DIR  = src
 LUA_DIR  = vendor/lua/src
 
 MSHELL_SRCS = $(SRC_DIR)/main.c       \
-              $(SRC_DIR)/keyboard.c   \
+              $(SRC_DIR)/cli.c        \
+              $(SRC_DIR)/msgwin.c     \
+              $(SRC_DIR)/monitors.c   \
+              $(SRC_DIR)/keys.c       \
+              $(SRC_DIR)/input_hook.c \
+              $(SRC_DIR)/actions.c    \
+              $(SRC_DIR)/action_util.c \
               $(SRC_DIR)/window.c     \
+              $(SRC_DIR)/window_rules.c \
+              $(SRC_DIR)/window_decor.c \
+              $(SRC_DIR)/window_visibility.c \
+              $(SRC_DIR)/window_place.c \
+              $(SRC_DIR)/window_zorder.c \
               $(SRC_DIR)/tiling.c     \
               $(SRC_DIR)/desktop.c    \
               $(SRC_DIR)/events.c     \
@@ -273,6 +284,8 @@ dist: $(TARGET) $(HELPER) $(SYMBOLS)
 $(TEST_DIR)/test_%$(TEST_SUFFIX): $(TEST_DIR)/test_%.c $(SRC_DIR)/%.c $(SRC_DIR)/%.h
 	@echo "  HOSTCC $@"
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_$*.c $(SRC_DIR)/$*.c
+
+$(TEST_DIR)/test_api_spec$(TEST_SUFFIX): $(SRC_DIR)/action_table.h
 
 GEN_META = tools/gen_lua_meta
 

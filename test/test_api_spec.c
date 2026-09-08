@@ -1,10 +1,33 @@
 #include "tests.h"
 #include "../src/api_spec.h"
+#include "../src/action_table.h"
 
 #include <stdlib.h>
 
 static int deliberately_unnamed(Action a) {
     return a == ACTION_LUA_CALL || a == ACTION_ENTER_SUBMAP;
+}
+
+#define ACTION_ROW(action, fn) [action] = 1,
+static const char action_has_handler[ACTION_COUNT] = { ACTION_TABLE(ACTION_ROW) };
+#undef ACTION_ROW
+
+static void test_every_action_has_a_handler(void) {
+    for (int i = 0; i < api_spec_count(); i++) {
+        const ApiEntry *e = api_spec_at(i);
+        if (e->kind != API_ACTION) continue;
+        CHECK(action_has_handler[e->action],
+              "'%s' has a spec row but no entry in ACTION_TABLE", e->path);
+    }
+}
+
+static void test_handlers_are_named_actions(void) {
+    for (int a = ACTION_NONE + 1; a < ACTION_COUNT; a++) {
+        if (!action_has_handler[a]) continue;
+        CHECK(deliberately_unnamed((Action)a) ||
+                  api_spec_by_action((Action)a) != NULL,
+              "action %d has a handler but no spec row", a);
+    }
 }
 
 static void test_every_action_has_a_row(void) {
@@ -196,6 +219,8 @@ static void test_payload_index(void) {
 
 int main(void) {
     test_every_action_has_a_row();
+    test_every_action_has_a_handler();
+    test_handlers_are_named_actions();
     test_paths_are_unique();
     test_legacy_names();
     test_lookup_accepts_both_vocabularies();
