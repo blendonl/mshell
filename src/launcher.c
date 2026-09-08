@@ -345,6 +345,37 @@ void launcher_key(DWORD vk, wchar_t ch) {
     }
 }
 
+static bool mrun_beside_us(wchar_t *out, size_t cap) {
+    wchar_t dir[MAX_PATH];
+    DWORD   n = GetModuleFileNameW(NULL, dir, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return false;
+
+    wchar_t *slash = wcsrchr(dir, L'\\');
+    if (!slash) return false;
+    *slash = L'\0';
+
+    int w = _snwprintf(out, cap, L"%ls\\mrun.exe", dir);
+    if (w <= 0 || (size_t)w >= cap) return false;
+
+    DWORD attr = GetFileAttributesW(out);
+    return attr != INVALID_FILE_ATTRIBUTES &&
+           !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static bool mrun_on_path(wchar_t *out, size_t cap) {
+    DWORD n = SearchPathW(NULL, L"mrun.exe", NULL, (DWORD)cap, out, NULL);
+    return n > 0 && n < cap;
+}
+
+bool launcher_spawn_mrun(void) {
+    wchar_t path[MAX_PATH];
+
+    if (!mrun_beside_us(path, MAX_PATH) && !mrun_on_path(path, MAX_PATH))
+        return false;
+
+    return spawn_command(path, NULL, NULL, L"launcher");
+}
+
 bool launcher_init(void) {
     if (!overlay_register(LAUNCHER_CLASS, launcher_wndproc, false)) return false;
 
