@@ -15,12 +15,14 @@ tiled, driven entirely from the keyboard and configured in Lua.
   configurable **`nmaster`** (master count) and per-window **`cfact`** sizing.
 - **Fullscreen in three flavours**, because the *window* and the app's own
   *content* fullscreen (YouTube's button, `F11`) are different things:
-  `fullscreen` gives the window the whole monitor, `fullscreen_content` pins it
-  so the app's fullscreen fills only its tile, and `fullscreen_both` lets the
+  `window.fullscreen.window` gives the window the whole monitor,
+`window.fullscreen.content` pins it
+  so the app's fullscreen fills only its tile, and `window.fullscreen.both` lets the
   app's fullscreen cover the display. `set_fullscreen_policy` picks which of the
   last two an app that fullscreens itself gets by default.
 - **Multi-monitor**: each display is tiled independently; move focus and windows
-  across monitors (`Win+,` / `Win+.`).
+  across monitors (`Win+,` / `Win+.`), and send a whole desktop to a display
+  (`desktop.to_monitor`) whether or not a rule pinned it there.
 - **Force-tiled mode** (`set_float_policy("never")`) so *every* window joins the
   grid and nothing is ever stacked on top of another window.
 - **Floating windows are centred** on their monitor rather than left wherever
@@ -59,7 +61,7 @@ tiled, driven entirely from the keyboard and configured in Lua.
   clock, the date, the desktops, and mshell's live notifications listed inline.
   It reserves nothing, passes clicks through, and follows the focus between
   displays. Configurable via `set_bar`, the module list can be trimmed or
-  turned off entirely, and `toggle_bar` hides it without a reload.
+  turned off entirely, and `bar.toggle` hides it without a reload.
 - **Focus ring** around the active window and a **solid desktop backdrop**
   (there is no Explorer to paint one).
 - **Window rules** matching class, process or full install path as wildcard
@@ -70,18 +72,31 @@ tiled, driven entirely from the keyboard and configured in Lua.
   catches every file picker, message box and permission prompt, whichever app
   raised it, so the default config floats them all in one line.
 - **The display itself, from the config**: a `monitor_rule` can state a
-  `resolution`, a `refresh` rate and whether `hdr` is on, alongside that
-  display's tiling habits — because Settings → System → Display is an
-  Explorer-hosted page and there is no Start menu to reach it from. Applied at
-  startup, on reload and to a monitor you plug in, but never on top of a change
-  you made yourself in Windows; validated first, so a resolution the panel
-  cannot show costs a line in the log rather than a black screen. Mode changes
+  `resolution`, a `refresh` rate, a `rotation` (landscape, portrait, either
+  flipped) and whether `hdr` is on, alongside that display's tiling habits —
+  because Settings → System → Display is an Explorer-hosted page and there is no
+  Start menu to reach it from. Applied at startup, on reload and to a monitor
+  you plug in, but never on top of a change you made yourself in Windows;
+  validated first, so a resolution the panel cannot show costs a line in the log
+  rather than a black screen. `resolution` always names the panel's unrotated
+  size, so a rule stays right whichever way the screen is turned. Mode changes
   are session-only and Windows' own stored configuration is left alone, so
   booting *without* mshell gives you your normal display back.
   `mshell.exe --displays` lists every attached display, its device name, its
-  HDR support and every mode it will accept; `toggle_hdr` and `cycle_refresh`
-  are bindable, for HDR only while a game is up or 60Hz on battery.
-- **Control it from a script**: `mshell.exe --msg "switch_desktop web"` runs any
+  position, its orientation, its HDR support and every mode it will accept;
+  `display.hdr.toggle`, `display.refresh.cycle`, `display.portrait.toggle` and
+`display.rotation.cycle` are
+  bindable, for HDR only while a game is up, 60Hz on battery, or standing a
+  secondary on its end to read.
+- **The arrangement too**: `primary = true` and `position = {x, y}` state which
+  display Windows treats as primary and where each one sits, so a config can
+  restate a whole multi-monitor desk after a hotplug shuffles it. Positions are
+  relative — mshell slides the arrangement until the primary lands on the
+  origin, which is the only shape Windows accepts — and a change that is refused
+  part-way is rolled back rather than half-applied. Unlike a mode, this one
+  persists: batching displays into a single change is only offered alongside a
+  registry write, so it is stored the way `hdr` is.
+- **Control it from a script**: `mshell.exe --msg "desktop.focus web"` runs any
   action in the running shell, and `mshell.exe --query` prints its state as JSON
   (desktops, monitors, focused window). The pipe is per-session and its DACL
   admits only the owning user.
@@ -98,13 +113,22 @@ tiled, driven entirely from the keyboard and configured in Lua.
   you no longer have. They are *borrowed*, not set: mshell notes what the
   machine had, never writes the change into your user profile, and hands the
   originals back when it exits. A field you don't mention is left alone.
-- **Session persistence**: per-desktop layout, master ratio and master count
-  survive a restart, and you come back to the desktop you left.
+- **Nothing is remembered across a restart**: every start is the one your
+  `init.lua` describes. A layout or master ratio you change at runtime lasts as
+  long as mshell does, and a config reload keeps it — unless a `desktop_rule`
+  names that field, in which case the config states it and the reload puts it
+  back. (`set_layout` is a default, not a rule; `desktop_rule("*", {layout =
+  ...})` is how a config insists.)
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
   still tile, hide and close windows owned by elevated processes — without your
   `init.lua` ever becoming administrator-level code. No config, no Lua, no
   scripting: it moves, cloaks and closes windows, and nothing else. Installed by
   `install.bat`; started by `install.bat /helper` from an administrator prompt.
+- **An optional launcher.** The built-in one (`launcher`) types a name and runs
+  a program. If you want modules, Lua configuration and a clipboard/emoji story,
+  [**mrun**](https://github.com/notpc/mrun) is a separate app that does that,
+  and the `launcher` action prefers it automatically when it is installed. See
+  [The launcher](#the-launcher).
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 
@@ -149,7 +173,7 @@ keymap. Add `--verbose` for the full per-keystroke trace on top.
 
 Every line is timestamped and carries a level, the file is **appended to** rather
 than truncated (so a crash leaves its evidence behind), and it rotates at 5 MB
-keeping two older generations alongside it. `mshell.set_log_level("error" |
+keeping two older generations alongside it. `mshell.log.level("error" |
 "warn" | "info" | "debug" | "trace")` sets the level from your config — `"debug"`
 is what `--verbose` gives you, and `"info"` is the default. The privileged
 helper writes `mshelld.log` beside it.
@@ -177,6 +201,32 @@ The release ships two, and they are for different moments:
 A default that launched Alacritty, Firefox, Discord and Valorant would greet
 most new users with a log full of launch failures, so it doesn't. Everything
 interesting is one file away and documented.
+
+## The launcher
+
+The `launcher` action opens a type-a-name-run-a-program box. It indexes both
+Start menus, matches subsequences (`fox` finds Firefox), and runs whatever you
+typed when nothing matches — so it is a Run box as well as a menu.
+
+It is deliberately small and has no configuration. When you want more,
+[**mrun**](https://github.com/notpc/mrun) is a **separate application** built
+for exactly that: a modular launcher with its own Lua config, where app
+launching is one module and clipboard history, emoji or anything you write
+yourself are the same shape.
+
+mshell ships nothing of it and depends on nothing in it, and using it needs no
+configuration: the `launcher` action looks for `mrun.exe` beside `mshell.exe`,
+then on `PATH`, and falls back to the built-in box when neither has it. Install
+`mrun.exe` and the binding you already have starts using it. To bind it
+explicitly instead:
+
+```lua
+mshell.keys.bind({"LWin"}, "Space",
+    function() mshell.exec("mrun.exe") end, { desc = "run" })
+```
+
+mshell knows not to tile it — `mrun_Window` is in the ignore list — so it floats
+over whatever it covers.
 
 ## Default keybindings
 
@@ -261,83 +311,112 @@ location for per-user config, so a reinstall never touches it. If that file is
 absent, mshell falls back to `config\init.lua` beside `mshell.exe`, which keeps
 a portable/unzipped copy working.
 
+### How a binding is written
+
+An action is a **value**, not a string. `mshell.window.close` is the action
+itself, so your editor completes it and a typo is a mistake you see as you
+write rather than one the config load reports:
+
+```lua
+mshell.keys.bind({"LWin"}, "h", mshell.window.focus.left)
+```
+
+Anything that has to be *told* something — which desktop, which command — goes
+inside a function, because that is the only place an argument can live:
+
+```lua
+mshell.keys.bind({"LWin"}, "3",
+    function() mshell.desktop.focus("3") end, { desc = "3" })
+```
+
+A function has no name, so the which-key panel has nothing to label the key
+with unless you give it `desc`. That is the one thing to remember about the
+form: **parameterised bindings want a `desc`**.
+
+A **string** in the action position names a submap to enter:
+
+```lua
+mshell.keys.bind({"LWin"}, "x", "extra")   -- enters the "extra" submap
+```
+
+The same names are callable at runtime, from a binding or an event handler,
+and every window verb takes an optional window to act on — the focused one when
+you leave it out:
+
+```lua
+mshell.window.close()                          -- the focused window
+mshell.window.move({ desktop = "web" })
+for _, w in ipairs(mshell.window.list({ process = "firefox.exe" })) do
+    w:move({ desktop = "web" })                -- windows are objects
+end
+```
+
+### Editor support
+
+mshell ships the type definitions for its whole API, generated from the same
+table the binary dispatches through, so they describe exactly the release you
+have installed. `install.bat` puts them in `%APPDATA%\mshell\meta` alongside a
+`.luarc.json` that points [lua-language-server][luals] at them.
+
+Open `%APPDATA%\mshell` in any editor with that LSP and you get completion over
+`mshell.*`, signatures and documentation on hover, and a diagnostic on anything
+mshell does not have — including a removed name, which says what replaced it.
+
+[luals]: https://github.com/LuaLS/lua-language-server
+
+### The rest
+
 See [`config/init.lua`](config/init.lua) for the full commented example.
 Highlights:
 
 ```lua
-mshell.set_gaps(6, 6)              -- inner gap, outer gap
-mshell.set_smart_gaps(true)       -- no gaps when a monitor has one window
-mshell.set_border(2, 0xffffff)    -- focus ring: width, 0xRRGGBB
-mshell.set_smart_borders(true)    -- no ring when a monitor shows one window
-mshell.set_background(0x000000)   -- desktop backdrop
-mshell.desktop_rule("1", { default = true })          -- the desktop you land on
-mshell.desktop_rule("web", { app = "firefox.exe" })   -- open it when empty
-mshell.desktop_rule("game", { float = true, app = "steam.exe" })
-mshell.desktop_rule("chat", { layout = "monocle", monitor = 1 })
+mshell.layout.gaps(6, 6)                  -- inner gap, outer gap
+mshell.layout.smart_gaps(true)            -- no gaps when a monitor has one window
+mshell.appearance.border(2, 0xffffff)     -- focus ring: width, 0xRRGGBB
+mshell.appearance.smart_borders(true)     -- no ring when a monitor shows one window
+mshell.appearance.background(0x000000)    -- desktop backdrop
 
-mshell.set_layout("tiling")       -- tiling|monocle|grid|spiral|centered|bstack|columns
-mshell.set_nmaster(1)             -- windows in the master area
-mshell.set_float_policy("never")  -- force EVERY window into the grid
-mshell.set_float_placement("center")  -- floats land mid-monitor ("none" = don't move them)
-mshell.set_attach("master")       -- new windows become master (dwm-style)
+mshell.desktop.rule("1", { default = true })          -- the desktop you land on
+mshell.desktop.rule("web", { app = "firefox.exe" })   -- open it when empty
+mshell.desktop.rule("game", { float = true, app = "steam.exe" })
+mshell.desktop.rule("chat", { layout = "monocle", monitor = 1 })
 
-mshell.bind({"LWin"}, "h", "focus_left")
-mshell.bind({"LWin", "Shift"}, "Return", "spawn", "alacritty.exe")
+mshell.layout.set("tiling")     -- tiling|monocle|grid|spiral|centered|bstack|columns
+mshell.layout.master.count(1)   -- windows in the master area
+mshell.desktop.attach("master") -- new windows become master (dwm-style)
 
--- submap values can be a bare action or {"action", arg} for a payload.
--- persist=false (default) is one-shot: the next key drops back to root.
-mshell.submap("launch", {
-    Return = {"spawn", "alacritty.exe"},
-    b      = {"spawn", "firefox.exe"},
+mshell.window.policy.float("never")       -- force EVERY window into the grid
+mshell.window.policy.placement("center")  -- floats land mid-monitor ("none" = leave them)
+
+-- persist = false (the default) is one-shot: the next key drops back to root.
+mshell.keys.submap("launch", {
+    Return = { function() mshell.exec("alacritty.exe") end, desc = "alacritty" },
+    b      = { function() mshell.exec("firefox.exe") end,   desc = "firefox" },
+    p      = mshell.launcher.open,
 })
-mshell.bind({"LWin"}, "o", "enter_submap", "launch")
-
--- persist=true stays active until its exit key (Esc, or a custom `exit`).
-mshell.submap("resize", {
-    h = "dec_master", l = "inc_master",
-}, { persist = true })            -- , exit = "q"  -- replaces Esc
-
--- set_leader makes a bare Win TAP enter a submap; from there bare keys reach
--- everything (no Win held). Tap Win / Esc to leave. The name is your choice.
-mshell.submap("normal", {
-    h = "focus_left", j = "focus_down", k = "focus_up", l = "focus_right",
-    w = {"enter_submap", "window"},   -- define "window" before this map
-    o = {"enter_submap", "launch"},
-}, { persist = true })
-mshell.set_leader("normal")           -- Win tap now enters the map above
-
-mshell.rule({ process = "Taskmgr.exe" }, "float")
-
--- Games: never tiled, borderless, covering the monitor, no ring over it.
--- `path` matches the full install path, so one rule covers a whole library
--- (every Steam game, on every drive) instead of one line per executable.
-mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
-            { ring = false, decorate = false, fullscreen = true })
 ```
 
-API: `bind`, `submap`, `set_leader`, `rule`, `monitor_rule`, `spawn`, `setenv`,
-`set_gaps`,
-`set_smart_gaps`, `set_border`, `set_smart_borders`, `set_background`,
-`set_bar`, `set_whichkey`,
-`set_notify`, `notify`, `set_urgency`,
-`desktop_rule`, `set_master_ratio`, `set_nmaster`, `set_layout`,
-`set_float_policy`, `set_fullscreen_policy`, `set_float_placement`,
-`set_hide_policy`, `set_attach`, `set_mouse`,
-`set_manage_owned`, `set_float_on_top`,
-`set_min_window_size`, `set_auto_reload`, `set_verbose`, `set_log_level`,
-`set_animation`, `set_dim`, `set_minimize_policy`, `set_update_check`,
-`block_system_keys`, `log`, `on`, `get_monitors`, `get_desktops`,
-`get_current_desktop`, `get_focused_window`.
+**API.** Everything is grouped by what it acts on, and every name is a value
+rather than a string: `mshell.window.*`, `mshell.desktop.*`, `mshell.monitor.*`,
+`mshell.display.*`, `mshell.layout.*`, `mshell.bar.*`, `mshell.appearance.*`,
+`mshell.keys.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
+`mshell.notify`, `mshell.log`, `mshell.config.*`, `mshell.on`.
+
+The full list is not reproduced here, because a list in a README goes stale.
+It is generated from the same table the binary dispatches through and shipped
+as `meta/mshell.lua`, so your editor can show it to you — see
+[Editor support](#editor-support) below. `make meta` regenerates it and CI
+fails if the committed copy has drifted.
 
 **Manual tiling.** Alongside the seven dynamic layouts there is `bsp`: windows
-split wherever you were, `split_h`/`split_v` decide the direction the next one
+split wherever you were, `layout.split.h`/`layout.split.v` decide the direction the next one
 takes, and any split can become a **tabbed** or **stacked** container showing one
 window at a time. The tree does not replace the window list — it is an index
 over it — so a desktop moves between `bsp` and the dynamic layouts freely. Each
 display gets its own tree, and `Win+Space` deliberately does not cycle into
-`bsp`: a layout you build by hand is one you ask for, with `layout_bsp`.
+`bsp`: a layout you build by hand is one you ask for, with `mshell.layout.bsp`.
 
-**A launcher.** The `launcher` action opens a filter over your Start-menu
+**A launcher.** `mshell.launcher.open` opens a filter over your Start-menu
 shortcuts; anything that matches nothing is run as typed, so it is a Run box too.
 It types without ever taking focus, because the keyboard hook hands it keys
 directly. `init.full.lua` puts it on `Win` `o` `p` — in the one-shot `launch`
@@ -392,9 +471,9 @@ at startup otherwise loops with no way in.
 save-in-progress isn't read half-written, and the atomic-reload rollback means
 a syntax error leaves the running config untouched (the error goes to the log).
 Extra modules you keep beside `init.lua` and `require()` count too. Turn it off
-with `mshell.set_auto_reload(false)` if you'd rather reload by hand.
+with `mshell.config.auto_reload(false)` if you'd rather reload by hand.
 
-**Window rules & games.** `mshell.rule(match, action, opts)` matches on `class`,
+**Window rules & games.** `mshell.window.rule(match, action, opts)` matches on `class`,
 `process` (the .exe name) and/or `path` (its full image path). Each criterion is
 a case-insensitive wildcard pattern — `*` any run, `?` one character, `/` and
 `\` interchangeable — so a pattern without wildcards is an exact match, and one
@@ -407,7 +486,7 @@ and add no border — floating windows otherwise keep their own chrome) and
 The three together are the game preset:
 
 ```lua
-mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
+mshell.window.rule({ path = [[*\steamapps\common\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 ```
 
@@ -422,8 +501,8 @@ bar is what keeps menus, dropdowns and tooltips out — those are owned popups
 too.
 
 ```lua
-mshell.rule({ dialog = true }, "float")                     -- every picker/prompt
-mshell.rule({ process = "code.exe", dialog = true }, "manage")  -- except this app's
+mshell.window.rule({ dialog = true }, "float")                     -- every picker/prompt
+mshell.window.rule({ process = "code.exe", dialog = true }, "manage")  -- except this app's
 ```
 
 Owned windows are the one kind a `dialog` rule *fully* manages that mshell
@@ -449,7 +528,7 @@ graphics device comes up (and again whenever you change resolution or flip
 windowed/borderless in their options), the frame and the fullscreen geometry are
 re-asserted whenever the window moves, not just once when it opens.
 
-**Force every window to tile.** Set `mshell.set_float_policy("never")`: any
+**Force every window to tile.** Set `mshell.window.policy.float("never")`: any
 `"float"` rule is downgraded to `"manage"` and `Win+f` becomes a no-op on
 managed windows, so nothing is ever stacked on top of a tiled window. (Tracked
 windows — owned/modal dialogs and the like — are still only desktop-bound,
@@ -462,14 +541,14 @@ keybind or with the mouse, does not bury the float you were looking at, because
 activation raising the tiled window is undone on the spot. Floats keep their own
 order among themselves, with the focused one on top, and a float that has been
 promoted to always-on-top or fullscreen sits above the rest of them. Pass
-`mshell.set_float_on_top(false)` for the old behaviour, where a float is an
+`mshell.window.float_on_top(false)` for the old behaviour, where a float is an
 ordinary window in the stack and sinks behind whatever you focus next.
 
 **Floating windows land in the middle.** A float is the window you deliberately
 kept out of the grid, so mshell centres it on its monitor's work area rather
 than leaving it wherever the app opened it — both a window that opens floating
 and one `Win+f` just untiled. Only the position is decided: the size stays the
-app's own, clamped to fit. `mshell.set_float_placement("none")` turns it off,
+app's own, clamped to fit. `mshell.window.policy.placement("none")` turns it off,
 and `center = false` (or `true`) in a rule's opts answers for one app — useful
 for an overlay that already positions itself well. A rule with an explicit
 `geometry = {x, y, w, h}` or `fullscreen = true` places the window itself and is
@@ -483,11 +562,15 @@ with no windows on it **destroys** it. At startup exactly one desktop exists, th
 one you land on:
 
 ```lua
-mshell.desktop_rule("term", { default = true })   -- start here; "1" if nothing claims it
+mshell.desktop.rule("term", { default = true })   -- start here; "1" if nothing claims it
 
-mshell.bind({mod}, "w", "switch_desktop",  "web")   -- creates "web" on demand
-mshell.bind({mod, shft}, "w", "move_to_desktop", "web")
-mshell.bind({mod}, "3", "switch_desktop",  "3")     -- "3" is a name, not an index
+-- "web" is created on demand; "3" is a name, not an index
+mshell.keys.bind({mod}, "w",
+    function() mshell.desktop.focus("web") end, { desc = "web" })
+mshell.keys.bind({mod, shft}, "w",
+    function() mshell.window.move.to_desktop("web") end, { desc = "→ web" })
+mshell.keys.bind({mod}, "3",
+    function() mshell.desktop.focus("3") end, { desc = "3" })
 ```
 
 `default` is a desktop rule like any other, so where you begin sits beside that
@@ -495,23 +578,13 @@ desktop's app, layout and monitor instead of in a setter somewhere else. It need
 a literal name rather than a pattern — mshell has to create exactly one desktop
 at startup — and if two rules claim it, the **last** one wins.
 
-By default it only decides a **first** run. mshell remembers the desktop you were
-last on (`session.txt`, beside your `init.lua`) and returns you there on a
-restart, which is what restarting your shell should feel like. `"always"` changes
-who wins:
-
-```lua
-mshell.desktop_rule("term", { default = true })       -- back where you left off
-mshell.desktop_rule("term", { default = "always" })   -- every start lands on "term"
-```
-
-The session is written either way, so going back to `default = true` picks up
-where you actually were; deleting `session.txt` has the same effect as
-`"always"`, once.
+It decides **every** start, not just the first: mshell keeps no memory of where
+you were, so a restart puts you back on the desktop your config names. Nothing to
+clear, nothing to drift.
 
 Names are case-insensitive (the first spelling to create the desktop is the one
 displayed), can't contain whitespace, and are capped at 63 characters. Because a
-name never has to be declared, `switch_desktop "scratch"` always works whether or
+name never has to be declared, `desktop.focus "scratch"` always works whether or
 not `scratch` appears anywhere in your config — you can invent a desktop at any
 time and it costs nothing once you close its last window.
 
@@ -519,10 +592,10 @@ Two consequences worth knowing:
 
 - The desktop you are *standing on* is never destroyed, however empty it is —
   closing everything in front of you leaves you somewhere, not nowhere.
-- `last_desktop` remembers a **name**, so it goes back to a desktop that was
+- `desktop.focus.last` remembers a **name**, so it goes back to a desktop that was
   destroyed behind you by re-creating it (empty, with its rules applied).
 
-Since the set changes under you, `next_desktop` / `prev_desktop` step through
+Since the set changes under you, `desktop.focus.next` / `.prev` step through
 whatever exists at that moment, in name order — numbers first and numerically
 (`1, 2, 10`), then words alphabetically. That's how you get back to a desktop you
 made on the fly and never bound a key to.
@@ -544,8 +617,8 @@ are already in the right place, no resize arrived to shake them out of it either
 and a whole desktop's worth of apps could come back blank at once.
 
 ```lua
-mshell.set_hide_policy("cloak")   -- default
-mshell.set_hide_policy("hide")    -- pre-0.13.0 ShowWindow(SW_HIDE)
+mshell.window.policy.hide("cloak")   -- default
+mshell.window.policy.hide("hide")    -- pre-0.13.0 ShowWindow(SW_HIDE)
 ```
 
 Cloaking alone is **not** what fixes the blackness, though — an app stops
@@ -557,15 +630,15 @@ tiler cannot skip it for already being in the right place. That applies to both
 policies, which is why `"hide"` is a usable escape hatch rather than a way back
 to the bug.
 
-**Desktop rules — what a desktop does.** `mshell.desktop_rule(pattern, opts)` is
-the desktop counterpart of `mshell.rule`. `pattern` is a desktop name or a
+**Desktop rules — what a desktop does.** `mshell.desktop.rule(pattern, opts)` is
+the desktop counterpart of `mshell.window.rule`. `pattern` is a desktop name or a
 case-insensitive wildcard over names, matched with the same `*`/`?` syntax window
 rules use:
 
 ```lua
-mshell.desktop_rule("web",    { app = "firefox.exe" })
-mshell.desktop_rule("chat",   { app = discord, layout = "monocle" })
-mshell.desktop_rule("game-*", { float = true, monitor = 1 })
+mshell.desktop.rule("web",    { app = "firefox.exe" })
+mshell.desktop.rule("chat",   { app = discord, layout = "monocle" })
+mshell.desktop.rule("game-*", { float = true, monitor = 1 })
 ```
 
 | field | effect |
@@ -577,20 +650,26 @@ mshell.desktop_rule("game-*", { float = true, monitor = 1 })
 | `nmaster` | windows in this desktop's master area |
 | `monitor` | pin the desktop to a display (0-based) |
 
+A pin is also a runtime operation, which is what the rule alone could not be:
+`desktop.to_monitor` as an action (bindable, and reachable as
+`mshell.exe --msg "desktop.to_monitor chat 1"`), or `mshell.desktop.to_monitor`
+from a binding or an event handler. What you set by hand outranks the rule and
+survives a reload, an unplug/replug and a restart, until `-1` clears it.
+
 Rules **layer** rather than compete: every rule whose pattern matches is applied
 in declaration order, and each overrides only the fields it names. So a `"*"`
 rule sets the house style and a specific one adjusts a field or two:
 
 ```lua
-mshell.desktop_rule("*",       { layout = "tiling" })
-mshell.desktop_rule("scratch", { float  = true     })   -- still layout = tiling
+mshell.desktop.rule("*",       { layout = "tiling" })
+mshell.desktop.rule("scratch", { float  = true     })   -- still layout = tiling
 ```
 
 Rules are resolved when a desktop is created and re-applied on every config
 reload, so editing one takes effect on desktops that already exist — including
 a layout you changed at runtime, which goes back to what the rule says.
 
-`float = true` sets what new windows on that desktop *start* as; `toggle_float`
+`float = true` sets what new windows on that desktop *start* as; `window.float.toggle`
 still works per window, so you can tile one thing on a floating desktop. It is
 deliberately checked *after* `set_float_policy("never")` vetoes a window rule's
 float, because a config that tiles aggressively and then carves out one floating
@@ -605,7 +684,7 @@ window appears won't spawn a second copy; closing the app and returning re-opens
 it. A failed launch (bad command) is retried on your next visit rather than
 latched.
 
-Note that `app` and `mshell.spawn` do **not** cancel out: at startup the
+Note that `app` and `mshell.exec.startup` do **not** cancel out: at startup the
 auto-launch check runs while a spawned app's window still doesn't exist, so the
 desktop looks empty and *both* launches go through. Put an app in one or the
 other — `spawn` for resident, desktop-less things (a launcher, a sync client),
@@ -617,7 +696,7 @@ worth generating from a single declaration rather than writing three times:
 
 ```lua
 local desktops = {
-    { name = "term", key = "t" },                                  -- no app: see spawn note
+    { name = "term", key = "t" },                           -- no app: see the note below
     { name = "web",  key = "b", rule = { app = "firefox.exe" } },
     { name = "chat", key = "d", rule = { app = discord       } },  -- nil if not installed
     { name = "game", key = "v", rule = { app = valorant,
@@ -626,17 +705,22 @@ local desktops = {
 
 local go_keys, move_keys = {}, {}
 for _, d in ipairs(desktops) do
-    go_keys[d.key]   = {"switch_desktop",  d.name}
-    move_keys[d.key] = {"move_to_desktop", d.name}
-    if d.rule then mshell.desktop_rule(d.name, d.rule) end
+    local name = d.name
+    -- A closure is how an action is told WHICH desktop, and desc is how the
+    -- which-key panel gets a label for it — a function has no name of its own.
+    go_keys[d.key]   = { function() mshell.desktop.focus(name) end,
+                         desc = name }
+    move_keys[d.key] = { function() mshell.window.move.to_desktop(name) end,
+                         desc = "→ " .. name }
+    if d.rule then mshell.desktop.rule(d.name, d.rule) end
 end
-go_keys.Tab  = "last_desktop"
-go_keys["]"] = "next_desktop"     -- step through whatever exists right now
-go_keys["["] = "prev_desktop"
+go_keys.Tab  = mshell.desktop.focus.last
+go_keys["]"] = mshell.desktop.focus.next   -- step through whatever exists now
+go_keys["["] = mshell.desktop.focus.prev
 
-mshell.submap("go",   go_keys)                   -- one-shot: pick and you're there
-mshell.submap("move", move_keys)
--- then, in the leader map:  g = {"enter_submap", "go"}, m = {"enter_submap", "move"}
+mshell.keys.submap("go",   go_keys)                   -- one-shot: pick and you're there
+mshell.keys.submap("move", move_keys)
+-- then, in the leader map:  g = "go", m = "move"
 ```
 
 Adding a desktop is then one row: it gets both leader keys and its rule at once,
@@ -660,16 +744,17 @@ Each action is its own toggle, and pressing a different one switches modes
 directly:
 
 ```lua
-mshell.bind({mod, shft}, "f", "fullscreen")           -- window fills the monitor
-mshell.bind({mod, ctrl}, "f", "fullscreen_content")   -- app fullscreen stays in the tile
-mshell.bind({mod, alt},  "f", "fullscreen_both")      -- app fullscreen fills the monitor
+-- window fills the monitor / app fullscreen stays in the tile / both
+mshell.keys.bind({mod, shft}, "f", mshell.window.fullscreen.window)
+mshell.keys.bind({mod, ctrl}, "f", mshell.window.fullscreen.content)
+mshell.keys.bind({mod, alt},  "f", mshell.window.fullscreen.both)
 ```
 
 | Action | Window geometry | The app's own fullscreen |
 |--------|-----------------|--------------------------|
-| `fullscreen` | covers the monitor, edge to edge | untouched — the app is never told |
-| `fullscreen_content` | pinned to its tile | renders *inside* the window |
-| `fullscreen_both` | covers the monitor | left alone — it covers the display |
+| `window.fullscreen.window` | covers the monitor, edge to edge | untouched — the app is never told |
+| `window.fullscreen.content` | pinned to its tile | renders *inside* the window |
+| `window.fullscreen.both` | covers the monitor | left alone — it covers the display |
 
 A fullscreen window leaves the layout: the others tile underneath it as if it
 weren't there, so leaving fullscreen reveals the layout already in place. Only
@@ -677,13 +762,13 @@ one window per monitor can cover the screen — claiming it releases the previou
 one — and its focus ring is suppressed (a colored line hugging the screen edges
 is not what content asking for the whole display wants).
 
-`fullscreen_content` has nothing to do until the app itself goes fullscreen:
+`window.fullscreen.content` has nothing to do until the app itself goes fullscreen:
 mshell can't press YouTube's button for you. What it does is *pin* the window, so
 when you do press it the fullscreen content fills the tile instead of escaping to
 the display.
 
 **What happens when an app fullscreens itself.** For windows you haven't given a
-mode, `mshell.set_fullscreen_policy("contain" | "monitor")` decides.
+mode, `mshell.window.policy.fullscreen("contain" | "monitor")` decides.
 `"contain"` (the default, and what mshell has always done) keeps the window in
 its tile, so a fullscreen video fills the tile. `"monitor"` hands it the display
 — detected from the window covering its monitor's full bounds — and puts it back
@@ -691,12 +776,12 @@ in the layout the moment it leaves fullscreen, so the fullscreen button behaves
 the way it does outside a tiling WM. The per-window actions override the policy
 either way.
 
-**Jump back to the last desktop.** The `last_desktop` action returns to the
+**Jump back to the last desktop.** The `desktop.focus.last` action returns to the
 desktop you switched away from. Every switch records where it came from, so the
 two form a toggle — press it twice and you are back where you started:
 
 ```lua
-mshell.bind({mod}, "`", "last_desktop")   -- Win+` bounces between two desktops
+mshell.keys.bind({mod}, "`", mshell.desktop.focus.last)  -- bounces between two
 ```
 
 The default config also puts it on `Tab` inside the **desktop** submap (`Win+d`
@@ -740,7 +825,7 @@ taken. Two reasons:
 1. **A desktop here is a name you invent, not a slot you own.** Desktops are
    created by going to them and destroyed when you leave them empty, so "the
    tags on monitor 2" would be a second, differently-shaped namespace layered
-   over a set that is already dynamic. `switch_desktop "web"` would have to mean
+   over a set that is already dynamic. `desktop.focus "web"` would have to mean
    something different depending on which monitor had focus.
 2. **It matches how the desktops are actually used.** A desktop that *is* your
    browser, or your chat app, is a context you move between — and a context
