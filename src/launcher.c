@@ -170,9 +170,9 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
         int row = overlay_scale(L_ROW, dpi);
 
         RECT all = { 0, 0, op.w, op.h };
-        overlay_fill(mdc, &all, g.whichkey_bg);
+        overlay_fill(mdc, &all, g.cfg.whichkey_bg);
 
-        HPEN pen = CreatePen(PS_SOLID, 1, g.whichkey_border);
+        HPEN pen = CreatePen(PS_SOLID, 1, g.cfg.whichkey_border);
         HPEN opn = (HPEN)SelectObject(mdc, pen);
         HBRUSH obr = (HBRUSH)SelectObject(mdc, GetStockObject(NULL_BRUSH));
         Rectangle(mdc, 0, 0, op.w, op.h);
@@ -186,7 +186,7 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
         wchar_t line[160];
         _snwprintf(line, 159, L"> %ls_", s_query);
         line[159] = L'\0';
-        SetTextColor(mdc, g.whichkey_key_fg);
+        SetTextColor(mdc, g.cfg.whichkey_key_fg);
         TextOutW(mdc, pad, pad, line, (int)wcslen(line));
 
         int shown = s_hit_n < LAUNCH_MAX_SHOWN ? s_hit_n : LAUNCH_MAX_SHOWN;
@@ -196,15 +196,15 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
 
             if (sel) {
                 RECT hl = { pad / 2, y, op.w - pad / 2, y + row };
-                overlay_fill(mdc, &hl, g.whichkey_key_fg);
+                overlay_fill(mdc, &hl, g.cfg.whichkey_key_fg);
             }
-            SetTextColor(mdc, sel ? g.whichkey_bg : g.whichkey_fg);
+            SetTextColor(mdc, sel ? g.cfg.whichkey_bg : g.cfg.whichkey_fg);
             const wchar_t *nm = s_index[s_hits[i]].name;
             TextOutW(mdc, pad, y + 2, nm, (int)wcslen(nm));
         }
 
         if (s_hit_n == 0 && s_query_n > 0) {
-            SetTextColor(mdc, g.whichkey_fg);
+            SetTextColor(mdc, g.cfg.whichkey_fg);
             const wchar_t *none = L"(no match)";
             TextOutW(mdc, pad, pad + row, none, (int)wcslen(none));
         }

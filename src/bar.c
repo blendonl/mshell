@@ -52,7 +52,7 @@ static int bar_float_monitor(void) {
 }
 
 static int bar_text_px(UINT dpi) {
-    int px = bar_scale(g.bar_height, dpi) / 2;
+    int px = bar_scale(g.cfg.bar_height, dpi) / 2;
     return px < 10 ? 10 : px;
 }
 
@@ -108,21 +108,21 @@ static bool rebuild_content(void) {
     wchar_t date[128]     = {0};
     NotifyItem notes[FLOAT_NOTES_MAX];
     int        note_count = 0;
-    bool       floating   = (g.bar_mode == BAR_MODE_FLOATING);
+    bool       floating   = (g.cfg.bar_mode == BAR_MODE_FLOATING);
 
     memset(notes, 0, sizeof notes);
 
-    if (g.bar_modules & BAR_MOD_DESKTOPS)
+    if (g.cfg.bar_modules & BAR_MOD_DESKTOPS)
         build_desktops(desktops, 512);
 
     const Desktop *cur = desktop_current();
-    if (g.bar_modules & BAR_MOD_LAYOUT)
+    if (g.cfg.bar_modules & BAR_MOD_LAYOUT)
         _snwprintf(layout, 32, L"%ls", layout_label(cur->layout));
 
-    if (g.bar_modules & BAR_MOD_TITLE)
+    if (g.cfg.bar_modules & BAR_MOD_TITLE)
         window_title(desktop_get_focused(), title, ARRAYSIZE(title));
 
-    if (g.bar_modules & BAR_MOD_CLOCK) {
+    if (g.cfg.bar_modules & BAR_MOD_CLOCK) {
         SYSTEMTIME st;
         GetLocalTime(&st);
         _snwprintf(clock, 32, L"%02d:%02d", st.wHour, st.wMinute);
@@ -134,7 +134,7 @@ static bool rebuild_content(void) {
             date[0] = L'\0';
     }
 
-    if (floating && (g.bar_modules & BAR_MOD_NOTIFICATIONS))
+    if (floating && (g.cfg.bar_modules & BAR_MOD_NOTIFICATIONS))
         note_count = notify_recent(notes, FLOAT_NOTES_MAX);
 
     bool changed = wcscmp(desktops, s_desktops) != 0 ||
@@ -173,7 +173,7 @@ static int draw_desktop_chips(HDC dc, int x, int y, int chip_pad, bool draw) {
 
         if (draw) {
             bool current = (start[len - 1] == L'*');
-            SetTextColor(dc, current ? g.bar_accent : g.bar_dim);
+            SetTextColor(dc, current ? g.cfg.bar_accent : g.cfg.bar_dim);
             TextOutW(dc, x, y, start, len);
         }
 
@@ -185,7 +185,7 @@ static int draw_desktop_chips(HDC dc, int x, int y, int chip_pad, bool draw) {
 }
 
 static int float_clock_px(UINT dpi) {
-    int px = bar_scale(g.bar_height, dpi) * 3 / 2;
+    int px = bar_scale(g.cfg.bar_height, dpi) * 3 / 2;
     return px < 20 ? 20 : px;
 }
 
@@ -194,7 +194,7 @@ static void float_rule(HDC dc, int W, int y, int pad, UINT dpi, bool draw) {
     int th = bar_scale(1, dpi);
     if (th < 1) th = 1;
     RECT r = { pad, y, W - pad, y + th };
-    overlay_fill(dc, &r, g.bar_dim);
+    overlay_fill(dc, &r, g.cfg.bar_dim);
 }
 
 static int float_render(HDC dc, int W, UINT dpi, bool draw) {
@@ -217,13 +217,13 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
     int y     = pad;
     int rows  = 0;
 
-    if ((g.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
         SelectObject(dc, big);
         int  len = (int)wcslen(s_clock);
         SIZE sz;
         GetTextExtentPoint32W(dc, s_clock, len, &sz);
         if (draw) {
-            SetTextColor(dc, g.bar_fg);
+            SetTextColor(dc, g.cfg.bar_fg);
             TextOutW(dc, pad + (inner - sz.cx) / 2, y, s_clock, len);
         }
         y += tmb.tmHeight;
@@ -233,7 +233,7 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
             len = (int)wcslen(s_date);
             GetTextExtentPoint32W(dc, s_date, len, &sz);
             if (draw) {
-                SetTextColor(dc, g.bar_dim);
+                SetTextColor(dc, g.cfg.bar_dim);
                 TextOutW(dc, pad + (inner - sz.cx) / 2, y, s_date, len);
             }
             y += tm.tmHeight;
@@ -242,8 +242,8 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
         rows++;
     }
 
-    bool has_desktops = (g.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0];
-    bool has_layout   = (g.bar_modules & BAR_MOD_LAYOUT)   && s_layout[0];
+    bool has_desktops = (g.cfg.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0];
+    bool has_layout   = (g.cfg.bar_modules & BAR_MOD_LAYOUT)   && s_layout[0];
     if (has_desktops || has_layout) {
         int  chip = bar_scale(BAR_CHIP_PAD, dpi);
         int  lgap = bar_scale(BAR_GAP,      dpi);
@@ -264,7 +264,7 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
         if (has_layout) {
             if (has_desktops) x += lgap;
             if (draw) {
-                SetTextColor(dc, g.bar_fg);
+                SetTextColor(dc, g.cfg.bar_fg);
                 TextOutW(dc, x, y, s_layout, (int)wcslen(s_layout));
             }
         }
@@ -272,10 +272,10 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
         rows++;
     }
 
-    if ((g.bar_modules & BAR_MOD_TITLE) && s_title[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_TITLE) && s_title[0]) {
         if (draw) {
             RECT tr = { pad, y, W - pad, y + tm.tmHeight };
-            SetTextColor(dc, g.bar_fg);
+            SetTextColor(dc, g.cfg.bar_fg);
             DrawTextW(dc, s_title, -1, &tr,
                       DT_SINGLELINE | DT_CENTER | DT_VCENTER |
                       DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -303,7 +303,7 @@ static int float_render(HDC dc, int W, UINT dpi, bool draw) {
                 overlay_fill(dc, &b, notify_kind_color(s_notes[i].kind));
 
                 RECT tr = { pad + bullet + bgap, y, W - pad, y + h };
-                SetTextColor(dc, g.bar_fg);
+                SetTextColor(dc, g.cfg.bar_fg);
                 DrawTextW(dc, s_notes[i].text, -1, &tr,
                           DT_WORDBREAK | DT_NOPREFIX);
             }
@@ -328,17 +328,17 @@ static int float_width(HDC dc, UINT dpi, int max_w) {
     int  want = 0;
     SIZE sz;
 
-    if ((g.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0]) {
         int w = draw_desktop_chips(dc, 0, 0, bar_scale(BAR_CHIP_PAD, dpi),
                                    false);
-        if ((g.bar_modules & BAR_MOD_LAYOUT) && s_layout[0]) {
+        if ((g.cfg.bar_modules & BAR_MOD_LAYOUT) && s_layout[0]) {
             GetTextExtentPoint32W(dc, s_layout, (int)wcslen(s_layout), &sz);
             w += bar_scale(BAR_GAP, dpi) + sz.cx;
         }
         if (w > want) want = w;
     }
 
-    if ((g.bar_modules & BAR_MOD_TITLE) && s_title[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_TITLE) && s_title[0]) {
         GetTextExtentPoint32W(dc, s_title, (int)wcslen(s_title), &sz);
         if (sz.cx > want) want = sz.cx;
     }
@@ -348,7 +348,7 @@ static int float_width(HDC dc, UINT dpi, int max_w) {
         if (sz.cx > want) want = sz.cx;
     }
 
-    if ((g.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
         SelectObject(dc, big);
         GetTextExtentPoint32W(dc, s_clock, (int)wcslen(s_clock), &sz);
         if (sz.cx > want) want = sz.cx;
@@ -405,11 +405,11 @@ static void float_relayout(bool changed) {
 }
 
 void bar_refresh(void) {
-    if (!g.bar_enabled) return;
+    if (!g.cfg.bar_enabled) return;
 
     bool changed = rebuild_content();
 
-    if (g.bar_mode == BAR_MODE_FLOATING) {
+    if (g.cfg.bar_mode == BAR_MODE_FLOATING) {
         float_relayout(changed);
         return;
     }
@@ -421,8 +421,8 @@ void bar_refresh(void) {
 }
 
 bool bar_owns_notifications(void) {
-    return g.bar_enabled && g.bar_mode == BAR_MODE_FLOATING &&
-           (g.bar_modules & BAR_MOD_NOTIFICATIONS) && g.bar_windows[0] != NULL;
+    return g.cfg.bar_enabled && g.cfg.bar_mode == BAR_MODE_FLOATING &&
+           (g.cfg.bar_modules & BAR_MOD_NOTIFICATIONS) && g.bar_windows[0] != NULL;
 }
 
 static void bar_paint_strip(HDC mdc, int W, int H, UINT dpi, int mon) {
@@ -436,12 +436,12 @@ static void bar_paint_strip(HDC mdc, int W, int H, UINT dpi, int mon) {
     int y   = (H - tm.tmHeight) / 2;
     int x   = pad;
 
-    if ((g.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0])
+    if ((g.cfg.bar_modules & BAR_MOD_DESKTOPS) && s_desktops[0])
         x += draw_desktop_chips(mdc, x, y, bar_scale(BAR_CHIP_PAD, dpi), true)
              + gap;
 
-    if ((g.bar_modules & BAR_MOD_LAYOUT) && s_layout[0]) {
-        SetTextColor(mdc, g.bar_fg);
+    if ((g.cfg.bar_modules & BAR_MOD_LAYOUT) && s_layout[0]) {
+        SetTextColor(mdc, g.cfg.bar_fg);
         int len = (int)wcslen(s_layout);
         TextOutW(mdc, x, y, s_layout, len);
         SIZE sz; GetTextExtentPoint32W(mdc, s_layout, len, &sz);
@@ -449,17 +449,17 @@ static void bar_paint_strip(HDC mdc, int W, int H, UINT dpi, int mon) {
     }
 
     int right = W - pad;
-    if ((g.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
+    if ((g.cfg.bar_modules & BAR_MOD_CLOCK) && s_clock[0]) {
         int  len = (int)wcslen(s_clock);
         SIZE sz; GetTextExtentPoint32W(mdc, s_clock, len, &sz);
-        SetTextColor(mdc, g.bar_fg);
+        SetTextColor(mdc, g.cfg.bar_fg);
         TextOutW(mdc, right - sz.cx, y, s_clock, len);
         right -= sz.cx + gap;
     }
 
-    if ((g.bar_modules & BAR_MOD_TITLE) && s_title[0] && right > x) {
+    if ((g.cfg.bar_modules & BAR_MOD_TITLE) && s_title[0] && right > x) {
         RECT tr = { x, 0, right, H };
-        SetTextColor(mdc, g.bar_fg);
+        SetTextColor(mdc, g.cfg.bar_fg);
         DrawTextW(mdc, s_title, -1, &tr,
                   DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
@@ -475,14 +475,14 @@ static void bar_paint(HWND hwnd) {
     int  W = op.w, H = op.h;
     RECT rc = { 0, 0, W, H };
 
-    bool floating = (g.bar_mode == BAR_MODE_FLOATING);
+    bool floating = (g.cfg.bar_mode == BAR_MODE_FLOATING);
     int  mon = floating ? bar_float_monitor() : bar_monitor_of(hwnd);
     UINT dpi = monitor_dpi(mon < 0 ? g.primary_monitor : mon);
 
-    overlay_fill(mdc, &rc, g.bar_bg);
+    overlay_fill(mdc, &rc, g.cfg.bar_bg);
 
     if (floating) {
-        HPEN   pen = CreatePen(PS_SOLID, 1, g.bar_accent);
+        HPEN   pen = CreatePen(PS_SOLID, 1, g.cfg.bar_accent);
         HPEN   opn = (HPEN)SelectObject(mdc, pen);
         HBRUSH obr = (HBRUSH)SelectObject(mdc, GetStockObject(NULL_BRUSH));
         Rectangle(mdc, 0, 0, W, H);
@@ -532,14 +532,14 @@ static void bar_create_strips(void) {
     for (int i = 0; i < g.monitor_count && i < MAX_MONITORS; i++) {
         RECT f   = g.monitors[i].full;
         int  dpi = (int)monitor_dpi(i);
-        int  h   = bar_scale(g.bar_height, (UINT)dpi);
-        int  y   = g.bar_bottom ? f.bottom - h : f.top;
+        int  h   = bar_scale(g.cfg.bar_height, (UINT)dpi);
+        int  y   = g.cfg.bar_bottom ? f.bottom - h : f.top;
 
         g.bar_windows[i] = overlay_create(
             BAR_CLASS, WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
         if (!g.bar_windows[i]) continue;
 
-        if (g.bar_modules & BAR_MOD_CLOCK)
+        if (g.cfg.bar_modules & BAR_MOD_CLOCK)
             SetTimer(g.bar_windows[i], BAR_TIMER_ID, 1000, NULL);
 
         SetWindowPos(g.bar_windows[i], HWND_TOPMOST,
@@ -560,15 +560,15 @@ static void bar_create_float(void) {
     DwmSetWindowAttribute(g.bar_windows[0], DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner, sizeof(corner));
 
-    if (g.bar_modules & BAR_MOD_CLOCK)
+    if (g.cfg.bar_modules & BAR_MOD_CLOCK)
         SetTimer(g.bar_windows[0], BAR_TIMER_ID, 1000, NULL);
 }
 
 void bar_reconfigure(void) {
     bar_destroy_windows();
 
-    if (g.bar_enabled) {
-        if (g.bar_mode == BAR_MODE_FLOATING) bar_create_float();
+    if (g.cfg.bar_enabled) {
+        if (g.cfg.bar_mode == BAR_MODE_FLOATING) bar_create_float();
         else                                 bar_create_strips();
     }
 
@@ -580,7 +580,7 @@ void bar_reconfigure(void) {
 }
 
 void bar_toggle(void) {
-    g.bar_enabled = !g.bar_enabled;
+    g.cfg.bar_enabled = !g.cfg.bar_enabled;
 
     update_work_area();
     bar_reconfigure();
@@ -588,10 +588,10 @@ void bar_toggle(void) {
 }
 
 void bar_set_mode(BarMode mode) {
-    if (g.bar_enabled && g.bar_mode == mode) return;
+    if (g.cfg.bar_enabled && g.cfg.bar_mode == mode) return;
 
-    g.bar_mode    = mode;
-    g.bar_enabled = true;
+    g.cfg.bar_mode    = mode;
+    g.cfg.bar_enabled = true;
 
     update_work_area();
     bar_reconfigure();
@@ -599,11 +599,11 @@ void bar_set_mode(BarMode mode) {
 }
 
 void bar_reserve_work_area(void) {
-    if (!g.bar_enabled || g.bar_mode == BAR_MODE_FLOATING) return;
+    if (!g.cfg.bar_enabled || g.cfg.bar_mode == BAR_MODE_FLOATING) return;
 
     for (int i = 0; i < g.monitor_count; i++) {
-        int h = bar_scale(g.bar_height, monitor_dpi(i));
-        if (g.bar_bottom) g.monitors[i].work_area.bottom -= h;
+        int h = bar_scale(g.cfg.bar_height, monitor_dpi(i));
+        if (g.cfg.bar_bottom) g.monitors[i].work_area.bottom -= h;
         else              g.monitors[i].work_area.top    += h;
 
         if (g.monitors[i].work_area.bottom <= g.monitors[i].work_area.top)

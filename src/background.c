@@ -17,7 +17,7 @@ static LRESULT CALLBACK bg_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC dc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        overlay_fill(dc, &rc, g.background_color);
+        overlay_fill(dc, &rc, g.cfg.background_color);
         EndPaint(hwnd, &ps);
         return 0;
     }

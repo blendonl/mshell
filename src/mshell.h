@@ -233,6 +233,14 @@ struct KeyMap {
 };
 
 typedef struct {
+    KeyMap  maps[MAX_KEYMAPS];
+    int     count;
+    KeyMap *root;
+    KeyMap *leader;
+    bool    block_system_keys;
+} Keymaps;
+
+typedef struct {
     HWND      hwnd;
     int       desktop_id;
     int       monitor;
@@ -400,30 +408,26 @@ typedef struct {
 } WindowRule;
 
 typedef struct {
-    Desktop  desktops[MAX_DESKTOPS];
-    int      desktop_count;
-    int      current_desktop_id;
-
-    int      monitor_desktop[MAX_MONITORS];
-    int      next_desktop_id;
-
-    wchar_t  last_desktop[DESKTOP_NAME_MAX];
     wchar_t  start_desktop[DESKTOP_NAME_MAX];
 
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
     int         desktop_rule_count;
 
-    KeyMap   keymaps[MAX_KEYMAPS];
-    int      keymap_count;
-    KeyMap  *root_map;
-    KeyMap  *current_map;
-    KeyMap  *leader_map;
-
-    ManagedWindow managed[MAX_MANAGED_WINDOWS];
-    int           managed_count;
+    Keymaps *keymaps;
 
     WindowRule rules[MAX_RULES];
     int        rule_count;
+
+    MonitorRule monitor_rules[MAX_MONITOR_RULES];
+    int      monitor_rule_count;
+
+    StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
+    int       startup_count;
+
+    LuaHook   lua_hooks[MAX_LUA_HOOKS];
+    int       lua_hook_count;
+
+    bool      auto_reload;
 
     int      inner_gap;
     int      outer_gap;
@@ -442,9 +446,6 @@ typedef struct {
     int      bar_height;
     unsigned bar_modules;
     COLORREF bar_bg, bar_fg, bar_accent, bar_dim;
-    HWND     bar_windows[MAX_MONITORS];
-
-    SplitMode next_split;
 
     int      anim_ms;
     bool     dim_enabled;
@@ -491,7 +492,36 @@ typedef struct {
     float    default_master_ratio;
     int      default_nmaster;
 
-    bool     block_system_keys;
+    bool     mouse_enabled;
+    bool     mouse_follow;
+    bool     mouse_warp;
+    bool     mouse_mod_drag;
+    int      mouse_speed;
+    int      mouse_accel;
+    int      mouse_swap;
+} MShellConfig;
+
+typedef struct {
+    MShellConfig cfg;
+
+    Desktop  desktops[MAX_DESKTOPS];
+    int      desktop_count;
+    int      current_desktop_id;
+
+    int      monitor_desktop[MAX_MONITORS];
+    int      next_desktop_id;
+
+    wchar_t  last_desktop[DESKTOP_NAME_MAX];
+
+    Keymaps *active_keymaps;
+    KeyMap  *current_map;
+
+    ManagedWindow managed[MAX_MANAGED_WINDOWS];
+    int           managed_count;
+
+    HWND     bar_windows[MAX_MONITORS];
+
+    SplitMode next_split;
 
     bool     running;
     int      suppress_depth;
@@ -512,21 +542,11 @@ typedef struct {
     HWINEVENTHOOK minimize_hook;
     HWINEVENTHOOK movesize_hook;
 
-    bool     mouse_enabled;
-    bool     mouse_follow;
-    bool     mouse_warp;
-    bool     mouse_mod_drag;
     HWND     mod_drag_hwnd;
     HWND     drag_hwnd;
     POINT    drag_start;
 
-    int      mouse_speed;
-    int      mouse_accel;
-    int      mouse_swap;
-
     Monitor  monitors[MAX_MONITORS];
-    MonitorRule monitor_rules[MAX_MONITOR_RULES];
-    int      monitor_rule_count;
     int      monitor_count;
     int      primary_monitor;
     int      focused_monitor;
@@ -535,15 +555,9 @@ typedef struct {
 
     wchar_t   config_path[MAX_PATH];
     char      config_error[512];
-    bool      auto_reload;
-    StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
-    int       startup_count;
     lua_State *L;
 
     unsigned  config_gen;
-
-    LuaHook   lua_hooks[MAX_LUA_HOOKS];
-    int       lua_hook_count;
 
     bool      lua_running;
 
@@ -855,6 +869,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
                                      DWORD idEventThread, DWORD dwmsEventTime);
 
+void     config_reset(void);
 bool     config_load(const wchar_t *path);
 void     config_reload(void);
 bool     config_init(void);

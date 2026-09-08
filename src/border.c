@@ -63,7 +63,7 @@ void border_refresh(void) {
 
     if (!g.border_window) return;
 
-    int bw = g.border_width;
+    int bw = g.cfg.border_width;
     HWND focus = desktop_get_focused();
 
     ManagedWindow *fmw = focus ? window_find(focus) : NULL;
@@ -72,7 +72,7 @@ void border_refresh(void) {
         return;
     }
 
-    if (g.smart_borders && fmw) {
+    if (g.cfg.smart_borders && fmw) {
         int mon = fmw->monitor;
         if (mon < 0 || mon >= g.monitor_count) mon = 0;
         if (monitor_visible_count(mon) <= 1) {
@@ -88,9 +88,9 @@ void border_refresh(void) {
         return;
     }
 
-    s_color = g.border_color;
-    if (window_is_float_tier(fmw))  s_color = g.border_color_float;
-    if (fmw && fmw->urgent)      s_color = g.border_color_urgent;
+    s_color = g.cfg.border_color;
+    if (window_is_float_tier(fmw))  s_color = g.cfg.border_color_float;
+    if (fmw && fmw->urgent)      s_color = g.cfg.border_color_urgent;
 
     RECT ring = { r.left - bw, r.top - bw, r.right + bw, r.bottom + bw };
 
