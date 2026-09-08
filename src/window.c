@@ -66,6 +66,11 @@ static bool window_set_band(HWND hwnd, HWND after, bool topmost);
  * the file than the floats do. */
 static void window_park_float_if_fullscreen(ManagedWindow *mw);
 
+/* Declared here because window_unstash needs it and it belongs beside the
+ * clamp, which comes several hundred lines later. */
+static bool rect_clamp_into_monitor(RECT *r, int mon);
+static void window_float_keep_reachable(ManagedWindow *mw);
+
 /* Declared here because window_resink gates its expensive half on it and is
  * defined first — the two belong next to each other and one of them has to
  * come second. */
@@ -830,6 +835,17 @@ static void window_unstash(ManagedWindow *mw) {
     mw->stashed = false;
 
     RECT r = mw->stash_rect;
+
+    /* The displays may have been rearranged while it was away — unplug the
+     * monitor a stashed float was on, or drop the resolution, and the rect we
+     * saved is now off every display, so the "way back" would strand it a
+     * second time with no taskbar to reach it from and no tiling pass that will
+     * ever place a float. Checked here rather than on the display change
+     * because this is where the answer is needed, and because every unstash
+     * comes through this one function — window_show, and
+     * window_restore_all_visibility on the way out. */
+    if (rect_off_screen(r)) rect_clamp_into_monitor(&r, mw->monitor);
+
     /* FRAMECHANGED | NOCOPYBITS for the same reason window_show's nudge carries
      * them: whatever the app had cached for this position is stale, and the
      * saved bits are the ones we do not want blitted forward. */
@@ -1050,6 +1066,8 @@ void window_show(ManagedWindow *mw) {
 
     mw->wm_hidden    = false;
     mw->vis_deferred = false;
+
+    if (was_off_screen && mw->is_floating) window_float_keep_reachable(mw);
 }
 
 /* ===========================================================================
@@ -1666,34 +1684,98 @@ void window_center_float(HWND hwnd) {
  *
  * Returns true when it moved something.
  * =========================================================================== */
-bool window_clamp_into_monitor(ManagedWindow *mw, int mon) {
-    if (!mw || !IsWindow(mw->hwnd)) return false;
-    /* An iconic window has no on-screen rect to judge, and moving one only
-     * edits the rect it will restore to. */
-    if (IsIconic(mw->hwnd)) return false;
 
-    RECT cur;
-    if (!window_frame_rect(mw->hwnd, &cur)) return false;
-
+/* The arithmetic on a bare rect: move `r` the least distance that puts it fully
+ * inside monitor `mon`'s work area, keeping its size. False when there is
+ * nothing sensible to answer — an empty work area, a degenerate rect — and `r`
+ * is left alone.
+ *
+ * Shared so a STASHED window's saved rect is re-homed by exactly the rule that
+ * moves an on-screen one. stash_rect is a GetWindowRect rect while the
+ * on-screen path measures a DWM frame rect; they differ by the invisible resize
+ * border, which does not matter to a function whose job is "somewhere the user
+ * can reach". */
+static bool rect_clamp_into_monitor(RECT *r, int mon) {
     if (mon < 0 || mon >= g.monitor_count) mon = g.primary_monitor;
     RECT area = (mon >= 0 && mon < g.monitor_count) ? g.monitors[mon].work_area
                                                     : g.work_area;
 
     int aw = (int)(area.right - area.left);
     int ah = (int)(area.bottom - area.top);
-    int w  = (int)(cur.right - cur.left);
-    int h  = (int)(cur.bottom - cur.top);
+    int w  = (int)(r->right - r->left);
+    int h  = (int)(r->bottom - r->top);
     if (aw <= 0 || ah <= 0 || w <= 0 || h <= 0) return false;
     if (w > aw) w = aw;
     if (h > ah) h = ah;
 
-    RECT want = { clamp_axis(area.left, aw, cur.left, w),
-                  clamp_axis(area.top,  ah, cur.top,  h), 0, 0 };
-    want.right  = want.left + w;
-    want.bottom = want.top  + h;
+    r->left   = clamp_axis(area.left, aw, r->left, w);
+    r->top    = clamp_axis(area.top,  ah, r->top,  h);
+    r->right  = r->left + w;
+    r->bottom = r->top  + h;
+    return true;
+}
+
+#define FLOAT_REACHABLE_MIN 48
+
+static void window_float_keep_reachable(ManagedWindow *mw) {
+    if (!mw || !IsWindow(mw->hwnd) || IsIconic(mw->hwnd)) return;
+    if (mw->stashed || mw->fullscreen || window_is_screen_fullscreen(mw)) return;
+
+    RECT r;
+    if (!window_frame_rect(mw->hwnd, &r)) return;
+
+    int mon = window_home_monitor(mw);
+    if (mon < 0) mon = monitor_of_window(mw->hwnd);
+    if (mon < 0 || mon >= g.monitor_count) return;
+
+    RECT area = g.monitors[mon].work_area;
+    RECT hit;
+    bool grabbable = IntersectRect(&hit, &r, &area) &&
+                     (hit.right - hit.left) >= FLOAT_REACHABLE_MIN &&
+                     (hit.bottom - hit.top) >= FLOAT_REACHABLE_MIN;
+
+    if (r.top >= area.top && grabbable) return;
+
+    RECT fixed = r;
+    if (!rect_clamp_into_monitor(&fixed, mon)) return;
+    if (fixed.left == r.left && fixed.top == r.top) return;
 
     events_suppress_begin();
-    window_apply_rect(mw, want,
+    window_apply_rect(mw, fixed, SWP_NOZORDER | SWP_NOACTIVATE);
+    events_suppress_end();
+
+    log_msg(LOG_INFO, L"%p came back at %ld,%ld, off monitor %d — moved to "
+                      L"%ld,%ld so it can be reached", (void *)mw->hwnd,
+            (long)r.left, (long)r.top, mon,
+            (long)fixed.left, (long)fixed.top);
+}
+
+bool window_clamp_into_monitor(ManagedWindow *mw, int mon) {
+    if (!mw || !IsWindow(mw->hwnd)) return false;
+    /* An iconic window has no on-screen rect to judge, and moving one only
+     * edits the rect it will restore to. */
+    if (IsIconic(mw->hwnd)) return false;
+
+    /* A STASHED window is not where it looks like it is: mshell parked it clear
+     * of every display and remembers in stash_rect where it came from. Moving
+     * it would put it back on screen — over the desktop you are actually on,
+     * still flagged hidden, with nothing left that would take it away again.
+     * What a caller means for such a window is "and it belongs on that display
+     * when it comes back", so move the rect it will come back TO.
+     *
+     * false because nothing on screen moved, which is what the return value
+     * and window_rescue_offscreen's log line are about. */
+    if (mw->stashed) {
+        rect_clamp_into_monitor(&mw->stash_rect, mon);
+        return false;
+    }
+
+    RECT cur;
+    if (!window_frame_rect(mw->hwnd, &cur)) return false;
+    if (!rect_clamp_into_monitor(&cur, mon)) return false;
+
+    events_suppress_begin();
+    window_apply_rect(mw, cur,
                       SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     events_suppress_end();
     return true;
@@ -1718,6 +1800,15 @@ bool window_clamp_into_monitor(ManagedWindow *mw, int mon) {
 bool window_rescue_offscreen(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return false;
     if (IsIconic(mw->hwnd)) return false;
+    /* Stashed is filed away, not stranded: window_stash put it clear of every
+     * display deliberately and window_unstash knows the way back, so "off every
+     * display" is this window's normal state rather than the emergency this
+     * function exists for. Rescuing it pulled windows belonging to other
+     * desktops onto the screen on every display change — monitors_update() runs
+     * this over every float, and a hotplug, a resolution change and a config
+     * reload all reach it. The rect it will come back TO is kept honest by
+     * window_clamp_into_monitor and by the check at the end of window_show. */
+    if (mw->stashed) return false;
 
     RECT cur;
     if (!window_frame_rect(mw->hwnd, &cur)) return false;
