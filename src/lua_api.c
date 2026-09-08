@@ -46,9 +46,9 @@ static void set_bool(lua_State *L, const char *k, bool v) {
 static KeyMap *find_keymap(const char *name) {
     wchar_t wname[256];
     u8_to_w(name, wname, 256);
-    for (int i = 0; i < g.cfg.keymap_count; i++) {
-        if (_wcsicmp(g.cfg.keymaps[i].name, wname) == 0) {
-            return &g.cfg.keymaps[i];
+    for (int i = 0; i < g.cfg.keymaps->count; i++) {
+        if (_wcsicmp(g.cfg.keymaps->maps[i].name, wname) == 0) {
+            return &g.cfg.keymaps->maps[i];
         }
     }
     return NULL;
@@ -166,7 +166,7 @@ static void bind_value(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
         KeyMap     *sm = find_keymap(nm);
         if (sm) {
             keymap_add_binding(map, mods, vk, ACTION_ENTER_SUBMAP,
-                               (int)(sm - g.cfg.keymaps), sm, NULL, NULL, NULL,
+                               (int)(sm - g.cfg.keymaps->maps), sm, NULL, NULL, NULL,
                                desc_w, false);
             free(desc_w);
             return;
@@ -225,7 +225,8 @@ static int lua_mshell_bind(lua_State *L) {
     DWORD vk = key_name_to_vk(key_str);
     if (vk == 0) return luaL_error(L, "unknown key: %s", key_str);
 
-    if (!g.root_map) return luaL_error(L, "root keymap not initialized");
+    if (!g.cfg.keymaps->root)
+        return luaL_error(L, "root keymap not initialized");
 
     const char *desc     = NULL;
     bool        terminal = true;
@@ -237,7 +238,7 @@ static int lua_mshell_bind(lua_State *L) {
         lua_pop(L, 1);
     }
 
-    bind_value(L, g.root_map, mods, vk, 3, desc, terminal, "keys.bind");
+    bind_value(L, g.cfg.keymaps->root, mods, vk, 3, desc, terminal, "keys.bind");
     return 0;
 }
 
@@ -312,9 +313,9 @@ static int lua_mshell_set_leader(lua_State *L) {
         return luaL_error(L, "set_leader: submap '%s' not found "
                              "(define it with mshell.submap before set_leader)",
                           name);
-    if (km == g.root_map)
+    if (km == g.cfg.keymaps->root)
         return luaL_error(L, "set_leader: the leader must be a submap, not root");
-    g.cfg.leader_map = km;
+    g.cfg.keymaps->leader = km;
     return 0;
 }
 
@@ -337,7 +338,7 @@ static int lua_mshell_set_smart_borders(lua_State *L) {
 }
 
 static int lua_mshell_block_system_keys(lua_State *L) {
-    g.cfg.block_system_keys = lua_toboolean(L, 1);
+    g.cfg.keymaps->block_system_keys = lua_toboolean(L, 1);
     return 0;
 }
 
