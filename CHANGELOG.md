@@ -5,6 +5,40 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.5 — 2026-09-08
+
+- refactor: split keyboard.c into keys, input_hook and actions
+- refactor: dispatch actions through a table instead of a 450-line switch
+- refactor: partition MShell into a nested MShellConfig
+- fix: bound every append in the IPC state serialiser
+- fix: serialise the helper pipe state across the restart thread
+- fix: time mshelld client I/O out and only serve the mshell beside it
+- docs: state what trust running the privileged helper grants
+- fix: restore the whole config on a failed reload
+- fix: layout and visibility bugs across tiling, borders and desktops
+- fix: use config_apply_defaults() for WinMain's startup defaults
+- perf(bar,lua): read window titles without blocking on hung apps
+- refactor: split window.c into rules, decor, visibility, place and zorder
+- perf(screenshot): encode the PNG on a worker thread
+- perf(log): flush every error and warning, batch the rest
+- perf(mouse): coalesce mod-drag posts and lock the shared drag state
+- fix(update): require https and a verified sha256 before installing
+- refactor: drive the four hide strategies from a table
+- fix: load init.lua without holding the keyboard lock
+- refactor: table-drive the window event dispatch and hook installation
+- refactor: table-drive subsystem startup and split the CLI out of main.c
+- test: add a sanitized run of the host test suite
+- build: enable -Wshadow -Wformat=2 -Wvla on first-party sources
+- ci: run cppcheck over src/ and fail on new findings
+- build: ship debug symbols instead of stripping them away
+- test: extract the layout tree node algebra behind a pure seam
+- test: extract the IPC state serialiser behind a pure seam
+- refactor: point layout_tree.c at the tested tree algebra
+- refactor: point ipc.c at the tested state serialiser
+- refactor: extract the hide-strategy selection behind a pure seam
+- test: extract desktop_switch's monitor placement behind a pure seam
+- chore: drop a stray symlink committed by accident
+
 ## 0.15.4 — 2026-09-08
 
 - style: remove comments from source, build and packaging files

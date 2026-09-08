@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.4
+VERSION  = 0.15.5
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
