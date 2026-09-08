@@ -3,7 +3,7 @@
  *
  * Every function here is one a desktop's window list leans on while the list is
  * being memmove'd under it. None of them can crash: get the attach index wrong
- * and a window opens in the wrong slot, get the focus clamp wrong and Win+h
+ * and a window opens in the wrong slot, get the focus arithmetic after a removal wrong and Win+h
  * walks from a window that is no longer there, get the history shift wrong and
  * "the window I was just in" is either duplicated or lost. All silent, all
  * noticed days later, all trivially checkable here.
@@ -129,29 +129,71 @@ int main(void) {
     }
 
     /* ==================================================================
-     * desktop_focus_clamp — where `focused` lands after a removal
+     * desktop_focus_after_remove — where `focused` lands after a removal
+     *
+     * `count` is the length AFTER the removal, so [A,B,C,D] losing one window
+     * is always count 3 here. The case that matters is a removal BELOW the
+     * focused index: the array shifts, so leaving `focused` alone silently
+     * moves it onto the next window.
      * ================================================================== */
-    /* Still valid: left exactly alone. Removing a window AFTER the focused one
-     * must not move the focus. */
-    CHECK(desktop_focus_clamp(0, 3) == 0, "0 of 3 is untouched");
-    CHECK(desktop_focus_clamp(1, 3) == 1, "1 of 3 is untouched");
-    CHECK(desktop_focus_clamp(2, 3) == 2, "the last index is untouched");
+    /* Removing a window BELOW the focused one: follow it down. [A,B,C,D] on C
+     * (2), close A → [B,C,D] and C is now 1. Leaving it at 2 was the bug — it
+     * named D, and window_unmanage then focused D for you. */
+    CHECK(desktop_focus_after_remove(2, 0, 3) == 1, "removing below pulls focus down");
+    CHECK(desktop_focus_after_remove(3, 1, 3) == 2, "...from any index below");
+    CHECK(desktop_focus_after_remove(1, 0, 3) == 0, "...including down to 0");
 
-    /* Past the end: pulled back to the last window. */
-    CHECK(desktop_focus_clamp(3, 3) == 2, "one past the end clamps to the last");
-    CHECK(desktop_focus_clamp(9, 3) == 2, "far past the end clamps to the last");
+    /* Removing a window ABOVE the focused one moves nothing below it. */
+    CHECK(desktop_focus_after_remove(0, 1, 3) == 0, "removing above leaves focus alone");
+    CHECK(desktop_focus_after_remove(1, 2, 3) == 1, "...wherever above it is");
+
+    /* Removing the FOCUSED window: the slot now holds what came after it, and
+     * that is what should take the focus — so the index stays put. */
+    CHECK(desktop_focus_after_remove(1, 1, 3) == 1, "removing the focused window stays put");
+    CHECK(desktop_focus_after_remove(0, 0, 3) == 0, "...at the head too");
+    /* ...unless it was the last window, where there is nothing after it. */
+    CHECK(desktop_focus_after_remove(3, 3, 3) == 2, "removing the last focused window steps back");
 
     /* Degenerate inputs still answer something indexable. */
-    CHECK(desktop_focus_clamp(2, 0) == 0, "an empty list answers 0");
-    CHECK(desktop_focus_clamp(0, 0) == 0, "an empty list answers 0 from 0");
-    CHECK(desktop_focus_clamp(-1, 3) == 0, "a negative index answers 0");
+    CHECK(desktop_focus_after_remove(2, 0, 0) == 0, "an empty list answers 0");
+    CHECK(desktop_focus_after_remove(0, 0, 0) == 0, "an empty list answers 0 from 0");
+    CHECK(desktop_focus_after_remove(-1, 0, 3) == 0, "a negative focus answers 0");
+    /* A `removed` outside the list shifted nothing, so it is not "below". */
+    CHECK(desktop_focus_after_remove(1, -1, 3) == 1, "a negative removal shifts nothing");
+    CHECK(desktop_focus_after_remove(1, 9, 3) == 1, "a removal past the end shifts nothing");
 
-    for (int count = 0; count <= 4; count++) {
+    /* Whatever it is handed, the answer is an index safe to read. */
+    for (int count = 0; count <= 5; count++) {
         for (int focused = -2; focused <= 6; focused++) {
-            int f = desktop_focus_clamp(focused, count);
-            CHECK(f >= 0 && (count == 0 ? f == 0 : f < count),
-                  "clamped focus %d not indexable in %d", f, count);
+            for (int removed = -1; removed <= 6; removed++) {
+                int f = desktop_focus_after_remove(focused, removed, count);
+                CHECK(f >= 0 && (count == 0 ? f == 0 : f < count),
+                      "focus %d not indexable in %d (focused %d, removed %d)",
+                      f, count, focused, removed);
+                /* Taking a window OUT can only ever move the focus earlier in
+                 * the list or leave it — never later. Moving it later is the
+                 * bug itself, spelled as an invariant. */
+                if (focused >= 0)
+                    CHECK(f <= focused,
+                          "a removal moved the focus UP (%d -> %d, removed %d, "
+                          "count %d)", focused, f, removed, count);
+                if (focused >= 0 && focused < count && removed > focused)
+                    CHECK(f == focused,
+                          "a removal above the focus moved it (%d -> %d, "
+                          "removed %d, count %d)", focused, f, removed, count);
+            }
         }
+    }
+
+    /* Applied repeatedly, the way desktop_switch's sticky loop walks a desktop
+     * downwards handing windows to the desktop you are moving to. [A,B,C,D] on
+     * D, losing B and then A, must still be on D. */
+    {
+        int f = 3;
+        f = desktop_focus_after_remove(f, 1, 3);
+        CHECK(f == 2, "after B leaves, D is at 2");
+        f = desktop_focus_after_remove(f, 0, 2);
+        CHECK(f == 1, "after A leaves, D is at 1");
     }
 
     /* ==================================================================
