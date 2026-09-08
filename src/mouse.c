@@ -2,9 +2,16 @@
 
 static POINT s_last_pointer;
 
+static bool drag_in_progress(void) {
+    kb_lock();
+    bool dragging = (g.drag_hwnd != NULL || g.mod_drag_hwnd != NULL);
+    kb_unlock();
+    return dragging;
+}
+
 void mouse_warp_focus(void) {
     if (!g.mouse_warp) return;
-    if (g.drag_hwnd || g.mod_drag_hwnd) return;
+    if (drag_in_progress()) return;
 
     int mon = g.focused_monitor;
     if (mon < 0 || mon >= g.monitor_count) return;
@@ -44,7 +51,7 @@ void mouse_poll_focus(void) {
     if (p.x == s_last_pointer.x && p.y == s_last_pointer.y) return;
     s_last_pointer = p;
 
-    if (g.drag_hwnd || g.mod_drag_hwnd) return;
+    if (drag_in_progress()) return;
 
     HWND under = WindowFromPoint(p);
     if (!under) return;
@@ -62,13 +69,51 @@ void mouse_poll_focus(void) {
 static POINT s_grab;
 static RECT  s_grab_rect;
 static bool  s_resizing;
+static int   s_posts_inflight;
+static bool  s_drag_ended;
+
+static void drag_post_consumed_locked(void) {
+    if (s_posts_inflight > 0) s_posts_inflight--;
+    if (s_drag_ended && s_posts_inflight == 0) {
+        g.mod_drag_hwnd = NULL;
+        s_drag_ended    = false;
+    }
+}
+
+static bool drag_post_move(POINT pt, bool final) {
+    kb_lock();
+    if (!g.mod_drag_hwnd || s_drag_ended) { kb_unlock(); return false; }
+
+    int  dx   = pt.x - s_grab.x;
+    int  dy   = pt.y - s_grab.y;
+    bool post = final || s_posts_inflight == 0;
+
+    if (final) s_drag_ended = true;
+    if (post)  s_posts_inflight++;
+    kb_unlock();
+
+    if (post && !PostMessageW(g.message_window, WM_MSHELL_MOUSE,
+                              (WPARAM)dx, (LPARAM)dy)) {
+        kb_lock();
+        drag_post_consumed_locked();
+        kb_unlock();
+    }
+    return true;
+}
 
 void mouse_mod_drag_apply(int dx, int dy) {
-    ManagedWindow *mw = window_find(g.mod_drag_hwnd);
+    kb_lock();
+    HWND target   = g.mod_drag_hwnd;
+    RECT base     = s_grab_rect;
+    bool resizing = s_resizing;
+    drag_post_consumed_locked();
+    kb_unlock();
+
+    ManagedWindow *mw = window_find(target);
     if (!mw || !mw->is_floating) return;
 
-    RECT want = s_grab_rect;
-    if (s_resizing) {
+    RECT want = base;
+    if (resizing) {
         want.right  += dx;
         want.bottom += dy;
         if (want.right - want.left < g.min_win_w)
@@ -95,25 +140,26 @@ bool mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held) {
 
         ManagedWindow *mw = window_find(top);
         if (!mw || !mw->is_floating) return false;
-        if (!window_frame_rect(top, &s_grab_rect)) return false;
 
-        s_grab           = pt;
-        s_resizing       = (msg == WM_RBUTTONDOWN);
-        g.mod_drag_hwnd  = top;
+        RECT frame;
+        if (!window_frame_rect(top, &frame)) return false;
+
+        kb_lock();
+        s_grab          = pt;
+        s_grab_rect     = frame;
+        s_resizing      = (msg == WM_RBUTTONDOWN);
+        s_drag_ended    = false;
+        g.mod_drag_hwnd = top;
+        kb_unlock();
         return true;
     }
 
     case WM_MOUSEMOVE:
-        if (!g.mod_drag_hwnd) return false;
-        PostMessageW(g.message_window, WM_MSHELL_MOUSE,
-                     (WPARAM)(pt.x - s_grab.x), (LPARAM)(pt.y - s_grab.y));
-        return true;
+        return drag_post_move(pt, false);
 
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
-        if (!g.mod_drag_hwnd) return false;
-        g.mod_drag_hwnd = NULL;
-        return true;
+        return drag_post_move(pt, true);
     }
     return false;
 }
