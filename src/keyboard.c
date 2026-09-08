@@ -1260,13 +1260,13 @@ void execute_action(Action action, int arg, const wchar_t *command,
         break;
 
     /* -- layout -------------------------------------------------------- */
-    case ACTION_LAYOUT_TILING:   dt->layout = LAYOUT_TILING;   tile_current(); session_save(); break;
-    case ACTION_LAYOUT_MONOCLE:  dt->layout = LAYOUT_MONOCLE;  tile_current(); session_save(); break;
-    case ACTION_LAYOUT_GRID:     dt->layout = LAYOUT_GRID;     tile_current(); session_save(); break;
-    case ACTION_LAYOUT_SPIRAL:   dt->layout = LAYOUT_SPIRAL;   tile_current(); session_save(); break;
-    case ACTION_LAYOUT_CENTERED: dt->layout = LAYOUT_CENTERED; tile_current(); session_save(); break;
-    case ACTION_LAYOUT_BSTACK:   dt->layout = LAYOUT_BSTACK;   tile_current(); session_save(); break;
-    case ACTION_LAYOUT_COLUMNS:  dt->layout = LAYOUT_COLUMNS;  tile_current(); session_save(); break;
+    case ACTION_LAYOUT_TILING:   dt->layout = LAYOUT_TILING;   tile_current(); break;
+    case ACTION_LAYOUT_MONOCLE:  dt->layout = LAYOUT_MONOCLE;  tile_current(); break;
+    case ACTION_LAYOUT_GRID:     dt->layout = LAYOUT_GRID;     tile_current(); break;
+    case ACTION_LAYOUT_SPIRAL:   dt->layout = LAYOUT_SPIRAL;   tile_current(); break;
+    case ACTION_LAYOUT_CENTERED: dt->layout = LAYOUT_CENTERED; tile_current(); break;
+    case ACTION_LAYOUT_BSTACK:   dt->layout = LAYOUT_BSTACK;   tile_current(); break;
+    case ACTION_LAYOUT_COLUMNS:  dt->layout = LAYOUT_COLUMNS;  tile_current(); break;
 
     case ACTION_CYCLE_LAYOUT: {
         /* The cycle covers the DYNAMIC layouts — the seven that are a pure
@@ -1285,7 +1285,6 @@ void execute_action(Action action, int arg, const wchar_t *command,
         if (next >= LAYOUT_BSP) next = LAYOUT_TILING;
         dt->layout = next;
         tile_current();
-        session_save();
         break;
     }
 
@@ -1293,13 +1292,11 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_INC_NMASTER:
         dt->n_master = clamp_i(dt->n_master + 1, 1, dt->count > 0 ? dt->count : 1);
         tile_current();
-        session_save();
         break;
 
     case ACTION_DEC_NMASTER:
         dt->n_master = clamp_i(dt->n_master - 1, 1, 20);
         tile_current();
-        session_save();
         break;
 
     /* -- per-window size within the stack (cfact) ---------------------- */
@@ -1326,13 +1323,11 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_INC_MASTER:
         dt->master_ratio = clamp_f(dt->master_ratio + 0.05f, 0.2f, 0.9f);
         tile_current();
-        session_save();
         break;
 
     case ACTION_DEC_MASTER:
         dt->master_ratio = clamp_f(dt->master_ratio - 0.05f, 0.2f, 0.9f);
         tile_current();
-        session_save();
         break;
 
     /* ACTION_ENTER_SUBMAP is deliberately absent: entering a submap is decided
@@ -1406,7 +1401,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
     case ACTION_CONTAINER_PREV: layout_tree_cycle_container(-1); break;
     case ACTION_SPLIT_GROW:     layout_tree_resize(+0.05f); break;
     case ACTION_SPLIT_SHRINK:   layout_tree_resize(-0.05f); break;
-    case ACTION_LAYOUT_BSP:     dt->layout = LAYOUT_BSP; tile_current(); session_save(); break;
+    case ACTION_LAYOUT_BSP:     dt->layout = LAYOUT_BSP; tile_current(); break;
 
     case ACTION_JUMP_URGENT: {
         for (int i = 0; i < g.managed_count; i++) {

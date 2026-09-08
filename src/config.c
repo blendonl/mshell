@@ -141,7 +141,6 @@ typedef struct {
     LuaHook   lua_hooks[MAX_LUA_HOOKS];
     int       lua_hook_count;
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
-    bool      start_desktop_always;
     int       inner_gap, outer_gap, border_width;
     bool      smart_gaps, smart_borders;
     COLORREF  border_color, border_color_float, border_color_urgent;
@@ -202,7 +201,6 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     memcpy(s->lua_hooks, g.lua_hooks, sizeof(g.lua_hooks));
     s->lua_hook_count = g.lua_hook_count;
     wcscpy(s->start_desktop, g.start_desktop);
-    s->start_desktop_always = g.start_desktop_always;
     s->inner_gap         = g.inner_gap;
     s->outer_gap         = g.outer_gap;
     s->smart_gaps        = g.smart_gaps;
@@ -289,7 +287,6 @@ static void config_detach(void) {
     g.monitor_rule_count = 0;
     g.lua_hook_count     = 0;   /* refs die with the lua_State */
     g.start_desktop[0]   = L'\0';
-    g.start_desktop_always = false;
     g.root_map      = NULL;
     g.current_map   = NULL;
     g.leader_map    = NULL;
@@ -316,7 +313,6 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     memcpy(g.lua_hooks, s->lua_hooks, sizeof(g.lua_hooks));
     g.lua_hook_count = s->lua_hook_count;
     wcscpy(g.start_desktop, s->start_desktop);
-    g.start_desktop_always = s->start_desktop_always;
     g.inner_gap         = s->inner_gap;
     g.outer_gap         = s->outer_gap;
     g.smart_gaps        = s->smart_gaps;
@@ -601,23 +597,17 @@ void config_load_builtin(void) {
  * picks up extra Lua modules kept beside init.lua and require()d from it — the
  * whole folder is mshell's config.
  *
- * One file in that folder is NOT config: session.txt, which session_save()
- * rewrites on every layout change. FindFirstChangeNotification can't say which
- * file changed, so with it every session write came back as a "config edit"
- * ~250 ms later — a reload whose desktop_apply_rules re-applied the startup
- * session snapshot and snapped the layout back (Win+Space looked like it
- * refused to stick). ReadDirectoryChangesW reports filenames, so batches that
- * touch only session.txt are ignored and a reload can no longer trigger
- * itself. Anything else in the folder still reloads, exactly as before.
- *
  * The wait lives on its own thread and only ever PostMessages: the reload has
  * to run on the main thread (config_load takes kb_lock and re-tiles).
  * =========================================================================== */
 #define CONFIG_DEBOUNCE_MS   250    /* quiet period before acting on a burst  */
 #define CONFIG_DEBOUNCE_MAX  2000   /* ...but never stall longer than this    */
+#define CONFIG_SETTLE_MS     100
+#define CONFIG_SETTLE_MAX    2000
 
 typedef struct {
     wchar_t  dir[MAX_PATH];
+    wchar_t  file[MAX_PATH];
     unsigned generation;
 } WatchArgs;
 
@@ -630,27 +620,10 @@ static unsigned g_watch_generation;     /* main thread only; bumped per start */
 typedef enum {
     BATCH_STOP,       /* stop requested, or the read broke — exit the thread */
     BATCH_NONE,       /* debounce tick elapsed with nothing arriving         */
-    BATCH_SESSION,    /* only our own session.txt write — not a config edit  */
-    BATCH_RELEVANT    /* something else changed — a real config edit         */
+    BATCH_RELEVANT    /* something changed — a config edit                   */
 } BatchResult;
 
 #define WATCH_BUF_SIZE 4096   /* one batch; a config folder is never busy   */
-
-/* True when any record in the batch names a file other than the session state
- * we write ourselves. FileName is not NUL-terminated, so compare by length. */
-static bool watch_batch_relevant(const BYTE *buf) {
-    const size_t sess_len = sizeof(SESSION_FILE) / sizeof(wchar_t) - 1;
-    const BYTE *p = buf;
-    for (;;) {
-        const FILE_NOTIFY_INFORMATION *ni = (const FILE_NOTIFY_INFORMATION *)p;
-        DWORD chars = ni->FileNameLength / sizeof(wchar_t);
-        if (chars != sess_len ||
-            _wcsnicmp(ni->FileName, SESSION_FILE, sess_len) != 0)
-            return true;
-        if (!ni->NextEntryOffset) return false;
-        p += ni->NextEntryOffset;
-    }
-}
 
 /* Arm one ReadDirectoryChangesW and wait for it, the stop event, or `ms`
  * (INFINITE for the idle wait, CONFIG_DEBOUNCE_MS inside a burst). */
@@ -685,7 +658,7 @@ static BatchResult watch_next_batch(HANDLE dir, OVERLAPPED *ov, BYTE *buf,
         return GetLastError() == ERROR_NOTIFY_ENUM_DIR ? BATCH_RELEVANT
                                                        : BATCH_STOP;
     }
-    return watch_batch_relevant(buf) ? BATCH_RELEVANT : BATCH_SESSION;
+    return BATCH_RELEVANT;
 }
 
 /* Wait out a write burst. True → reload; false → the thread should stop. */
@@ -698,6 +671,50 @@ static bool config_watch_debounce(HANDLE dir, OVERLAPPED *ov, BYTE *buf) {
         /* another change — keep waiting */
     }
     /* Something is writing continuously; reload rather than starve. */
+    return true;
+}
+
+static bool config_file_stamp(const wchar_t *path, LONGLONG *size,
+                              FILETIME *mtime) {
+    HANDLE h = CreateFileW(path, FILE_READ_ATTRIBUTES,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE |
+                           FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+
+    LARGE_INTEGER li;
+    bool ok = GetFileSizeEx(h, &li) && GetFileTime(h, NULL, NULL, mtime);
+    CloseHandle(h);
+    if (!ok) return false;
+
+    *size = li.QuadPart;
+    return true;
+}
+
+static bool config_watch_settle(const wchar_t *path) {
+    LONGLONG prev_size = 0, size = 0;
+    FILETIME prev_mtime = {0}, mtime = {0};
+    bool     have_prev = config_file_stamp(path, &prev_size, &prev_mtime);
+
+    for (unsigned waited = 0; waited < CONFIG_SETTLE_MAX;
+         waited += CONFIG_SETTLE_MS) {
+        if (WaitForSingleObject(g_watch_stop_evt, CONFIG_SETTLE_MS)
+            == WAIT_OBJECT_0)
+            return false;
+
+        if (!config_file_stamp(path, &size, &mtime)) {
+            have_prev = false;
+            continue;
+        }
+
+        if (have_prev && size == prev_size &&
+            CompareFileTime(&mtime, &prev_mtime) == 0)
+            return true;
+
+        prev_size  = size;
+        prev_mtime = mtime;
+        have_prev  = true;
+    }
     return true;
 }
 
@@ -731,8 +748,8 @@ static DWORD WINAPI config_watch_proc(LPVOID param) {
     for (;;) {
         BatchResult b = watch_next_batch(dir, &ov, buf, INFINITE);
         if (b == BATCH_STOP) break;
-        if (b == BATCH_SESSION) continue;   /* our own write — not config */
         if (!config_watch_debounce(dir, &ov, buf)) break;
+        if (!config_watch_settle(wa->file)) break;
 
         PostMessageW(g.message_window, WM_MSHELL_CONFIG_CHANGED,
                      (WPARAM)wa->generation, 0);
@@ -802,6 +819,8 @@ void config_watch_sync(void) {
     WatchArgs *wa = (WatchArgs *)malloc(sizeof *wa);
     if (!wa) return;
     memcpy(wa->dir, dir, (wcslen(dir) + 1) * sizeof(wchar_t));
+    wcsncpy(wa->file, g.config_path, MAX_PATH - 1);
+    wa->file[MAX_PATH - 1] = L'\0';
     wa->generation = ++g_watch_generation;
 
     g_watch_stop_evt = CreateEventW(NULL, TRUE, FALSE, NULL);   /* manual reset */

@@ -150,6 +150,10 @@ void desktop_apply_rules(int slot) {
     dt->app_args[0]  = L'\0';
     dt->app_cwd[0]   = L'\0';
 
+    /* A config that says nothing about a desktop's layout lets your runtime
+     * choice persist (g.default_layout is the baseline above, not a rule), and
+     * a config that DOES name one is the source of truth for it from the next
+     * reload on. */
     for (int i = 0; i < g.desktop_rule_count; i++) {
         const DesktopRule *r = &g.desktop_rules[i];
         if (r->name_match[0] && !wildcard_match(r->name_match, dt->name)) continue;
@@ -171,11 +175,6 @@ void desktop_apply_rules(int slot) {
         if (r->set_gaps) { dt->inner_gap = r->inner_gap;
                            dt->outer_gap = r->outer_gap; }
     }
-
-    /* Anything remembered from last time overrides the rule defaults — a
-     * layout you switched to is yours. A reload re-runs this whole function,
-     * so editing a rule still wins at that point. */
-    session_apply(dt);
 
     desktop_resolve_monitor(dt);
 }
@@ -291,21 +290,10 @@ void desktop_gc(int slot) {
  * we land on. Every other desktop is created by being switched to.
  * =========================================================================== */
 void desktop_init(void) {
-    /* Where you were last beats where the config says to start: coming back to
-     * the desktop you left is what "restart" should feel like. A `default` rule
-     * still decides on a genuinely first run, and deleting session.txt restores
-     * that behaviour.
-     *
-     * default = "always" is the config saying it would rather decide — every
-     * start lands on its name, session or no session. The session is still
-     * WRITTEN either way, so turning this back off returns you to wherever you
-     * were when you did. */
-    const wchar_t *remembered = session_start_desktop();
-    const wchar_t *configured = g.start_desktop[0] ? g.start_desktop : NULL;
-    const wchar_t *name = (configured && g.start_desktop_always) ? configured
-                        : remembered                             ? remembered
-                        : configured                             ? configured
-                                                                 : DEFAULT_START_DESKTOP;
+    /* The desktop rule that claimed `default` decides every start; with none,
+     * DEFAULT_START_DESKTOP does. */
+    const wchar_t *name = g.start_desktop[0] ? g.start_desktop
+                                             : DEFAULT_START_DESKTOP;
 
     g.desktop_count      = 0;
     g.current_desktop_id = 0;
@@ -525,7 +513,6 @@ void desktop_switch(const wchar_t *name) {
     /* 8. Tell the config, once everything above has settled — the handler gets
      *    the desktop as it now is, plus `from` naming where we came from. */
     bar_refresh();   /* the desktop set and the current one both just changed */
-    session_save();  /* which desktop you are on is part of the session */
     lua_fire(LUA_EVENT_DESKTOP_SWITCH, NULL, from);
 }
 

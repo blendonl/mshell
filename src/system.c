@@ -17,9 +17,6 @@
  * drive them, and the OS's own handling (including its on-screen indicator)
  * does the rest. Synthesising rather than calling IAudioEndpointVolume directly
  * is what keeps that indicator, and keeps per-app volume behaving normally.
- *
- * Note this file is NOT session.c, which is persistence of per-desktop settings
- * across restarts and has nothing to do with the Windows session.
  * =========================================================================== */
 #include "mshell.h"
 

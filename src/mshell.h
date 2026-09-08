@@ -877,13 +877,9 @@ typedef struct {
      * from is destroyed behind you when you leave it empty, and last_desktop
      * then re-creates it by name. */
     wchar_t  last_desktop[DESKTOP_NAME_MAX];
+    /* Set by a desktop rule's `default` (the last one to claim it wins); the
+     * desktop every start lands on. See desktop_init(). */
     wchar_t  start_desktop[DESKTOP_NAME_MAX];
-    /* Both set by a desktop rule's `default` (the last one to claim it wins).
-     * start_desktop_always says whether that name outranks the desktop the
-     * session remembers: false (the default) keeps a restart returning you
-     * where you left off and lets the config name only the FIRST run's
-     * desktop; true makes every start land on it. See desktop_init(). */
-    bool     start_desktop_always;
 
     /* --- desktop rules --- */
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
@@ -1581,22 +1577,6 @@ PlaceResult window_set_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
  * ManagedWindow, call window_set_pos directly. */
 PlaceResult window_apply_rect(ManagedWindow *mw, RECT want, UINT flags);
 
-/* ===========================================================================
- * Prototypes — session.c
- *
- * Per-desktop layout / master-ratio / master-count, remembered by desktop NAME
- * across restarts. Window placement is deliberately NOT saved: an HWND means
- * nothing next boot, and guessing from titles would scatter your windows.
- * =========================================================================== */
-/* Lives beside the config, which is also the folder the auto-reload watcher
- * watches — config.c needs the name to tell our own writes apart from a
- * config edit. */
-#define SESSION_FILE  L"session.txt"
-
-void     session_load(void);              /* read the file; call once at start */
-void     session_apply(Desktop *dt);      /* from desktop_apply_rules          */
-void     session_save(void);              /* whenever a saved value changes    */
-const wchar_t *session_start_desktop(void);  /* last desktop, or NULL          */
 
 /* ===========================================================================
  * Prototypes — bar.c (status bar)
