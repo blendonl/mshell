@@ -7,6 +7,9 @@
 #define LOG_MAX_BYTES  (5 * 1024 * 1024)
 #define LOG_KEEP        2
 
+#define LOG_FLUSH_LINES  64
+#define LOG_FLUSH_MS    250
+
 static CRITICAL_SECTION s_cs;
 static INIT_ONCE        s_once = INIT_ONCE_STATIC_INIT;
 
@@ -14,6 +17,21 @@ static FILE    *s_fp;
 static LogLevel s_level = LOG_INFO;
 static wchar_t  s_path[MAX_PATH];
 static bool     s_inited;
+
+static unsigned s_unflushed;
+static DWORD    s_last_flush;
+
+static void log_flush_locked(void) {
+    if (s_fp) fflush(s_fp);
+    s_unflushed  = 0;
+    s_last_flush = GetTickCount();
+}
+
+static bool log_flush_is_due(LogLevel level) {
+    if (level <= LOG_WARN) return true;
+    if (++s_unflushed >= LOG_FLUSH_LINES) return true;
+    return (DWORD)(GetTickCount() - s_last_flush) >= LOG_FLUSH_MS;
+}
 
 static BOOL CALLBACK log_once_init(PINIT_ONCE o, PVOID p, PVOID *ctx) {
     (void)o; (void)p; (void)ctx;
@@ -121,7 +139,7 @@ void log_init(const wchar_t *basename, LogLevel level) {
 
 void log_shutdown(void) {
     log_lock();
-    if (s_fp) { fflush(s_fp); fclose(s_fp); s_fp = NULL; }
+    if (s_fp) { log_flush_locked(); fclose(s_fp); s_fp = NULL; }
     s_inited = false;
     log_unlock();
 }
@@ -150,12 +168,13 @@ void log_vmsg(LogLevel level, const wchar_t *fmt, va_list ap) {
     if (s_fp) {
         fputws(line, s_fp);
         fputwc(L'\n', s_fp);
-        fflush(s_fp);
+        if (log_flush_is_due(level)) log_flush_locked();
 
         long pos = ftell(s_fp);
         if (pos >= LOG_MAX_BYTES) {
             fclose(s_fp);
             s_fp = NULL;
+            s_unflushed = 0;
             log_rotate_locked();
             s_fp = _wfopen(s_path, L"a, ccs=UTF-8");
         }
