@@ -1489,6 +1489,39 @@ static int lua_mshell_monitor_rule(lua_State *L) {
     }
     lua_pop(L, 1);
 
+    lua_getfield(L, 2, "rotation");
+    if (lua_isnumber(L, -1)) {
+        int deg = (int)lua_tointeger(L, -1);
+        if (deg != 0 && deg != 90 && deg != 180 && deg != 270) {
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: rotation must be 0, 90, 180 or "
+                                 "270 degrees, or a name like \"portrait\"");
+        }
+        r->set_rotation = true;
+        r->rotation     = deg;
+    } else if (lua_isstring(L, -1)) {
+        const char *n = lua_tostring(L, -1);
+        int deg = -1;
+        if      (!strcmp(n, "landscape"))         deg = ROTATE_0;
+        else if (!strcmp(n, "portrait"))          deg = ROTATE_90;
+        else if (!strcmp(n, "landscape_flipped")) deg = ROTATE_180;
+        else if (!strcmp(n, "portrait_flipped"))  deg = ROTATE_270;
+        if (deg < 0) {
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: unknown rotation '%s' — "
+                                 "expected landscape, portrait, "
+                                 "landscape_flipped, portrait_flipped, or a "
+                                 "number of degrees", n);
+        }
+        r->set_rotation = true;
+        r->rotation     = deg;
+    } else if (!lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return luaL_error(L, "monitor_rule: rotation must be a number or a "
+                             "string");
+    }
+    lua_pop(L, 1);
+
     lua_getfield(L, 2, "hdr");
     if (lua_isboolean(L, -1)) {
         r->set_hdr = true;

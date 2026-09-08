@@ -273,8 +273,50 @@ bool display_hdr_set(const wchar_t *device, bool on) {
 }
 
 /* ===========================================================================
- * Resolution and refresh rate
+ * Resolution, refresh rate and rotation
  * =========================================================================== */
+static bool orientation_is_portrait(DWORD orientation) {
+    return orientation == DMDO_90 || orientation == DMDO_270;
+}
+
+static int degrees_of_orientation(DWORD orientation) {
+    switch (orientation) {
+        case DMDO_90:  return ROTATE_90;
+        case DMDO_180: return ROTATE_180;
+        case DMDO_270: return ROTATE_270;
+        default:       return ROTATE_0;
+    }
+}
+
+static bool orientation_of_degrees(int degrees, DWORD *out) {
+    switch (degrees) {
+        case ROTATE_0:   *out = DMDO_DEFAULT; return true;
+        case ROTATE_90:  *out = DMDO_90;      return true;
+        case ROTATE_180: *out = DMDO_180;     return true;
+        case ROTATE_270: *out = DMDO_270;     return true;
+        default:                              return false;
+    }
+}
+
+static void swap_axes(DisplayMode *m) {
+    int t = m->width; m->width = m->height; m->height = t;
+}
+
+const wchar_t *rotation_name(int rotation) {
+    switch (rotation) {
+        case ROTATE_90:  return L"portrait";
+        case ROTATE_180: return L"landscape (flipped)";
+        case ROTATE_270: return L"portrait (flipped)";
+        default:         return L"landscape";
+    }
+}
+
+int display_rotation(const wchar_t *device) {
+    DEVMODEW dm = { .dmSize = sizeof dm };
+    if (!EnumDisplaySettingsExW(device, ENUM_CURRENT_SETTINGS, &dm, 0))
+        return ROTATE_0;
+    return degrees_of_orientation(dm.dmDisplayOrientation);
+}
 
 bool display_current_mode(const wchar_t *device, DisplayMode *out) {
     DEVMODEW dm = { .dmSize = sizeof dm };
@@ -283,6 +325,7 @@ bool display_current_mode(const wchar_t *device, DisplayMode *out) {
     out->width   = (int)dm.dmPelsWidth;
     out->height  = (int)dm.dmPelsHeight;
     out->refresh = (int)dm.dmDisplayFrequency;
+    if (orientation_is_portrait(dm.dmDisplayOrientation)) swap_axes(out);
     return true;
 }
 
@@ -299,6 +342,8 @@ int display_modes(const wchar_t *device, DisplayMode *out, int max) {
     if (!EnumDisplaySettingsExW(device, ENUM_CURRENT_SETTINGS, &cur, 0))
         return 0;
 
+    bool rotated = orientation_is_portrait(cur.dmDisplayOrientation);
+
     int count = 0;
     DEVMODEW dm = { .dmSize = sizeof dm };
     for (DWORD i = 0; EnumDisplaySettingsExW(device, i, &dm, 0); i++) {
@@ -309,6 +354,7 @@ int display_modes(const wchar_t *device, DisplayMode *out, int max) {
 
         DisplayMode m = { (int)dm.dmPelsWidth, (int)dm.dmPelsHeight,
                           (int)dm.dmDisplayFrequency };
+        if (rotated) swap_axes(&m);
 
         bool seen = false;
         for (int k = 0; k < count && !seen; k++)
@@ -331,7 +377,8 @@ int display_modes(const wchar_t *device, DisplayMode *out, int max) {
  * it from. The test call asks the driver without touching the output, so a bad
  * mode costs a line in the log instead of a reboot.
  */
-bool display_set_mode(const wchar_t *device, const DisplayMode *want) {
+bool display_set_mode(const wchar_t *device, const DisplayMode *want,
+                      int rotation) {
     /* Start from the CURRENT mode so the fields not being changed — position
      * above all, which is what places this monitor next to the others — carry
      * over untouched. */
@@ -341,8 +388,20 @@ bool display_set_mode(const wchar_t *device, const DisplayMode *want) {
         return false;
     }
 
+    DWORD now_orientation = dm.dmDisplayOrientation;
+    DWORD orientation     = now_orientation;
+    if (rotation != ROTATE_KEEP &&
+        !orientation_of_degrees(rotation, &orientation)) {
+        log_err(L"display: %d is not a rotation — expected 0, 90, 180 or 270",
+                rotation);
+        return false;
+    }
+    int now_rotation = degrees_of_orientation(now_orientation);
+
     DisplayMode now = { (int)dm.dmPelsWidth, (int)dm.dmPelsHeight,
                         (int)dm.dmDisplayFrequency };
+    if (orientation_is_portrait(now_orientation)) swap_axes(&now);
+
     DisplayMode target = now;
     if (want->width > 0 && want->height > 0) {
         target.width  = want->width;
@@ -355,22 +414,34 @@ bool display_set_mode(const wchar_t *device, const DisplayMode *want) {
      * this runs on every config reload. */
     if (target.width   == now.width &&
         target.height  == now.height &&
-        target.refresh == now.refresh)
+        target.refresh == now.refresh &&
+        orientation    == now_orientation)
         return true;
 
-    dm.dmPelsWidth        = (DWORD)target.width;
-    dm.dmPelsHeight       = (DWORD)target.height;
+    DisplayMode pels = target;
+    if (orientation_is_portrait(orientation)) swap_axes(&pels);
+
+    dm.dmPelsWidth        = (DWORD)pels.width;
+    dm.dmPelsHeight       = (DWORD)pels.height;
     dm.dmDisplayFrequency = (DWORD)target.refresh;
     dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY |
                   DM_BITSPERPEL;
+    if (orientation != now_orientation) {
+        dm.dmDisplayOrientation = orientation;
+        dm.dmFields |= DM_DISPLAYORIENTATION;
+    }
+
+    int target_rotation = degrees_of_orientation(orientation);
 
     LONG rc = ChangeDisplaySettingsExW(device, &dm, NULL, CDS_TEST, NULL);
     if (rc != DISP_CHANGE_SUCCESSFUL) {
-        log_err(L"display: %ls will not do %dx%d @%dHz (test returned %ld) — "
-                L"left at %dx%d @%dHz. `mshell.exe --displays` lists the modes "
-                L"it will do.",
-                device, target.width, target.height, target.refresh, (long)rc,
-                now.width, now.height, now.refresh);
+        log_err(L"display: %ls will not do %dx%d @%dHz %ls (test returned %ld) "
+                L"— left at %dx%d @%dHz %ls. `mshell.exe --displays` lists the "
+                L"modes it will do.",
+                device, target.width, target.height, target.refresh,
+                rotation_name(target_rotation), (long)rc,
+                now.width, now.height, now.refresh,
+                rotation_name(now_rotation));
         return false;
     }
 
@@ -378,13 +449,14 @@ bool display_set_mode(const wchar_t *device, const DisplayMode *want) {
      * See the file header. */
     rc = ChangeDisplaySettingsExW(device, &dm, NULL, 0, NULL);
     if (rc != DISP_CHANGE_SUCCESSFUL) {
-        log_err(L"display: setting %ls to %dx%d @%dHz failed (%ld)",
-                device, target.width, target.height, target.refresh, (long)rc);
+        log_err(L"display: setting %ls to %dx%d @%dHz %ls failed (%ld)",
+                device, target.width, target.height, target.refresh,
+                rotation_name(target_rotation), (long)rc);
         return false;
     }
 
-    log_w(L"display: %ls -> %dx%d @%dHz", device, target.width, target.height,
-          target.refresh);
+    log_w(L"display: %ls -> %dx%d @%dHz %ls", device, target.width,
+          target.height, target.refresh, rotation_name(target_rotation));
     return true;
 }
 
@@ -428,6 +500,7 @@ void displays_apply_rules(bool force) {
         /* Layered exactly like the tiling overrides: every matching rule
          * applies, in declaration order, each overwriting only what it names. */
         DisplayMode want = {0};
+        int  rotation = ROTATE_KEEP;
         bool set_hdr = false, hdr = false;
         bool any     = false;
 
@@ -442,8 +515,9 @@ void displays_apply_rules(bool force) {
                 want.height = mr->height;
                 any = true;
             }
-            if (mr->set_refresh) { want.refresh = mr->refresh; any = true; }
-            if (mr->set_hdr)     { set_hdr = true; hdr = mr->hdr; any = true; }
+            if (mr->set_refresh)  { want.refresh = mr->refresh; any = true; }
+            if (mr->set_rotation) { rotation = mr->rotation; any = true; }
+            if (mr->set_hdr)      { set_hdr = true; hdr = mr->hdr; any = true; }
         }
 
         /* Marked whether or not a rule named it: the point of the list is "this
@@ -452,8 +526,8 @@ void displays_apply_rules(bool force) {
         mark_applied(m->device);
         if (!any) continue;
 
-        if (want.width > 0 || want.refresh > 0)
-            display_set_mode(m->device, &want);
+        if (want.width > 0 || want.refresh > 0 || rotation != ROTATE_KEEP)
+            display_set_mode(m->device, &want, rotation);
         if (set_hdr)
             display_hdr_set(m->device, hdr);
     }
@@ -520,12 +594,45 @@ void display_cycle_refresh(int mon, int dir) {
     int next = (at + (dir < 0 ? -1 : 1) + count) % count;
 
     DisplayMode want = { 0, 0, rates[next] };
-    if (display_set_mode(device, &want)) {
+    if (display_set_mode(device, &want, ROTATE_KEEP)) {
         wchar_t msg[64];
         _snwprintf(msg, 64, L"%d Hz", rates[next]);
         msg[63] = L'\0';
         notify_show(msg, NOTIFY_INFO, 2000);
     }
+}
+
+static void rotate_focused(const wchar_t *device, int rotation) {
+    DisplayMode keep = {0};
+    if (display_set_mode(device, &keep, rotation)) {
+        wchar_t msg[64];
+        _snwprintf(msg, 64, L"%ls (%d°)", rotation_name(rotation), rotation);
+        msg[63] = L'\0';
+        notify_show(msg, NOTIFY_INFO, 2000);
+    } else {
+        notify_show(L"this display will not rotate — see the log",
+                    NOTIFY_WARN, 3000);
+    }
+}
+
+void display_cycle_rotation(int mon, int dir) {
+    if (mon < 0 || mon >= g.monitor_count) return;
+    const wchar_t *device = g.monitors[mon].device;
+    if (!device[0]) return;
+
+    int quarters = display_rotation(device) / 90;
+    int next     = (quarters + (dir < 0 ? 3 : 1)) % 4;
+    rotate_focused(device, next * 90);
+}
+
+void display_toggle_portrait(int mon) {
+    if (mon < 0 || mon >= g.monitor_count) return;
+    const wchar_t *device = g.monitors[mon].device;
+    if (!device[0]) return;
+
+    int now = display_rotation(device);
+    rotate_focused(device, (now == ROTATE_90 || now == ROTATE_270)
+                               ? ROTATE_0 : ROTATE_90);
 }
 
 /* ===========================================================================
@@ -569,10 +676,20 @@ void display_list(void) {
                              : hdr == HDR_OFF ? L"off"
                                               : L"unsupported";
 
+        int rot = display_rotation(dd.DeviceName);
+
+        DEVMODEW at = { .dmSize = sizeof at };
+        long x = 0, y = 0;
+        if (EnumDisplaySettingsExW(dd.DeviceName, ENUM_CURRENT_SETTINGS, &at, 0)) {
+            x = (long)at.dmPosition.x;
+            y = (long)at.dmPosition.y;
+        }
+
         wchar_t line[512];
-        _snwprintf(line, 512, L"%-14ls %dx%d @%dHz  HDR: %-11ls %ls%ls",
-                   dd.DeviceName, cur.width, cur.height, cur.refresh, hdr_s,
-                   label,
+        _snwprintf(line, 512,
+                   L"%-14ls %dx%d @%dHz %+ld%+ld  %-19ls HDR: %-11ls %ls%ls",
+                   dd.DeviceName, cur.width, cur.height, cur.refresh, x, y,
+                   rotation_name(rot), hdr_s, label,
                    (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
                        ? L"  (primary)" : L"");
         line[511] = L'\0';
