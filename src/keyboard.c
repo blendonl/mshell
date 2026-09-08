@@ -1538,6 +1538,13 @@ void execute_action(Action action, int arg, const wchar_t *command,
         update_install_async();
         break;
 
+    /* Same reasoning as update: schtasks has to be waited on twice with a
+     * settle in between, which is far too long to hold the thread that
+     * services keybinds. */
+    case ACTION_RESTART_HELPER:
+        helper_restart_async();
+        break;
+
     /* -- panic --------------------------------------------------------
      * The escape hatch that does not require Task Manager. Explorer comes up
      * alongside us (it coexists fine — that is exactly what --test mode is),
