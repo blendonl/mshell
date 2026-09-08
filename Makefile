@@ -31,6 +31,11 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/actions.c    \
               $(SRC_DIR)/action_util.c \
               $(SRC_DIR)/window.c     \
+              $(SRC_DIR)/window_rules.c \
+              $(SRC_DIR)/window_decor.c \
+              $(SRC_DIR)/window_visibility.c \
+              $(SRC_DIR)/window_place.c \
+              $(SRC_DIR)/window_zorder.c \
               $(SRC_DIR)/tiling.c     \
               $(SRC_DIR)/desktop.c    \
               $(SRC_DIR)/events.c     \
