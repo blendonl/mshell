@@ -80,41 +80,6 @@ static KeyMap *find_keymap(const char *name) {
     return NULL;
 }
 
-/* ===========================================================================
- * A desktop argument is a NAME.
- *
- * Desktops are created on demand, so there is nothing to resolve against and
- * no such thing as an unknown desktop: whatever name a binding carries either
- * already exists or comes into being the moment the key is pressed. All this
- * does is normalise and validate — a number is accepted and used as the name it
- * spells, so `switch_desktop 3` means the desktop called "3" (which is what
- * Win+3 lands on) rather than an index into anything.
- *
- * Returns a fresh wide string the caller owns.
- * =========================================================================== */
-static wchar_t *desktop_arg_name(lua_State *L, const char *ctx, bool has_num,
-                                 int num_arg, const char *str_arg) {
-    char buf[32];
-    if (has_num) {
-        snprintf(buf, sizeof buf, "%d", num_arg);
-        str_arg = buf;
-    }
-    if (!str_arg || !str_arg[0])
-        luaL_error(L, "%s: needs a desktop name, e.g. %s \"web\" or %s \"1\"",
-                   ctx, ctx, ctx);
-
-    wchar_t wname[DESKTOP_NAME_MAX];
-    u8_to_w(str_arg, wname, DESKTOP_NAME_MAX);
-    if (!desktop_name_ok(wname))
-        luaL_error(L, "%s: '%s' is not a usable desktop name — it must be "
-                      "non-empty, contain no spaces, and be under %d characters",
-                   ctx, str_arg, DESKTOP_NAME_MAX);
-
-    wchar_t *out = _wcsdup(wname);
-    if (!out) luaL_error(L, "out of memory");
-    return out;
-}
-
 /* Enum → layout name; the exact spellings layout_from_name accepts.
  * Non-static: ipc.c reports the same names, and two copies of this switch
  * would drift the moment a layout is added. */
@@ -148,125 +113,35 @@ static bool layout_from_name(const char *s, Layout *out) {
     return true;
 }
 
-/* ===========================================================================
- * Resolve an action name (+ optional numeric/string payload) into a full
- * binding and append it to `map`. Shared by mshell.bind and mshell.submap so
- * submaps are as expressive as root bindings (spawn, switch_desktop, nesting).
- *
- * Raises a Lua error (longjmp) on bad input; never returns in that case.
- * =========================================================================== */
-static void add_resolved_binding(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
-                                 const char *action_str, bool has_num, int num_arg,
-                                 const char *str_arg, const char *args_str,
-                                 const char *cwd_str, const char *desc_str,
-                                 bool default_terminal) {
-    int      arg      = 0;
-    KeyMap  *submap   = NULL;
-    wchar_t *command  = NULL;
-    wchar_t *cmd_args = NULL;
-    wchar_t *cmd_cwd  = NULL;
-    /* A which-key label the config chose, overriding the one derived from the
-     * action. "browser" reads better in a hint panel than "spawn firefox.exe". */
-    wchar_t *desc_str_w = (desc_str && desc_str[0]) ? u8_to_w_dup(desc_str) : NULL;
-    bool     terminal = default_terminal;
-    Action   action;
+#define MSHELL_SPEC_KEY "__mshell_spec"
 
-    if (strcmp(action_str, "enter_submap") == 0) {
-        action = ACTION_ENTER_SUBMAP;
-        if (!str_arg) luaL_error(L, "enter_submap requires a submap name");
-        submap = find_keymap(str_arg);
-        if (!submap)
-            luaL_error(L, "submap not found: %s (define it before entering it)",
-                       str_arg);
-        arg = (int)(submap - g.keymaps);
-        terminal = false;   /* entering a submap is never terminal */
-    } else if (strcmp(action_str, "spawn") == 0) {
-        action = ACTION_SPAWN;
-        if (!str_arg) luaL_error(L, "spawn requires a command string");
-        command = u8_to_w_dup(str_arg);
-        if (args_str && args_str[0]) cmd_args = u8_to_w_dup(args_str);
-        if (cwd_str  && cwd_str[0])  cmd_cwd  = u8_to_w_dup(cwd_str);
-    } else {
-        if (args_str)
-            luaL_error(L, "%s takes no arguments string — only spawn does",
-                       action_str);
-        if (cwd_str)
-            luaL_error(L, "%s takes no working directory — only spawn does",
-                       action_str);
-        action = action_name_to_enum(action_str);
-        if (action == ACTION_NONE) luaL_error(L, "unknown action: %s", action_str);
+static int  l_action_call(lua_State *L);
+static void push_window(lua_State *L, HWND hwnd);
 
-        if (action == ACTION_NOTIFY) {
-            /* The message rides in `command`, the same slot spawn and the
-             * desktop actions use — there is one string slot, and a notify has
-             * exactly one string. */
-            if (!str_arg) luaL_error(L, "notify requires a message string");
-            command = u8_to_w_dup(str_arg);
-        } else if (action == ACTION_SWITCH_DESKTOP ||
-                   action == ACTION_MOVE_TO_DESKTOP) {
-            /* Desktop actions carry a NAME, not an index — in `command`, the
-             * same slot spawn uses, since a name is a string and there is no
-             * number to put in `arg`. */
-            command = desktop_arg_name(L, action_str, has_num, num_arg, str_arg);
-        } else if (has_num) {
-            arg = num_arg;
-        } else if (str_arg) {
-            arg = atoi(str_arg);
-        }
-    }
-
-    keymap_add_binding(map, mods, vk, action, arg, submap, command, cmd_args,
-                       cmd_cwd, desc_str_w, terminal);
-    free(command);    /* keymap_add_binding takes its own copies */
-    free(cmd_args);
-    free(cmd_cwd);
-    free(desc_str_w);
+static int l_call_self(lua_State *L) {
+    lua_remove(L, 1);
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
+    return lua_gettop(L);
 }
 
-/* ===========================================================================
- * A binding's payload: either a plain string, or {command, arguments}.
- *
- * Arguments have to be a separate string because ShellExecuteW takes them
- * separately, and splitting one string back apart is ambiguous as soon as a
- * path contains a space — which on Windows is most of them. Reading the pair
- * off the stack is factored out here so mshell.bind and mshell.submap accept
- * exactly the same shapes.
- *
- * Returns how many values it pushed. *str and *args point into those, so the
- * caller must lua_pop() that many only after it is finished with them.
- * =========================================================================== */
-static int read_payload(lua_State *L, int idx, bool *has_num, int *num_arg,
-                        const char **str, const char **args,
-                        const char **cwd, const char **desc) {
-    *has_num = false; *num_arg = 0; *str = NULL; *args = NULL; *cwd = NULL;
-    *desc = NULL;
+static int api_value_spec(lua_State *L, int idx) {
+    idx = lua_absindex(L, idx);
 
-    if (lua_isnumber(L, idx)) {
-        *has_num = true;
-        *num_arg = (int)lua_tointeger(L, idx);
-        return 0;
+    if (lua_iscfunction(L, idx) && lua_tocfunction(L, idx) == l_action_call) {
+        if (!lua_getupvalue(L, idx, 1)) return -1;
+        int i = (int)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        return i;
     }
-    if (lua_isstring(L, idx)) {
-        *str = lua_tostring(L, idx);
-        return 0;
+    if (lua_istable(L, idx) && lua_getmetatable(L, idx)) {
+        lua_getfield(L, -1, MSHELL_SPEC_KEY);
+        int i = lua_isinteger(L, -1) ? (int)lua_tointeger(L, -1) : -1;
+        lua_pop(L, 2);
+        return i;
     }
-    if (lua_istable(L, idx)) {
-        int t = lua_absindex(L, idx);   /* idx may be relative; pushing shifts it */
-        lua_rawgeti(L, t, 1);
-        lua_rawgeti(L, t, 2);
-        /* Third slot is the working directory. Also accepts the named form,
-         * because {"cmd", nil, "C:\\x"} to give only a cwd reads badly. */
-        lua_rawgeti(L, t, 3);
-        if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_getfield(L, t, "cwd"); }
-        /* Named only: a fourth positional slot after cwd would be unreadable. */
-        lua_getfield(L, t, "desc");
-        *str  = lua_isstring(L, -4) ? lua_tostring(L, -4) : NULL;
-        *args = lua_isstring(L, -3) ? lua_tostring(L, -3) : NULL;
-        *cwd  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
-        *desc = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
-        return 4;
-    }
-    return 0;
+    return -1;
 }
 
 /* Parse a {"LWin", "Shift"} style modifier table at `idx` into a flag mask. */
@@ -281,17 +156,106 @@ static DWORD parse_mods(lua_State *L, int idx) {
     return mods;
 }
 
-/* ===========================================================================
- * mshell.bind(mods, key, action [, arg [, terminal]])
- *
- *   mods   — table of modifier strings, e.g. {"LWin", "Shift"}
- *   key    — key name string, e.g. "h", "Return"
- *   action — action name string, e.g. "focus_left", "spawn", "enter_submap"
- *   arg    — optional int (switch_desktop) or string (command / submap name)
- * =========================================================================== */
+static void bind_value(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
+                       int vidx, const char *desc, bool default_terminal,
+                       const char *where) {
+    vidx = lua_absindex(L, vidx);
+
+    wchar_t *desc_w = (desc && desc[0]) ? u8_to_w_dup(desc) : NULL;
+    bool     terminal = default_terminal;
+
+    int si = api_value_spec(L, vidx);
+    if (si >= 0) {
+        const ApiEntry *e = api_spec_at(si);
+        if (!e || e->kind != API_ACTION) {
+            free(desc_w);
+            luaL_error(L, "%s: mshell.%s is not something a key can do",
+                       where, e ? e->path : "?");
+        }
+        if (e->flags & API_PAYLOAD_STR) {
+            free(desc_w);
+            luaL_error(L, "%s: mshell.%s needs an argument, so bind a function "
+                          "instead: function() mshell.%s(...) end",
+                       where, e->path, e->path);
+        }
+        keymap_add_binding(map, mods, vk, e->action, 0, NULL, NULL, NULL, NULL,
+                           desc_w, terminal);
+        free(desc_w);
+        return;
+    }
+
+    if (lua_isfunction(L, vidx)) {
+        /* The ref lives in the registry of the CURRENT lua_State, which is torn
+         * down wholesale on reload — so there is nothing to release by hand,
+         * and dispatch checks the config generation before ever using it. */
+        lua_pushvalue(L, vidx);
+        int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        keymap_add_binding(map, mods, vk, ACTION_LUA_CALL, ref, NULL, NULL,
+                           NULL, NULL, desc_w, terminal);
+        free(desc_w);
+        return;
+    }
+
+    /* lua_isstring would also accept a number, and lua_tostring would then
+     * convert the value in place — inside the lua_next walk a submap is read
+     * with. A number is not a submap name, so ask for the type exactly. */
+    if (lua_type(L, vidx) == LUA_TSTRING) {
+        const char *nm = lua_tostring(L, vidx);
+        KeyMap     *sm = find_keymap(nm);
+        if (sm) {
+            keymap_add_binding(map, mods, vk, ACTION_ENTER_SUBMAP,
+                               (int)(sm - g.keymaps), sm, NULL, NULL, NULL,
+                               desc_w, false);
+            free(desc_w);
+            return;
+        }
+        free(desc_w);
+        const ApiEntry *old = api_spec_by_legacy(nm);
+        if (old)
+            luaL_error(L, "%s: actions are functions now — write mshell.%s "
+                          "instead of \"%s\"", where, old->path, nm);
+        luaL_error(L, "%s: no submap named '%s' (define it with "
+                      "mshell.keys.submap before entering it)", where, nm);
+    }
+
+    free(desc_w);
+    luaL_error(L, "%s: expected an action, a function, or a submap name; got %s",
+               where, luaL_typename(L, vidx));
+}
+
+static void bind_table_value(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
+                             int tidx, bool default_terminal,
+                             const char *where) {
+    tidx = lua_absindex(L, tidx);
+
+    lua_getfield(L, tidx, "desc");
+    const char *desc = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+
+    bool terminal = default_terminal;
+    lua_getfield(L, tidx, "terminal");
+    if (lua_isboolean(L, -1)) terminal = (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    lua_rawgeti(L, tidx, 1);
+    if (lua_isnil(L, -1))
+        luaL_error(L, "%s: a {…} binding needs the action or function first",
+                   where);
+
+    bind_value(L, map, mods, vk, -1, desc, terminal, where);
+    lua_pop(L, 2);   
+}
+
+static void bind_any(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
+                     int vidx, bool default_terminal, const char *where) {
+    vidx = lua_absindex(L, vidx);
+    if (lua_istable(L, vidx) && api_value_spec(L, vidx) < 0)
+        bind_table_value(L, map, mods, vk, vidx, default_terminal, where);
+    else
+        bind_value(L, map, mods, vk, vidx, NULL, default_terminal, where);
+}
+
 static int lua_mshell_bind(lua_State *L) {
-    reject_at_runtime(L, "bind");
-    int nargs = lua_gettop(L);
+    reject_at_runtime(L, "keys.bind");
 
     DWORD mods = parse_mods(L, 1);
 
@@ -299,45 +263,19 @@ static int lua_mshell_bind(lua_State *L) {
     DWORD vk = key_name_to_vk(key_str);
     if (vk == 0) return luaL_error(L, "unknown key: %s", key_str);
 
-    /* A function instead of an action name: keep a reference to it and bind a
-     * call. The ref lives in the registry of the CURRENT lua_State, which is
-     * torn down wholesale on reload — so there is nothing to release by hand,
-     * and dispatch checks the config generation before ever using it. */
-    if (lua_isfunction(L, 3)) {
-        if (!g.root_map) return luaL_error(L, "root keymap not initialized");
-
-        bool terminal = true;
-        if (nargs >= 4 && lua_isboolean(L, 4)) terminal = (bool)lua_toboolean(L, 4);
-
-        lua_pushvalue(L, 3);
-        int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-
-        keymap_add_binding(g.root_map, mods, vk, ACTION_LUA_CALL, ref,
-                           NULL, NULL, NULL, NULL, NULL, terminal);
-        return 0;
-    }
-
-    const char *action_str = luaL_checkstring(L, 3);
-
-    /* Payload: a number, a string, or {command, arguments} for spawn. */
-    bool        has_num = false;
-    int         num_arg = 0;
-    const char *str_arg = NULL, *args_str = NULL, *cwd_str = NULL;
-    const char *desc_str = NULL;
-    int         pushed  = 0;
-    if (nargs >= 4)
-        pushed = read_payload(L, 4, &has_num, &num_arg, &str_arg, &args_str,
-                              &cwd_str, &desc_str);
-
-    bool terminal = true;   /* most actions return to root after firing */
-    if (nargs >= 5 && lua_isboolean(L, 5)) terminal = (bool)lua_toboolean(L, 5);
-
     if (!g.root_map) return luaL_error(L, "root keymap not initialized");
 
-    add_resolved_binding(L, g.root_map, mods, vk, action_str,
-                         has_num, num_arg, str_arg, args_str, cwd_str,
-                         desc_str, terminal);
-    lua_pop(L, pushed);
+    const char *desc     = NULL;
+    bool        terminal = true;   /* most actions return to root after firing */
+    if (lua_istable(L, 4)) {
+        lua_getfield(L, 4, "desc");
+        if (lua_isstring(L, -1)) desc = lua_tostring(L, -1);
+        lua_getfield(L, 4, "terminal");
+        if (lua_isboolean(L, -1)) terminal = (bool)lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
+
+    bind_value(L, g.root_map, mods, vk, 3, desc, terminal, "keys.bind");
     return 0;
 }
 
@@ -356,7 +294,7 @@ static int lua_mshell_bind(lua_State *L) {
  *                 sticky  = true   backward-compatible alias for persist = true
  * =========================================================================== */
 static int lua_mshell_submap(lua_State *L) {
-    reject_at_runtime(L, "submap");
+    reject_at_runtime(L, "keys.submap");
     const char *name    = luaL_checkstring(L, 1);
     bool        persist = false;
     DWORD       exit_vk = 0;
@@ -406,10 +344,6 @@ static int lua_mshell_submap(lua_State *L) {
      * in the submap (its exit key leaves). */
     bool term = !persist;
 
-    /* Parse bindings table (index 2). Each value is either:
-     *   key = "action"                 — simple action
-     *   key = {"action", arg|command}  — action with a payload (spawn, desktop,
-     *                                     enter_submap, …) */
     luaL_checktype(L, 2, LUA_TTABLE);
     lua_pushnil(L);
     while (lua_next(L, 2)) {
@@ -420,8 +354,8 @@ static int lua_mshell_submap(lua_State *L) {
          * type instead of coercing, and say so rather than skipping silently. */
         if (lua_type(L, -2) != LUA_TSTRING)
             return luaL_error(L, "submap '%s': keys must be key-name strings "
-                                 "(e.g. h = \"focus_left\"); got a %s key",
-                              name, luaL_typename(L, -2));
+                                 "(e.g. h = mshell.window.focus.left); got a "
+                                 "%s key", name, luaL_typename(L, -2));
 
         const char *key_str = lua_tostring(L, -2);
         DWORD vk = key_str ? key_name_to_vk(key_str) : 0;
@@ -429,44 +363,9 @@ static int lua_mshell_submap(lua_State *L) {
             return luaL_error(L, "submap '%s': unknown key '%s'", name,
                               key_str ? key_str : "?");
 
-        if (lua_isfunction(L, -1)) {
-            /*  key = function() ... end  */
-            lua_pushvalue(L, -1);
-            int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-            keymap_add_binding(km, 0, vk, ACTION_LUA_CALL, ref,
-                               NULL, NULL, NULL, NULL, NULL, term);
-        } else if (lua_isstring(L, -1)) {
-            /*  key = "action"  */
-            add_resolved_binding(L, km, 0, vk, lua_tostring(L, -1),
-                                 false, 0, NULL, NULL, NULL, NULL, term);
-        } else if (lua_istable(L, -1)) {
-            /*  key = {"action", payload}  — payload may itself be
-             *  {command, arguments} for spawn. */
-            int  t = lua_absindex(L, -1);
-            lua_rawgeti(L, t, 1);
-            const char *action_str = lua_isstring(L, -1) ? lua_tostring(L, -1)
-                                                         : NULL;
-            if (!action_str)
-                return luaL_error(L, "submap '%s': binding for '%s' must start "
-                                     "with an action name", name, key_str);
-
-            lua_rawgeti(L, t, 2);
-            bool        has_num; int num_arg;
-            const char *str_arg, *args_str, *cwd_str, *desc_str;
-            int pushed = read_payload(L, -1, &has_num, &num_arg,
-                                      &str_arg, &args_str, &cwd_str, &desc_str);
-
-            add_resolved_binding(L, km, 0, vk, action_str,
-                                 has_num, num_arg, str_arg, args_str, cwd_str,
-                                 desc_str, term);
-
-            lua_pop(L, pushed + 2);  /* payload parts + payload + action */
-        } else {
-            return luaL_error(L, "submap '%s': binding for '%s' must be an "
-                                 "action name, {action, payload}, or a "
-                                 "function; got %s",
-                              name, key_str, luaL_typename(L, -1));
-        }
+        char where[160];
+        snprintf(where, sizeof where, "submap '%s', key '%s'", name, key_str);
+        bind_any(L, km, 0, vk, -1, term, where);
 
         lua_pop(L, 1);  /* pop value, keep key for lua_next */
     }
@@ -483,7 +382,7 @@ static int lua_mshell_submap(lua_State *L) {
  * a persisting map is the usual choice so the leader stays until Escape.
  * =========================================================================== */
 static int lua_mshell_set_leader(lua_State *L) {
-    reject_at_runtime(L, "set_leader");
+    reject_at_runtime(L, "keys.leader");
     const char *name = luaL_checkstring(L, 1);
     KeyMap *km = find_keymap(name);
     if (!km)
@@ -656,26 +555,6 @@ static int lua_mshell_set_log_level(lua_State *L) {
 }
 
 /* ===========================================================================
- * mshell.set_start_desktop — REMOVED. The desktop you start on is a property of
- * that desktop, so it is declared where the rest of its properties are:
- *
- *   mshell.desktop_rule("term", { default = true })
- *
- * This stub exists to say that out loud. Without it the call raises "attempt to
- * call a nil value (field 'set_start_desktop')", the whole config is rejected,
- * and you are staring at the fallback keymap trying to work out which line
- * broke — for a config that was correct one release ago.
- * =========================================================================== */
-static int lua_mshell_set_start_desktop(lua_State *L) {
-    const char *name = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1)
-                                                     : "1";
-    return luaL_error(L, "set_start_desktop has been removed — the start "
-                         "desktop is a desktop rule now: "
-                         "mshell.desktop_rule(\"%s\", { default = true })",
-                      name);
-}
-
-/* ===========================================================================
  * mshell.desktop_rule(pattern, opts) — what a desktop does.
  *
  *   pattern — the desktop NAME this applies to, as a case-insensitive wildcard
@@ -717,7 +596,7 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  * restart puts you back here, not wherever you happened to be.
  * =========================================================================== */
 static int lua_mshell_desktop_rule(lua_State *L) {
-    reject_at_runtime(L, "desktop_rule");
+    reject_at_runtime(L, "desktop.rule");
     const char *pattern = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TTABLE);
 
@@ -1036,7 +915,7 @@ static int lua_mshell_set_min_window_size(lua_State *L) {
  *            covering the display, with no ring painted over its edges.
  * =========================================================================== */
 static int lua_mshell_rule(lua_State *L) {
-    reject_at_runtime(L, "rule");
+    reject_at_runtime(L, "window.rule");
     luaL_checktype(L, 1, LUA_TTABLE);
     const char *action_str = luaL_checkstring(L, 2);
 
@@ -1196,7 +1075,7 @@ static int lua_mshell_rule(lua_State *L) {
  * resolved) and so does a .lnk shortcut.
  * =========================================================================== */
 static int lua_mshell_spawn(lua_State *L) {
-    reject_at_runtime(L, "spawn");
+    reject_at_runtime(L, "exec.startup");
     const char *cmd  = luaL_checkstring(L, 1);
     const char *args = luaL_optstring(L, 2, NULL);
     const char *cwd  = luaL_optstring(L, 3, NULL);
@@ -1309,7 +1188,7 @@ static int lua_mshell_set_dim(lua_State *L) {
  * checkbox.
  * =========================================================================== */
 static int lua_mshell_set_mouse_tbl(lua_State *L) {
-    reject_at_runtime(L, "set_mouse");
+    reject_at_runtime(L, "mouse.setup");
     /* Bare boolean is the original form: dragging a TILED window onto another
      * swaps them. A tiled window cannot really be moved (the layout owns its
      * geometry), so the drag is interpreted rather than obeyed. */
@@ -1700,43 +1579,46 @@ static int lua_mshell_setenv(lua_State *L) {
 
 /* mshell.get_monitors() -> array of
  *   { x, y, width, height, work_x, work_y, work_width, work_height,
- *     dpi, scale, primary, focused }
+ *     dpi, scale, primary, focused, device, refresh, rotation, hdr }
  * Geometry is in physical pixels (mshell is per-monitor DPI aware); `scale` is
  * the convenience form of dpi/96. */
+static void push_monitor_fields(lua_State *L, int i) {
+    const Monitor *m   = &g.monitors[i];
+    UINT           dpi = monitor_dpi(i);
+
+    lua_createtable(L, 0, 16);
+    set_int (L, "x",           m->full.left);
+    set_int (L, "y",           m->full.top);
+    set_int (L, "width",       m->full.right  - m->full.left);
+    set_int (L, "height",      m->full.bottom - m->full.top);
+    set_int (L, "work_x",      m->work_area.left);
+    set_int (L, "work_y",      m->work_area.top);
+    set_int (L, "work_width",  m->work_area.right  - m->work_area.left);
+    set_int (L, "work_height", m->work_area.bottom - m->work_area.top);
+    set_int (L, "dpi",         (lua_Integer)dpi);
+    lua_pushnumber(L, (lua_Number)dpi / 96.0); lua_setfield(L, -2, "scale");
+    set_bool(L, "primary",     i == g.primary_monitor);
+    set_bool(L, "focused",     i == g.focused_monitor);
+
+    /* The device name is what monitor_rule matches on, so a config that
+     * wants to decide something per display can read it here rather than
+     * hard-coding "\\\\.\\DISPLAY2". `refresh` and `hdr` are read from the
+     * display itself, not from anything cached, so they stay true when the
+     * mode is changed outside mshell. hdr is nil when the panel cannot do
+     * it — which is a different answer from false, and worth keeping so. */
+    set_str(L, "device", m->device);
+    DisplayMode mode = {0};
+    if (display_current_mode(m->device, &mode))
+        set_int(L, "refresh", mode.refresh);
+    if (m->device[0]) set_int(L, "rotation", display_rotation(m->device));
+    int hdr = display_hdr_state(m->device);
+    if (hdr != HDR_UNSUPPORTED) set_bool(L, "hdr", hdr == HDR_ON);
+}
+
 static int lua_mshell_get_monitors(lua_State *L) {
     lua_createtable(L, g.monitor_count, 0);
-
     for (int i = 0; i < g.monitor_count; i++) {
-        const Monitor *m   = &g.monitors[i];
-        UINT           dpi = monitor_dpi(i);
-
-        lua_createtable(L, 0, 16);
-        set_int (L, "x",           m->full.left);
-        set_int (L, "y",           m->full.top);
-        set_int (L, "width",       m->full.right  - m->full.left);
-        set_int (L, "height",      m->full.bottom - m->full.top);
-        set_int (L, "work_x",      m->work_area.left);
-        set_int (L, "work_y",      m->work_area.top);
-        set_int (L, "work_width",  m->work_area.right  - m->work_area.left);
-        set_int (L, "work_height", m->work_area.bottom - m->work_area.top);
-        set_int (L, "dpi",         (lua_Integer)dpi);
-        lua_pushnumber(L, (lua_Number)dpi / 96.0); lua_setfield(L, -2, "scale");
-        set_bool(L, "primary",     i == g.primary_monitor);
-        set_bool(L, "focused",     i == g.focused_monitor);
-
-        /* The device name is what monitor_rule matches on, so a config that
-         * wants to decide something per display can read it here rather than
-         * hard-coding "\\\\.\\DISPLAY2". `refresh` and `hdr` are read from the
-         * display itself, not from anything cached, so they stay true when the
-         * mode is changed outside mshell. hdr is nil when the panel cannot do
-         * it — which is a different answer from false, and worth keeping so. */
-        set_str(L, "device", m->device);
-        DisplayMode mode = {0};
-        if (display_current_mode(m->device, &mode))
-            set_int(L, "refresh", mode.refresh);
-        int hdr = display_hdr_state(m->device);
-        if (hdr != HDR_UNSUPPORTED) set_bool(L, "hdr", hdr == HDR_ON);
-
+        push_monitor_fields(L, i);
         lua_rawseti(L, -2, i + 1);   /* Lua arrays are 1-based */
     }
     return 1;
@@ -1778,36 +1660,46 @@ static int lua_mshell_get_current_desktop(lua_State *L) {
     return 1;
 }
 
+static int lua_mshell_desktop_to_monitor(lua_State *L) {
+    if (!g.lua_running)
+        return luaL_error(L, "mshell.desktop_to_monitor can only be called at "
+                             "runtime, from a binding or a callback — no "
+                             "desktops exist while the config is loading. Use "
+                             "mshell.desktop_rule(name, { monitor = n }) there");
+
+    int slot, mon, mon_idx = 1;
+
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        const char *name_u8 = lua_tostring(L, 1);
+        wchar_t     name[DESKTOP_NAME_MAX];
+        u8_to_w(name_u8, name, DESKTOP_NAME_MAX);
+
+        slot = desktop_slot_by_name(name);
+        if (slot < 0)
+            return luaL_error(L, "desktop_to_monitor: no desktop named '%s' "
+                                 "exists right now", name_u8);
+        mon_idx = 2;
+    } else {
+        slot = desktop_current_slot();
+    }
+
+    mon = lua_isnoneornil(L, mon_idx) ? -1
+                                      : (int)luaL_checkinteger(L, mon_idx);
+    if (mon >= g.monitor_count)
+        return luaL_error(L, "desktop_to_monitor: monitor %d does not exist "
+                             "(%d attached)", mon, g.monitor_count);
+
+    lua_pushboolean(L, desktop_set_monitor(slot, mon));
+    return 1;
+}
+
 /* mshell.get_focused_window() -> table or nil:
  *   { title, class, process, path, floating, fullscreen, monitor, desktop }
  * `process` is the bare exe name, the same thing a rule's `process` matches. */
 static int lua_mshell_get_focused_window(lua_State *L) {
     HWND hwnd = desktop_get_focused();
     if (!hwnd || !IsWindow(hwnd)) { lua_pushnil(L); return 1; }
-
-    wchar_t title[256] = {0}, cls[256] = {0}, path[MAX_PATH] = {0};
-    GetWindowTextW(hwnd, title, 256);
-    GetClassNameW(hwnd, cls, 256);
-    window_process_path(hwnd, path, MAX_PATH);
-
-    const wchar_t *proc = path;
-    for (const wchar_t *p = path; *p; p++)
-        if (*p == L'\\' || *p == L'/') proc = p + 1;
-
-    lua_createtable(L, 0, 8);
-    set_str(L, "title",   title);
-    set_str(L, "class",   cls);
-    set_str(L, "process", proc);
-    set_str(L, "path",    path);
-
-    const ManagedWindow *mw = window_find(hwnd);
-    if (mw) {
-        set_bool(L, "floating",   mw->is_floating);
-        set_bool(L, "fullscreen", window_is_screen_fullscreen(mw));
-        set_int (L, "monitor",    mw->monitor);
-        const Desktop *d = desktop_by_id(mw->desktop_id);
-        if (d) set_str(L, "desktop", d->name);
-    }
+    push_window(L, hwnd);
     return 1;
 }
 
@@ -1846,7 +1738,7 @@ static int lua_mshell_log(lua_State *L) {
  * raising its own toasts. `height` still drives the type scale.
  * =========================================================================== */
 static int lua_mshell_set_bar(lua_State *L) {
-    reject_at_runtime(L, "set_bar");
+    reject_at_runtime(L, "bar.setup");
     luaL_checktype(L, 1, LUA_TTABLE);
 
     lua_getfield(L, 1, "enabled");
@@ -2181,33 +2073,7 @@ static void push_event_arg(lua_State *L, LuaEvent ev, HWND hwnd,
         return;
     }
 
-    /* Window events. Described the same way get_focused_window() does, so a
-     * handler can be written once and used for either. */
-    if (!hwnd || !IsWindow(hwnd)) { lua_pushnil(L); return; }
-
-    wchar_t title[256] = {0}, cls[256] = {0}, path[MAX_PATH] = {0};
-    GetWindowTextW(hwnd, title, 256);
-    GetClassNameW(hwnd, cls, 256);
-    window_process_path(hwnd, path, MAX_PATH);
-
-    const wchar_t *proc = path;
-    for (const wchar_t *p = path; *p; p++)
-        if (*p == L'\\' || *p == L'/') proc = p + 1;
-
-    lua_createtable(L, 0, 8);
-    set_str(L, "title",   title);
-    set_str(L, "class",   cls);
-    set_str(L, "process", proc);
-    set_str(L, "path",    path);
-
-    const ManagedWindow *mw = window_find(hwnd);
-    if (mw) {
-        set_bool(L, "floating",   mw->is_floating);
-        set_bool(L, "fullscreen", window_is_screen_fullscreen(mw));
-        set_int (L, "monitor",    mw->monitor);
-        const Desktop *d = desktop_by_id(mw->desktop_id);
-        if (d) set_str(L, "desktop", d->name);
-    }
+    push_window(L, (hwnd && IsWindow(hwnd)) ? hwnd : NULL);
 }
 
 void lua_fire(LuaEvent ev, HWND hwnd, const wchar_t *name) {
@@ -2246,64 +2112,771 @@ static void reject_at_runtime(lua_State *L, const char *fn) {
                       "loading, not from a binding or callback", fn);
 }
 
-/* ===========================================================================
- * Register all functions into the Lua VM
- * =========================================================================== */
+#define MSHELL_WINDOW_MT "mshell.Window"
+
+typedef struct { HWND hwnd; } LuaWindow;
+
+static void push_window(lua_State *L, HWND hwnd) {
+    if (!hwnd) { lua_pushnil(L); return; }
+    LuaWindow *w = (LuaWindow *)lua_newuserdatauv(L, sizeof *w, 0);
+    w->hwnd = hwnd;
+    luaL_setmetatable(L, MSHELL_WINDOW_MT);
+}
+
+static HWND to_window(lua_State *L, int idx) {
+    LuaWindow *w = (LuaWindow *)luaL_testudata(L, idx, MSHELL_WINDOW_MT);
+    return w ? w->hwnd : NULL;
+}
+
+static HWND opt_window(lua_State *L, int idx) {
+    if (lua_isnoneornil(L, idx)) return NULL;
+    HWND h = to_window(L, idx);
+    if (!h) luaL_argerror(L, idx, "expected a window");
+    return IsWindow(h) ? h : NULL;
+}
+
+static HWND check_window(lua_State *L, int idx) {
+    HWND h = to_window(L, idx);
+    if (!h) luaL_argerror(L, idx, "expected a window");
+    if (!IsWindow(h)) luaL_error(L, "that window is gone");
+    return h;
+}
+
+static int push_window_field(lua_State *L, HWND hwnd, const char *k) {
+    if (strcmp(k, "hwnd") == 0) {
+        lua_pushinteger(L, (lua_Integer)(intptr_t)hwnd);
+        return 1;
+    }
+    if (strcmp(k, "valid") == 0) {
+        lua_pushboolean(L, IsWindow(hwnd) != 0);
+        return 1;
+    }
+    if (!IsWindow(hwnd)) {
+        if (strcmp(k, "title") == 0 || strcmp(k, "class") == 0 ||
+            strcmp(k, "process") == 0 || strcmp(k, "path") == 0 ||
+            strcmp(k, "floating") == 0 || strcmp(k, "fullscreen") == 0 ||
+            strcmp(k, "monitor") == 0 || strcmp(k, "desktop") == 0) {
+            lua_pushnil(L);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(k, "title") == 0) {
+        wchar_t title[256] = {0};
+        GetWindowTextW(hwnd, title, 256);
+        push_wstr(L, title);
+        return 1;
+    }
+    if (strcmp(k, "class") == 0) {
+        wchar_t cls[256] = {0};
+        GetClassNameW(hwnd, cls, 256);
+        push_wstr(L, cls);
+        return 1;
+    }
+    if (strcmp(k, "process") == 0 || strcmp(k, "path") == 0) {
+        wchar_t path[MAX_PATH] = {0};
+        window_process_path(hwnd, path, MAX_PATH);
+        if (strcmp(k, "path") == 0) { push_wstr(L, path); return 1; }
+        const wchar_t *proc = path;
+        for (const wchar_t *p = path; *p; p++)
+            if (*p == L'\\' || *p == L'/') proc = p + 1;
+        push_wstr(L, proc);
+        return 1;
+    }
+
+    const ManagedWindow *mw = window_find(hwnd);
+    if (strcmp(k, "floating") == 0) {
+        lua_pushboolean(L, mw && mw->is_floating);
+        return 1;
+    }
+    if (strcmp(k, "fullscreen") == 0) {
+        lua_pushboolean(L, mw && window_is_screen_fullscreen(mw));
+        return 1;
+    }
+    if (strcmp(k, "monitor") == 0) {
+        if (mw) lua_pushinteger(L, mw->monitor); else lua_pushnil(L);
+        return 1;
+    }
+    if (strcmp(k, "desktop") == 0) {
+        const Desktop *d = mw ? desktop_by_id(mw->desktop_id) : NULL;
+        if (d) push_wstr(L, d->name); else lua_pushnil(L);
+        return 1;
+    }
+    if (strcmp(k, "managed") == 0) {
+        lua_pushboolean(L, mw != NULL);
+        return 1;
+    }
+    return 0;
+}
+
+static int lua_window_index(lua_State *L) {
+    HWND        hwnd = to_window(L, 1);
+    const char *k    = luaL_checkstring(L, 2);
+
+    if (push_window_field(L, hwnd, k)) return 1;
+
+    luaL_getmetatable(L, MSHELL_WINDOW_MT);
+    lua_getfield(L, -1, "methods");
+    lua_getfield(L, -1, k);
+    return 1;
+}
+
+static int lua_window_eq(lua_State *L) {
+    lua_pushboolean(L, to_window(L, 1) == to_window(L, 2));
+    return 1;
+}
+
+static int lua_window_tostring(lua_State *L) {
+    HWND    hwnd     = to_window(L, 1);
+    wchar_t title[80] = {0};
+    if (IsWindow(hwnd)) GetWindowTextW(hwnd, title, 80);
+    char t[240];
+    WideCharToMultiByte(CP_UTF8, 0, title, -1, t, sizeof t, NULL, NULL);
+    lua_pushfstring(L, "window(%p, \"%s\")", (void *)hwnd, t);
+    return 1;
+}
+
+static Action direction_action(lua_State *L, const char *dir, Action left,
+                               Action down, Action up, Action right) {
+    if (strcmp(dir, "left")  == 0) return left;
+    if (strcmp(dir, "down")  == 0) return down;
+    if (strcmp(dir, "up")    == 0) return up;
+    if (strcmp(dir, "right") == 0) return right;
+    luaL_error(L, "unknown direction '%s' (left, down, up or right)", dir);
+    return ACTION_NONE;
+}
+
+static void split_target_and_spec(lua_State *L, HWND *target, int *spec) {
+    if (lua_isnoneornil(L, 1) && lua_gettop(L) >= 2) {
+        *target = NULL;
+        *spec   = 2;
+    } else if (to_window(L, 1)) {
+        *target = opt_window(L, 1);
+        *spec   = 2;
+    } else {
+        *target = NULL;
+        *spec   = 1;
+    }
+}
+
+static int window_move_to_monitor(lua_State *L, HWND target, int stack_idx);
+
+static int lua_mshell_window_focus(lua_State *L) {
+    HWND h = check_window(L, 1);
+    window_focus(h);
+    return 0;
+}
+
+static int lua_mshell_window_move(lua_State *L) {
+    HWND target; int spec;
+    split_target_and_spec(L, &target, &spec);
+
+    if (lua_isstring(L, spec)) {
+        Action a = direction_action(L, lua_tostring(L, spec), ACTION_MOVE_LEFT,
+                                    ACTION_MOVE_DOWN, ACTION_MOVE_UP,
+                                    ACTION_MOVE_RIGHT);
+        execute_action_on(a, target, 0, NULL, NULL, NULL);
+        return 0;
+    }
+
+    luaL_checktype(L, spec, LUA_TTABLE);
+
+    lua_getfield(L, spec, "dir");
+    if (lua_isstring(L, -1)) {
+        Action a = direction_action(L, lua_tostring(L, -1), ACTION_MOVE_LEFT,
+                                    ACTION_MOVE_DOWN, ACTION_MOVE_UP,
+                                    ACTION_MOVE_RIGHT);
+        lua_pop(L, 1);
+        execute_action_on(a, target, 0, NULL, NULL, NULL);
+        return 0;
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, spec, "desktop");
+    if (lua_isstring(L, -1)) {
+        wchar_t *name = u8_to_w_dup(lua_tostring(L, -1));
+        lua_pop(L, 1);
+        if (!name) return luaL_error(L, "out of memory");
+        execute_action_on(ACTION_MOVE_TO_DESKTOP, target, 0, name, NULL, NULL);
+        free(name);
+        return 0;
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, spec, "monitor");
+    if (!lua_isnil(L, -1)) {
+        int rc = window_move_to_monitor(L, target, -1);
+        lua_pop(L, 1);
+        return rc;
+    }
+    lua_pop(L, 1);
+
+    return luaL_error(L, "mshell.window.move needs dir, desktop or monitor");
+}
+
+static int window_move_to_monitor(lua_State *L, HWND target, int stack_idx) {
+    int idx = stack_idx < 0 ? lua_gettop(L) : stack_idx;
+
+    if (lua_isstring(L, idx) && !lua_isnumber(L, idx)) {
+        const char *step = lua_tostring(L, idx);
+        Action a;
+        if (strcmp(step, "next") == 0)      a = ACTION_MOVE_TO_MONITOR_NEXT;
+        else if (strcmp(step, "prev") == 0) a = ACTION_MOVE_TO_MONITOR_PREV;
+        else return luaL_error(L, "monitor must be an index, \"next\" or \"prev\"");
+        execute_action_on(a, target, 0, NULL, NULL, NULL);
+        return 0;
+    }
+
+    int mon = (int)luaL_checkinteger(L, idx);
+    if (mon < 0 || mon >= g.monitor_count)
+        return luaL_error(L, "no monitor %d (there are %d)", mon,
+                          g.monitor_count);
+
+    HWND h = target ? target : desktop_get_focused();
+    ManagedWindow *mw = h ? window_find(h) : NULL;
+    if (!mw) return luaL_error(L, "no managed window to move");
+
+    window_follow_monitor(mw, mon);
+    tile_current();
+    return 0;
+}
+
+static int lua_mshell_window_to_monitor(lua_State *L) {
+    HWND target; int spec;
+    split_target_and_spec(L, &target, &spec);
+    return window_move_to_monitor(L, target, spec);
+}
+
+static int lua_mshell_window_resize(lua_State *L) {
+    HWND target; int spec;
+    split_target_and_spec(L, &target, &spec);
+
+    if (lua_isstring(L, spec)) {
+        Action a = direction_action(L, lua_tostring(L, spec),
+                                    ACTION_RESIZE_LEFT, ACTION_RESIZE_DOWN,
+                                    ACTION_RESIZE_UP, ACTION_RESIZE_RIGHT);
+        execute_action_on(a, target, 0, NULL, NULL, NULL);
+        return 0;
+    }
+
+    luaL_checktype(L, spec, LUA_TTABLE);
+    HWND h = target ? target : desktop_get_focused();
+    if (!h) return luaL_error(L, "no window to resize");
+
+    RECT r = {0};
+    if (!window_frame_rect(h, &r)) return luaL_error(L, "cannot read that window");
+
+    lua_getfield(L, spec, "x");      int x = (int)luaL_optinteger(L, -1, r.left);
+    lua_getfield(L, spec, "y");      int y = (int)luaL_optinteger(L, -1, r.top);
+    lua_getfield(L, spec, "width");  int w = (int)luaL_optinteger(L, -1, r.right - r.left);
+    lua_getfield(L, spec, "height"); int hh = (int)luaL_optinteger(L, -1, r.bottom - r.top);
+    lua_pop(L, 4);
+
+    window_set_pos(h, x, y, w, hh, 0);
+    return 0;
+}
+
+static int lua_mshell_window_float(lua_State *L) {
+    HWND target; int spec;
+    split_target_and_spec(L, &target, &spec);
+
+    HWND h = target ? target : desktop_get_focused();
+    if (!h) return luaL_error(L, "no window to float");
+
+    if (lua_isnoneornil(L, spec)) {
+        const ManagedWindow *mw = window_find(h);
+        lua_pushboolean(L, mw && mw->is_floating);
+        return 1;
+    }
+
+    window_set_floating(h, (bool)lua_toboolean(L, spec));
+    tile_current();
+    return 0;
+}
+
+static int lua_mshell_window_fullscreen(lua_State *L) {
+    HWND target; int spec;
+    split_target_and_spec(L, &target, &spec);
+
+    const char *mode = luaL_optstring(L, spec, "window");
+    Action a;
+    if (strcmp(mode, "window") == 0)       a = ACTION_FULLSCREEN;
+    else if (strcmp(mode, "content") == 0) a = ACTION_FULLSCREEN_CONTENT;
+    else if (strcmp(mode, "both") == 0)    a = ACTION_FULLSCREEN_BOTH;
+    else return luaL_error(L, "fullscreen mode must be \"window\", \"content\" "
+                              "or \"both\"");
+
+    execute_action_on(a, target, 0, NULL, NULL, NULL);
+    return 0;
+}
+
+static int lua_mshell_window_center(lua_State *L) {
+    HWND h = opt_window(L, 1);
+    if (!h) h = desktop_get_focused();
+    if (!h) return luaL_error(L, "no window to center");
+    window_center_float(h);
+    return 0;
+}
+
+static int lua_mshell_window_promote(lua_State *L) {
+    HWND h = opt_window(L, 1);
+    if (!h) h = desktop_get_focused();
+    if (!h) return luaL_error(L, "no window to promote");
+    window_promote(h);
+    tile_current();
+    return 0;
+}
+
+static bool window_matches_filter(lua_State *L, int fidx, HWND hwnd) {
+    if (fidx == 0) return true;
+
+    const ManagedWindow *mw = window_find(hwnd);
+
+    lua_getfield(L, fidx, "desktop");
+    if (lua_isstring(L, -1)) {
+        wchar_t want[DESKTOP_NAME_MAX];
+        u8_to_w(lua_tostring(L, -1), want, DESKTOP_NAME_MAX);
+        const Desktop *d = mw ? desktop_by_id(mw->desktop_id) : NULL;
+        if (!d || !desktop_name_eq(d->name, want)) { lua_pop(L, 1); return false; }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, fidx, "monitor");
+    if (lua_isinteger(L, -1)) {
+        if (!mw || mw->monitor != (int)lua_tointeger(L, -1)) { lua_pop(L, 1); return false; }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, fidx, "floating");
+    if (lua_isboolean(L, -1)) {
+        bool want = (bool)lua_toboolean(L, -1);
+        if (!mw || mw->is_floating != want) { lua_pop(L, 1); return false; }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, fidx, "class");
+    if (lua_isstring(L, -1)) {
+        wchar_t pat[256], cls[256] = {0};
+        u8_to_w(lua_tostring(L, -1), pat, 256);
+        GetClassNameW(hwnd, cls, 256);
+        if (!wildcard_match(pat, cls)) { lua_pop(L, 1); return false; }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, fidx, "process");
+    if (lua_isstring(L, -1)) {
+        wchar_t pat[MAX_PATH], path[MAX_PATH] = {0};
+        u8_to_w(lua_tostring(L, -1), pat, MAX_PATH);
+        window_process_path(hwnd, path, MAX_PATH);
+        const wchar_t *proc = path;
+        for (const wchar_t *p = path; *p; p++)
+            if (*p == L'\\' || *p == L'/') proc = p + 1;
+        if (!wildcard_match(pat, proc)) { lua_pop(L, 1); return false; }
+    }
+    lua_pop(L, 1);
+
+    return true;
+}
+
+static int lua_mshell_window_list(lua_State *L) {
+    int fidx = lua_istable(L, 1) ? 1 : 0;
+
+    lua_createtable(L, g.managed_count, 0);
+    int n = 0;
+    for (int i = 0; i < g.managed_count; i++) {
+        HWND h = g.managed[i].hwnd;
+        if (!h || !IsWindow(h)) continue;
+        if (!window_matches_filter(L, fidx, h)) continue;
+        push_window(L, h);
+        lua_rawseti(L, -2, ++n);
+    }
+    return 1;
+}
+
+static int lua_mshell_desktop_get(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    wchar_t     wname[DESKTOP_NAME_MAX];
+    u8_to_w(name, wname, DESKTOP_NAME_MAX);
+
+    int slot = desktop_slot_by_name(wname);
+    if (slot < 0) { lua_pushnil(L); return 1; }
+
+    lua_createtable(L, 0, 9);
+    push_desktop_fields(L, &g.desktops[slot]);
+    return 1;
+}
+
+static int lua_mshell_desktop_windows(lua_State *L) {
+    const Desktop *dt = NULL;
+    if (lua_isstring(L, 1)) {
+        wchar_t wname[DESKTOP_NAME_MAX];
+        u8_to_w(lua_tostring(L, 1), wname, DESKTOP_NAME_MAX);
+        int slot = desktop_slot_by_name(wname);
+        if (slot >= 0) dt = &g.desktops[slot];
+    } else {
+        dt = desktop_current();
+    }
+    if (!dt) { lua_createtable(L, 0, 0); return 1; }
+
+    lua_createtable(L, dt->count, 0);
+    int n = 0;
+    for (int i = 0; i < dt->count; i++) {
+        if (!dt->windows[i] || !IsWindow(dt->windows[i])) continue;
+        push_window(L, dt->windows[i]);
+        lua_rawseti(L, -2, ++n);
+    }
+    return 1;
+}
+
+static int lua_mshell_monitor_current(lua_State *L) {
+    int i = g.focused_monitor;
+    if (i < 0 || i >= g.monitor_count) { lua_pushnil(L); return 1; }
+    push_monitor_fields(L, i);
+    return 1;
+}
+
+static int lua_mshell_monitor_focus(lua_State *L) {
+    int mon = (int)luaL_checkinteger(L, 1);
+    if (mon < 0 || mon >= g.monitor_count)
+        return luaL_error(L, "no monitor %d (there are %d)", mon,
+                          g.monitor_count);
+    focus_monitor_at(mon);
+    return 0;
+}
+
+static int lua_mshell_layout_get(lua_State *L) {
+    const Desktop *dt = desktop_current();
+    lua_pushstring(L, layout_to_name(dt ? dt->layout : LAYOUT_TILING));
+    return 1;
+}
+
+/* idx may be 0, meaning "this call has no device argument" — 0 is not a legal
+ * Lua stack index and must never reach the API. */
+static const wchar_t *display_device_arg(lua_State *L, int idx, wchar_t *buf,
+                                         int cap) {
+    if (idx >= 1 && lua_isstring(L, idx)) {
+        u8_to_w(lua_tostring(L, idx), buf, cap);
+        return buf;
+    }
+    int i = g.focused_monitor;
+    if (i < 0 || i >= g.monitor_count) return NULL;
+    return g.monitors[i].device;
+}
+
+static int lua_mshell_display_modes(lua_State *L) {
+    wchar_t        buf[CCHDEVICENAME];
+    const wchar_t *dev = display_device_arg(L, 1, buf, CCHDEVICENAME);
+    if (!dev || !dev[0]) { lua_createtable(L, 0, 0); return 1; }
+
+    DisplayMode modes[128];
+    int         n = display_modes(dev, modes, 128);
+
+    lua_createtable(L, n, 0);
+    for (int i = 0; i < n; i++) {
+        lua_createtable(L, 0, 3);
+        set_int(L, "width",   modes[i].width);
+        set_int(L, "height",  modes[i].height);
+        set_int(L, "refresh", modes[i].refresh);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+static int lua_mshell_display_set_mode(lua_State *L) {
+    int            opts = lua_istable(L, 1) ? 1 : 2;
+    wchar_t        buf[CCHDEVICENAME];
+    const wchar_t *dev = display_device_arg(L, opts == 1 ? 0 : 1, buf,
+                                            CCHDEVICENAME);
+    if (!dev || !dev[0]) return luaL_error(L, "no display to set");
+
+    luaL_checktype(L, opts, LUA_TTABLE);
+    DisplayMode want = {0};
+    lua_getfield(L, opts, "width");   want.width   = (int)luaL_optinteger(L, -1, 0);
+    lua_getfield(L, opts, "height");  want.height  = (int)luaL_optinteger(L, -1, 0);
+    lua_getfield(L, opts, "refresh"); want.refresh = (int)luaL_optinteger(L, -1, 0);
+    lua_getfield(L, opts, "rotation");
+    int rotation = (int)luaL_optinteger(L, -1, ROTATE_KEEP);
+    lua_pop(L, 4);
+
+    lua_pushboolean(L, display_set_mode(dev, &want, rotation));
+    return 1;
+}
+
+static int lua_mshell_exec(lua_State *L) {
+    const char *cmd  = luaL_checkstring(L, 1);
+    const char *args = luaL_optstring(L, 2, NULL);
+    const char *cwd  = luaL_optstring(L, 3, NULL);
+
+    wchar_t *wcmd  = u8_to_w_dup(cmd);
+    wchar_t *wargs = (args && args[0]) ? u8_to_w_dup(args) : NULL;
+    wchar_t *wcwd  = (cwd  && cwd[0])  ? u8_to_w_dup(cwd)  : NULL;
+    if (!wcmd) { free(wargs); free(wcwd); return luaL_error(L, "out of memory"); }
+
+    bool ok = spawn_command(wcmd, wargs, wcwd, L"lua");
+    free(wcmd); free(wargs); free(wcwd);
+
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+static int window_method_action(lua_State *L, Action a) {
+    execute_action_on(a, check_window(L, 1), 0, NULL, NULL, NULL);
+    return 0;
+}
+
+static int lua_window_close(lua_State *L)    { return window_method_action(L, ACTION_CLOSE); }
+static int lua_window_kill(lua_State *L)     { return window_method_action(L, ACTION_KILL); }
+static int lua_window_minimize(lua_State *L) { return window_method_action(L, ACTION_MINIMIZE); }
+static int lua_window_restore(lua_State *L)  { return window_method_action(L, ACTION_RESTORE); }
+
+static const luaL_Reg window_methods[] = {
+    { "focus",      lua_mshell_window_focus },
+    { "move",       lua_mshell_window_move },
+    { "resize",     lua_mshell_window_resize },
+    { "float",      lua_mshell_window_float },
+    { "fullscreen", lua_mshell_window_fullscreen },
+    { "center",     lua_mshell_window_center },
+    { "promote",    lua_mshell_window_promote },
+    { "close",      lua_window_close },
+    { "kill",       lua_window_kill },
+    { "minimize",   lua_window_minimize },
+    { "restore",    lua_window_restore },
+    { NULL, NULL }
+};
+
+static int l_action_call(lua_State *L) {
+    int             si = (int)lua_tointeger(L, lua_upvalueindex(1));
+    const ApiEntry *e  = api_spec_at(si);
+    if (!e) return luaL_error(L, "unknown action");
+
+    if ((e->flags & API_CONFIG_ONLY) && g.lua_running)
+        return luaL_error(L, "mshell.%s can only be called while the config is "
+                             "loading, not from a binding or callback", e->path);
+    if ((e->flags & API_RUNTIME_ONLY) && !g.lua_running)
+        return luaL_error(L, "mshell.%s can only be called at runtime, from a "
+                             "binding or a callback", e->path);
+
+    HWND target = to_window(L, 1);
+    if (!(e->flags & API_TAKES_WINDOW)) target = NULL;
+    if (target && !IsWindow(target))    target = NULL;
+
+    int first = api_payload_index(e, to_window(L, 1) != NULL);
+
+    int      arg     = 0;
+    wchar_t *command = NULL;
+    if (e->flags & API_PAYLOAD_STR) {
+        command = u8_to_w_dup(luaL_checkstring(L, first));
+        if (!command) return luaL_error(L, "out of memory");
+    } else if (e->flags & API_PAYLOAD_NUM) {
+        arg = (int)luaL_optinteger(L, first, 1);
+    }
+
+    execute_action_on(e->action, target, arg, command, NULL, NULL);
+    free(command);
+    return 0;
+}
+
+typedef struct { const char *path; lua_CFunction fn; } ApiImpl;
+
+static const ApiImpl api_impl[] = {
+    { "keys.bind",                lua_mshell_bind },
+    { "keys.submap",              lua_mshell_submap },
+    { "keys.leader",              lua_mshell_set_leader },
+    { "keys.block_system",        lua_mshell_block_system_keys },
+
+    { "window.get",               lua_mshell_get_focused_window },
+    { "window.list",              lua_mshell_window_list },
+    { "window.rule",              lua_mshell_rule },
+    { "window.focus",             lua_mshell_window_focus },
+    { "window.move",              lua_mshell_window_move },
+    { "window.move.to_monitor",   lua_mshell_window_to_monitor },
+    { "window.resize",            lua_mshell_window_resize },
+    { "window.float",             lua_mshell_window_float },
+    { "window.fullscreen",        lua_mshell_window_fullscreen },
+    { "window.center",            lua_mshell_window_center },
+    { "window.promote",           lua_mshell_window_promote },
+    { "window.policy.float",      lua_mshell_set_float_policy },
+    { "window.policy.hide",       lua_mshell_set_hide_policy },
+    { "window.policy.fullscreen", lua_mshell_set_fullscreen_policy },
+    { "window.policy.placement",  lua_mshell_set_float_placement },
+    { "window.policy.minimize",   lua_mshell_set_minimize_policy },
+    { "window.min_size",          lua_mshell_set_min_window_size },
+    { "window.manage_owned",      lua_mshell_set_manage_owned },
+    { "window.float_on_top",      lua_mshell_set_float_on_top },
+
+    { "desktop.list",             lua_mshell_get_desktops },
+    { "desktop.current",          lua_mshell_get_current_desktop },
+    { "desktop.get",              lua_mshell_desktop_get },
+    { "desktop.windows",          lua_mshell_desktop_windows },
+    { "desktop.to_monitor",       lua_mshell_desktop_to_monitor },
+    { "desktop.rule",             lua_mshell_desktop_rule },
+    { "desktop.attach",           lua_mshell_set_attach },
+
+    { "monitor.list",             lua_mshell_get_monitors },
+    { "monitor.current",          lua_mshell_monitor_current },
+    { "monitor.focus",            lua_mshell_monitor_focus },
+    { "monitor.rule",             lua_mshell_monitor_rule },
+
+    { "display.modes",            lua_mshell_display_modes },
+    { "display.set_mode",         lua_mshell_display_set_mode },
+
+    { "layout.set",               lua_mshell_set_layout },
+    { "layout.get",               lua_mshell_layout_get },
+    { "layout.master.ratio",      lua_mshell_set_master_ratio },
+    { "layout.master.count",      lua_mshell_set_nmaster },
+    { "layout.gaps",              lua_mshell_set_gaps },
+    { "layout.smart_gaps",        lua_mshell_set_smart_gaps },
+
+    { "bar.setup",                lua_mshell_set_bar },
+    { "whichkey.setup",           lua_mshell_set_whichkey },
+    { "mouse.setup",              lua_mshell_set_mouse_tbl },
+    { "notify",                   lua_mshell_notify },
+    { "notify.setup",             lua_mshell_set_notify },
+
+    { "appearance.border",        lua_mshell_set_border },
+    { "appearance.background",    lua_mshell_set_background },
+    { "appearance.dim",           lua_mshell_set_dim },
+    { "appearance.animation",     lua_mshell_set_animation },
+    { "appearance.smart_borders", lua_mshell_set_smart_borders },
+    { "appearance.urgency",       lua_mshell_set_urgency },
+
+    { "exec",                     lua_mshell_exec },
+    { "exec.startup",             lua_mshell_spawn },
+    { "exec.setenv",              lua_mshell_setenv },
+
+    { "log",                      lua_mshell_log },
+    { "log.level",                lua_mshell_set_log_level },
+    { "log.verbose",              lua_mshell_set_verbose },
+
+    { "config.auto_reload",       lua_mshell_set_auto_reload },
+    { "config.update_check",      lua_mshell_set_update_check },
+
+    { "on",                       lua_mshell_on },
+    { NULL, NULL }
+};
+
+static lua_CFunction api_impl_for(const char *path) {
+    for (const ApiImpl *i = api_impl; i->path; i++)
+        if (strcmp(i->path, path) == 0) return i->fn;
+    return NULL;
+}
+
+static bool api_has_children(const char *path) {
+    size_t n = strlen(path);
+    for (const ApiEntry *e = api_spec; e->path; e++) {
+        if (strncmp(e->path, path, n) == 0 && e->path[n] == '.') return true;
+    }
+    return false;
+}
+
+static void api_push_parent(lua_State *L, int root, const char *path) {
+    lua_pushvalue(L, root);
+
+    const char *p = path;
+    for (;;) {
+        const char *dot = strchr(p, '.');
+        if (!dot) return;                     
+
+        lua_pushlstring(L, p, (size_t)(dot - p));
+        lua_pushvalue(L, -1);                 
+        lua_rawget(L, -3);                    
+        if (!lua_istable(L, -1)) {
+            lua_pop(L, 1);
+            lua_newtable(L);
+            lua_pushvalue(L, -1);             
+            lua_insert(L, -3);                
+            lua_rawset(L, -4);                
+        } else {
+            lua_remove(L, -2);                
+        }
+        lua_remove(L, -2);                    
+        p = dot + 1;
+    }
+}
+
+static void api_register_entry(lua_State *L, int root, int index) {
+    const ApiEntry *e = api_spec_at(index);
+
+    lua_CFunction impl = api_impl_for(e->path);
+    bool          is_action = (e->kind == API_ACTION);
+    bool          wants_table = (e->kind == API_NAMESPACE) ||
+                                (e->flags & API_CALLABLE) ||
+                                api_has_children(e->path);
+
+    if (!impl && !is_action && e->kind != API_NAMESPACE) {
+        log_err(L"[lua] api_spec: no implementation for mshell.%hs", e->path);
+        return;
+    }
+
+    api_push_parent(L, root, e->path);
+    const char *dot  = strrchr(e->path, '.');
+    const char *leaf = dot ? dot + 1 : e->path;
+
+    if (!wants_table) {
+        if (impl) {
+            lua_pushcfunction(L, impl);
+        } else {
+            lua_pushinteger(L, index);
+            lua_pushcclosure(L, l_action_call, 1);
+        }
+        lua_setfield(L, -2, leaf);
+        lua_pop(L, 1);
+        return;
+    }
+
+    lua_getfield(L, -1, leaf);
+    if (!lua_istable(L, -1)) { lua_pop(L, 1); lua_newtable(L); }
+
+    lua_newtable(L);                                   
+    if (is_action) {
+        lua_pushinteger(L, index);
+        lua_setfield(L, -2, MSHELL_SPEC_KEY);
+    }
+    if (impl || is_action) {
+        if (impl) lua_pushcfunction(L, impl);
+        else    { lua_pushinteger(L, index); lua_pushcclosure(L, l_action_call, 1); }
+        lua_pushcclosure(L, l_call_self, 1);
+        lua_setfield(L, -2, "__call");
+    }
+    lua_setmetatable(L, -2);
+
+    lua_setfield(L, -2, leaf);
+    lua_pop(L, 1);
+}
+
+static int lua_mshell_missing(lua_State *L) {
+    const char *k = lua_tostring(L, 2);
+    if (k) {
+        const char *now = api_removed_replacement(k);
+        if (now)
+            return luaL_error(L, "mshell.%s was removed — use mshell.%s", k, now);
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
 void lua_register_api(lua_State *L) {
-    static const luaL_Reg api[] = {
-        {"bind",            lua_mshell_bind},
-        {"submap",          lua_mshell_submap},
-        {"set_leader",      lua_mshell_set_leader},
-        {"set_gaps",        lua_mshell_set_gaps},
-        {"set_smart_gaps",  lua_mshell_set_smart_gaps},
-        {"set_smart_borders", lua_mshell_set_smart_borders},
-        {"set_border",      lua_mshell_set_border},
-        {"set_background",  lua_mshell_set_background},
-                {"set_bar",         lua_mshell_set_bar},
-{"set_whichkey",    lua_mshell_set_whichkey},
-        {"set_start_desktop", lua_mshell_set_start_desktop},
-        {"desktop_rule",    lua_mshell_desktop_rule},
-        {"set_master_ratio",lua_mshell_set_master_ratio},
-        {"set_nmaster",     lua_mshell_set_nmaster},
-        {"set_layout",      lua_mshell_set_layout},
-        {"set_float_policy",lua_mshell_set_float_policy},
-        {"set_hide_policy", lua_mshell_set_hide_policy},
-        {"set_fullscreen_policy",lua_mshell_set_fullscreen_policy},
-        {"set_float_placement",lua_mshell_set_float_placement},
-        {"set_attach",      lua_mshell_set_attach},
-        {"set_mouse",       lua_mshell_set_mouse_tbl},
-        {"set_animation",   lua_mshell_set_animation},
-        {"set_update_check",lua_mshell_set_update_check},
-        {"set_dim",         lua_mshell_set_dim},
-        {"set_manage_owned",lua_mshell_set_manage_owned},
-        {"set_float_on_top",lua_mshell_set_float_on_top},
-        {"set_min_window_size",lua_mshell_set_min_window_size},
-        {"set_auto_reload", lua_mshell_set_auto_reload},
-        {"set_verbose",     lua_mshell_set_verbose},
-        {"set_log_level",   lua_mshell_set_log_level},
-        {"block_system_keys",lua_mshell_block_system_keys},
-        {"rule",            lua_mshell_rule},
-        {"spawn",           lua_mshell_spawn},
-        {"setenv",          lua_mshell_setenv},
-        {"set_urgency",     lua_mshell_set_urgency},
-        {"monitor_rule",    lua_mshell_monitor_rule},
-        {"set_minimize_policy", lua_mshell_set_minimize_policy},
-        {"notify",          lua_mshell_notify},
-        {"set_notify",      lua_mshell_set_notify},
-        {"log",             lua_mshell_log},
-        {"on",              lua_mshell_on},
+    luaL_newmetatable(L, MSHELL_WINDOW_MT);
+    lua_pushcfunction(L, lua_window_index);    lua_setfield(L, -2, "__index");
+    lua_pushcfunction(L, lua_window_eq);       lua_setfield(L, -2, "__eq");
+    lua_pushcfunction(L, lua_window_tostring); lua_setfield(L, -2, "__tostring");
+    lua_newtable(L);
+    for (const luaL_Reg *m = window_methods; m->name; m++) {
+        lua_pushcfunction(L, m->func);
+        lua_setfield(L, -2, m->name);
+    }
+    lua_setfield(L, -2, "methods");
+    lua_pop(L, 1);
 
-        /* --- state queries (see the note above their definitions: only the
-         *     monitor list is populated during the FIRST config load) --- */
-        {"get_monitors",        lua_mshell_get_monitors},
-        {"get_desktops",        lua_mshell_get_desktops},
-        {"get_current_desktop", lua_mshell_get_current_desktop},
-        {"get_focused_window",  lua_mshell_get_focused_window},
+    lua_newtable(L);
+    int root = lua_gettop(L);
+    for (int i = 0; i < api_spec_count(); i++) api_register_entry(L, root, i);
 
-        {NULL, NULL}
-    };
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_mshell_missing);
+    lua_setfield(L, -2, "__index");
+    lua_setmetatable(L, root);
 
-    /* Register all functions into the global "mshell" table */
-    luaL_newlib(L, api);
     lua_setglobal(L, "mshell");
 }

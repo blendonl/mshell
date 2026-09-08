@@ -14,7 +14,7 @@
       1. Win+key chords     — hold Win and press a key (Win+h, Win+Shift+Return…).
                               Instant, exactly as before.
       2. The leader mode    — TAP Win on its own (press and release, nothing held)
-                              to enter the sub-map named by mshell.set_leader
+                              to enter the sub-map named by mshell.keys.leader
                               (below we point it at "normal"). From there bare
                               keys do everything: h/j/k/l focus, and w/r/d/o open
                               the sub-maps. Tap Win again (or Esc) to leave.
@@ -45,7 +45,7 @@
     name you never listed and get an empty desktop for it.
 
     What a desktop DOES — which app opens on it, whether its windows float, its
-    layout, which monitor it lives on — is a mshell.desktop_rule.
+    layout, which monitor it lives on — is a mshell.desktop.rule.
 --]]
 
 local mod  = "LWin"
@@ -137,15 +137,15 @@ local kovaaks = "steam://rungameid/824270"
 ----------------------------------------------------------------------
 -- Appearance
 ----------------------------------------------------------------------
-mshell.set_gaps(6, 6)               -- inner gap (between windows), outer gap (screen edge)
--- mshell.set_smart_gaps(true)      -- drop gaps when a monitor has a single window
-mshell.set_border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
--- mshell.set_smart_borders(true)   -- hide the ring when a monitor shows a single
+mshell.layout.gaps(6, 6)            -- inner (between windows), outer (screen edge)
+-- mshell.layout.smart_gaps(true)      -- drop gaps when a monitor has a single window
+mshell.appearance.border(2, 0xffffff)      -- focused-window ring (width, 0xRRGGBB)
+-- mshell.appearance.smart_borders(true)   -- hide the ring when a monitor shows a single
                                     -- window: nothing to tell apart, so nothing to
                                     -- point at. Counts floats too, and monocle
                                     -- (which shows one window) counts as one.
-mshell.set_background(0x000000)     -- solid desktop backdrop color
-mshell.set_master_ratio(0.60)
+mshell.appearance.background(0x000000)     -- solid desktop backdrop color
+mshell.layout.master.ratio(0.60)
 
 -- Status bar. Two modes, same content in two shapes:
 --
@@ -157,8 +157,8 @@ mshell.set_master_ratio(0.60)
 --               live notifications stacked under each other. It reserves
 --               nothing and floats over the windows (click-through), and it
 --               follows the focus between monitors rather than appearing on
---               all of them. Bind `toggle_bar` to dismiss it when it is in the
---               way.
+--               all of them. Bind `mshell.bar.toggle` to dismiss it when it is
+--               in the way.
 --
 -- `height` sizes the strip in top_bar mode and the type scale in both.
 --
@@ -167,7 +167,7 @@ mshell.set_master_ratio(0.60)
 -- nothing but the desktop list. "notifications" applies to floating mode only
 -- — a one-line strip has nowhere to wrap a message — and with it on the panel
 -- becomes the surface mshell's messages appear on instead of its own toasts.
-mshell.set_bar({
+mshell.bar.setup({
     enabled  = true,
     mode     = "top_bar",    -- or "floating"
     position = "top",        -- or "bottom"; top_bar mode only
@@ -181,7 +181,7 @@ mshell.set_bar({
 
 -- Show/hide the bar without a reload — mostly for floating mode, where the
 -- panel sits over the middle of the screen:
--- mshell.bind({"win"}, "b", "toggle_bar")
+-- mshell.keys.bind({"win"}, "b", mshell.bar.toggle)
 
 -- Submap hint ("which-key"): when you enter a submap (Win+r, Win+x, …) a small
 -- panel lists that submap's keys and what they do. On by default; this call
@@ -189,7 +189,7 @@ mshell.set_bar({
 --
 -- Every pixel value here is a DESIGN pixel at 96 DPI and is scaled for the
 -- monitor the panel appears on, so one number is right on every display.
-mshell.set_whichkey({
+mshell.whichkey.setup({
     enabled = true,
     delay   = 150,          -- ms before it appears; 0 = show instantly
 
@@ -234,8 +234,8 @@ mshell.set_whichkey({
 
 -- How much goes to %LOCALAPPDATA%\mshell\mshell.log (and DebugView). The file
 -- is appended to and rotates at 5 MB, so raising this is not a commitment.
--- mshell.set_log_level("debug")    -- error | warn | info (default) | debug | trace
--- mshell.set_verbose(true)         -- the older spelling of set_log_level("debug")
+-- mshell.log.level("debug")    -- error | warn | info (default) | debug | trace
+-- mshell.log.verbose(true)         -- the older spelling of set_log_level("debug")
 
 ----------------------------------------------------------------------
 -- Auto-reload
@@ -243,7 +243,7 @@ mshell.set_whichkey({
 -- mshell watches this file's folder and reloads a quarter-second after the
 -- last write, so saving in your editor applies the config. Rollback still
 -- applies: a half-saved or broken file leaves the running config untouched.
--- mshell.set_auto_reload(false)    -- reload only on Win+Shift+R
+-- mshell.config.auto_reload(false)    -- reload only on Win+Shift+R
 
 ----------------------------------------------------------------------
 -- Mouse
@@ -275,7 +275,7 @@ mshell.set_whichkey({
 --                 you play anything, and the reason this knob is here.
 --   swap_buttons  left/right primary button.
 --
--- mshell.set_mouse({
+-- mshell.mouse.setup({
 --     drag_swap    = true,
 --     follow       = false,
 --     mod_drag     = true,
@@ -287,21 +287,22 @@ mshell.set_whichkey({
 ----------------------------------------------------------------------
 -- Tiling policy
 ----------------------------------------------------------------------
-mshell.set_layout("tiling")         -- default layout: tiling|monocle|grid|spiral|centered|bstack|columns
-mshell.set_nmaster(1)               -- windows in the master area
-mshell.set_attach("end")            -- where new windows land: end|master|after
+-- default layout: tiling|monocle|grid|spiral|centered|bstack|columns
+mshell.layout.set("tiling")
+mshell.layout.master.count(1)               -- windows in the master area
+mshell.desktop.attach("end")            -- where new windows land: end|master|after
 
 -- Force EVERY window into the grid — "float" rules are downgraded to "manage"
 -- and Win+f becomes a no-op, so nothing is ever stacked on top of a tiled
 -- window. Uncomment to guarantee a fully-tiled desktop:
--- mshell.set_float_policy("never")
+-- mshell.window.policy.float("never")
 
 -- Floating windows stay above the tiled grid whatever you focus — they are put
 -- in Windows' always-on-top band, so no other window can cover one (mshell's
 -- own status bar and a fullscreen window still do). Turn this off to make a
 -- float an ordinary window in the stack, which sinks behind whatever you focus
 -- next:
--- mshell.set_float_on_top(false)
+-- mshell.window.float_on_top(false)
 
 -- Where a floating window goes. A float is the window you are looking at — the
 -- one deliberately kept out of the grid — so by default mshell centres it on
@@ -310,17 +311,17 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- float = true) and one Win+f just took out of the grid. Position only: the
 -- size stays the app's own, clamped to the monitor. "none" restores the old
 -- behaviour of never moving a float:
--- mshell.set_float_placement("none")
+-- mshell.window.policy.placement("none")
 --
 -- Per app, either way, in the rule's opts: `center = false` leaves that one
 -- app's windows alone, `center = true` centres them under a config that set
 -- "none". A rule with an explicit `geometry` already overrides both.
 
 -- Also tile owned/dialog windows (aggressive — modal dialogs tile poorly):
--- mshell.set_manage_owned(true)
+-- mshell.window.manage_owned(true)
 
 -- Ignore windows smaller than this (default 120x80):
--- mshell.set_min_window_size(120, 80)
+-- mshell.window.min_size(120, 80)
 
 -- How a window is taken OFF the screen — for a desktop you are not on, for
 -- monocle's unfocused windows, for a stowed scratchpad.
@@ -338,14 +339,14 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 --           every desktop switch until you restart it.
 --
 -- Only worth changing if cloaking misbehaves for some app you use:
--- mshell.set_hide_policy("hide")
+-- mshell.window.policy.hide("hide")
 
 -- Notice windows that flash for attention, and mark them urgent. OFF by
 -- default, and deliberately: it costs a hook on EVENT_OBJECT_STATECHANGE, which
 -- fires for every control on the system. Until this is on, nothing is ever
--- urgent and the `jump_urgent` key in the desktop sub-map (leader d u) has
+-- urgent and the `window.urgent.jump` key in the desktop sub-map (leader d u) has
 -- nothing to jump to — uncomment if you want that key to do something:
--- mshell.set_urgency(true)
+-- mshell.appearance.urgency(true)
 
 ----------------------------------------------------------------------
 -- Fullscreen
@@ -356,26 +357,28 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- and resizes itself to the display). Three keybindable actions, each its own
 -- toggle; pressing a different one switches modes directly:
 --
---   fullscreen          the window covers its monitor, edge to edge. The app is
---                       never told anything — its ordinary UI is just as big as
---                       the screen. For apps with no fullscreen mode of their own.
---   fullscreen_content  the window stays pinned to its tile, so when the app
---                       fullscreens itself the video fills THE TILE, not the
---                       screen — fullscreen "inside" the window.
---   fullscreen_both     the window covers the monitor AND mshell stops policing
---                       its geometry, so the app's own fullscreen covers the
---                       display, exactly as it would outside a tiling WM.
+--   window.fullscreen.window   the window covers its monitor, edge to edge. The
+--                              app is never told anything — its ordinary UI is
+--                              just as big as the screen. For apps with no
+--                              fullscreen mode of their own.
+--   window.fullscreen.content  the window stays pinned to its tile, so when the
+--                              app fullscreens itself the video fills THE TILE,
+--                              not the screen — fullscreen "inside" the window.
+--   window.fullscreen.both     the window covers the monitor AND mshell stops
+--                              policing its geometry, so the app's own
+--                              fullscreen covers the display, exactly as it
+--                              would outside a tiling WM.
 --
 -- This policy decides what an app that fullscreens itself gets when you haven't
 -- given its window a mode. "contain" (the default) keeps it in its tile;
 -- "monitor" hands it the display and puts it back in the layout the moment it
 -- leaves fullscreen — so YouTube's button behaves the way it does everywhere else.
--- mshell.set_fullscreen_policy("monitor")
+-- mshell.window.policy.fullscreen("monitor")
 
 ----------------------------------------------------------------------
 -- Monitors
 ----------------------------------------------------------------------
--- mshell.monitor_rule(which, opts) says two different kinds of thing about one
+-- mshell.monitor.rule(which, opts) says two different kinds of thing about one
 -- display: how mshell TILES it, and what the display itself is DOING.
 --
 --   which          a device-name pattern ("*DISPLAY2") or a 0-based index.
@@ -391,37 +394,76 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 --   -- what the display is doing (this is the monitor, not the window manager)
 --   resolution     {2560, 1440} or "2560x1440"
 --   refresh        165           -- Hz
+--   rotation       "portrait"    -- or 0 / 90 / 180 / 270 degrees clockwise;
+--                                -- "landscape" (0), "portrait" (90),
+--                                -- "landscape_flipped", "portrait_flipped"
 --   hdr            true | false  -- HDR / advanced colour
 --
+--   -- where it sits among the others
+--   primary        true          -- make this the primary display
+--   position       {3840, 0}     -- where its top-left corner goes
+--
 -- RUN `mshell.exe --displays` FIRST. It prints each attached display's device
--- name, its current mode, whether it can do HDR, and every mode it will
--- actually accept — which is what these three fields have to be written
--- against. A mode the panel cannot show is refused with a line in the log and
--- the display is left alone; it never blanks your screen.
+-- name, its current mode and rotation, whether it can do HDR, and every mode it
+-- will actually accept — which is what these fields have to be written against.
+-- A mode the panel cannot show is refused with a line in the log and the
+-- display is left alone; it never blanks your screen.
 --
--- Resolution and refresh are applied at startup, on every reload, and to a
--- monitor you plug in mid-session — but NOT when you change the mode yourself
--- from Windows' display settings, which mshell deliberately leaves standing.
--- They are also session-only: Windows' own stored display configuration is
--- never written, so booting without mshell gives you your normal mode back.
--- HDR is the exception — it is a persistent system setting and there is no
--- transient form of it.
+-- `resolution` ALWAYS names the panel's own unrotated size, and so does every
+-- mode `--displays` prints. Rotation is a separate axis on top of it: a
+-- 2560x1440 panel with rotation = "portrait" gives you a 1440x2560 desktop, and
+-- the SAME rule is still right after you turn it back. Windows states it the
+-- other way round — its display settings show a rotated panel as 1440x2560 —
+-- so do not copy that number in here.
 --
--- mshell.monitor_rule("*DISPLAY1", {
+-- Resolution, refresh and rotation are applied at startup, on every reload, and
+-- to a monitor you plug in mid-session — but NOT when you change the mode
+-- yourself from Windows' display settings, which mshell deliberately leaves
+-- standing. They are also session-only: Windows' own stored display
+-- configuration is never written, so booting without mshell gives you your
+-- normal mode and orientation back.
+--
+-- TWO OF THESE PERSIST, and cannot be otherwise. `hdr` is a Windows setting
+-- with no transient form at all. `primary` and `position` are one operation on
+-- the whole desktop rather than a setting on one screen, and batching the
+-- displays into a single change is only offered alongside a registry write, so
+-- an arrangement mshell sets is the arrangement Windows keeps. Booting without
+-- mshell gives you back your resolution, refresh and rotation — but not these.
+--
+-- `position` is RELATIVE, not absolute. Windows keeps the primary display at
+-- (0,0) and states every other one from there, so mshell resolves the
+-- positions you give, then slides the whole arrangement until the primary sits
+-- on the origin. That is why "make the right-hand monitor primary" moves both
+-- of them, and why you can write the coordinates from whichever corner you find
+-- easiest to think in. `--displays` prints each display's current position in
+-- the same `+x+y` form.
+--
+-- Nothing is touched unless the arrangement you asked for differs from the one
+-- you have, so a rule that is already satisfied costs nothing on reload. If any
+-- part of the change is refused, the whole arrangement is rolled back rather
+-- than half-applied.
+--
+-- The right-hand 4K becomes primary, with the laptop panel to its left:
+-- mshell.monitor.rule("*DISPLAY2", { primary = true, position = { 0, 0 } })
+-- mshell.monitor.rule("*DISPLAY1", { position = { -3840, 0 } })
+--
+-- mshell.monitor.rule("*DISPLAY1", {
 --     resolution = "2560x1440",
 --     refresh    = 165,
 --     hdr        = true,
 --     master_ratio = 0.62,      -- and its tiling habits, in the same rule
 -- })
 --
--- A vertical secondary that always wants columns and nothing else changed:
--- mshell.monitor_rule("*DISPLAY2", { layout = "columns" })
+-- A secondary stood on its end, which then naturally wants columns:
+-- mshell.monitor.rule("*DISPLAY2", { rotation = "portrait", layout = "columns" })
 --
 -- Rules layer like desktop rules: every one that matches applies, in order,
 -- each overwriting only the fields it names.
 --
--- The two bindable display actions are down in the keybinds section:
--- `toggle_hdr` and `cycle_refresh`, both acting on the FOCUSED monitor.
+-- The bindable display actions are down in the keybinds section:
+-- `display.hdr.toggle`, `display.refresh.cycle`, `display.rotation.cycle` and
+-- `display.portrait.toggle`, all acting on the
+-- FOCUSED monitor.
 
 ----------------------------------------------------------------------
 -- Desktops (dynamic, addressed by name)
@@ -431,10 +473,9 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- on it. "1" and "web" are both just names — a number is not an index into
 -- anything, which is why Win+1 goes to a desktop literally called "1".
 --
---   mshell.desktop_rule("1", { default = true })       -- the one you land on
---   mshell.desktop_rule("1", { default = "always" })   -- ...even after a restart
+--   mshell.desktop.rule("1", { default = true })       -- the one you land on
 --
--- So `switch_desktop "scratch"` always works, whether or not "scratch" appears
+-- So `mshell.desktop.focus("scratch")` always works, whether or not it appears
 -- anywhere in this file. What this section configures is the desktops you want
 -- a KEY and a RULE for.
 -- ---------------------------------------------------------------------
@@ -442,18 +483,18 @@ mshell.set_attach("end")            -- where new windows land: end|master|after
 -- ---------------------------------------------------------------------
 -- Each row gets you two things at once:
 --
---   name   the desktop's name, as switch_desktop/move_to_desktop take it.
+--   name   the desktop's name, as desktop.focus / window.move.to_desktop take it.
 --   key    one bare key that addresses this desktop from BOTH desktop submaps:
 --          leader g <key> switches to it, leader m <key> sends the focused
 --          window to it. Defined once, so the two maps can never drift apart.
---   rule   optional table passed straight to mshell.desktop_rule — see the
+--   rule   optional table passed straight to mshell.desktop.rule — see the
 --          rules block under the table for what goes in it.
 --
 -- To add a desktop: add a row (or don't — switch to the name and it exists).
 -- A row whose app path could not be resolved (not installed, or the env var is
 -- missing) quietly loses just its auto-launch; the desktop and its keys stay.
 local desktops = {
-    -- No `app` on purpose: the terminal is started by mshell.spawn at the
+    -- No `app` on purpose: the terminal is started by mshell.exec.startup at the
     -- bottom of this file instead. Setting both would open TWO terminals at
     -- startup, not one — see the note in the Startup section for why they don't
     -- cancel out. To flip it the other way, add `app = "alacritty.exe"` to the
@@ -461,11 +502,9 @@ local desktops = {
     -- whenever you close the last one and come back, which the spawn can't do.
     --
     -- `default` marks the desktop mshell starts on — the only one that exists
-    -- then. On its own it decides a FIRST run only: mshell remembers where you
-    -- were (session.txt, next to this file) and a restart returns you there, so
-    -- restarting the shell doesn't move you. Write `default = "always"` to
-    -- overrule that and land here every time. Claim it twice and the last row
-    -- wins; claim it nowhere and you start on "1".
+    -- then, and the one every start lands on: nothing about where you were is
+    -- remembered, so a restart brings you back here. Claim it twice and the
+    -- last row wins; claim it nowhere and you start on "1".
     { name = "term",    key = "t", rule = { default = true       } }, -- leader g t
     { name = "web",     key = "b", rule = { app = "firefox.exe"  } }, -- leader g b
     -- `app` takes a bare command, or {command, arguments} when the program
@@ -497,37 +536,39 @@ local desktops = {
 -- ---------------------------------------------------------------------
 -- Desktop rules — what a desktop DOES
 -- ---------------------------------------------------------------------
--- mshell.desktop_rule(pattern, opts). `pattern` is a desktop name, or a
+-- mshell.desktop.rule(pattern, opts). `pattern` is a desktop name, or a
 -- wildcard over names ("game-*", "*"). Every field is optional:
 --
---   default      = true           the desktop mshell starts on. Needs a real
---                                 name, not a pattern; the last rule to claim
---                                 it wins. `default = "always"` also beats the
---                                 desktop the session remembers you were on.
+--   default      = true           the desktop mshell starts on, every start.
+--                                 Needs a real name, not a pattern; the last
+--                                 rule to claim it wins.
 --   app          = "firefox.exe"  open this whenever you enter the desktop and
 --                                 it's empty — a desktop that IS your browser
 --                                 rather than one you have to remember to put a
 --                                 browser on. Close it, come back, it reopens.
 --   float        = true           windows opened here start floating instead of
---                                 tiled. toggle_float still works per window.
+--                                 tiled. window.float.toggle still works per window.
 --   layout       = "monocle"      this desktop's layout, overriding set_layout.
 --   master_ratio = 0.6            master area size for this desktop, 0.2 .. 0.9
 --   nmaster      = 1              windows in this desktop's master area
 --   monitor      = 1              pin the desktop to a display (0-based): its
 --                                 windows tile there and switching to it takes
---                                 the focus there.
+--                                 the focus there. The `desktop.to_monitor`
+--                                 action and mshell.desktop.to_monitor() move
+--                                 one at runtime, and what they set outranks
+--                                 this until you clear it with -1.
 --
 -- Rules LAYER. Every rule whose pattern matches is applied in the order written,
 -- and each overrides only the fields it names — so a "*" rule sets the house
 -- style and a specific one adjusts a field or two:
 --
---   mshell.desktop_rule("*",       { layout = "tiling"  })
---   mshell.desktop_rule("scratch", { float  = true      })
+--   mshell.desktop.rule("*",       { layout = "tiling"  })
+--   mshell.desktop.rule("scratch", { float  = true      })
 --
 -- They're re-applied on every reload, so editing one takes effect on desktops
 -- that already exist.
 for _, d in ipairs(desktops) do
-    if d.rule then mshell.desktop_rule(d.name, d.rule) end
+    if d.rule then mshell.desktop.rule(d.name, d.rule) end
 end
 
 -- Expand the table into the key tables for the two desktop submaps. The submaps
@@ -545,8 +586,11 @@ for _, d in ipairs(desktops) do
                    d.name .. "' shadows the earlier desktop in the go/move maps")
     end
 
-    go_keys[d.key]   = {"switch_desktop",  d.name}
-    move_keys[d.key] = {"move_to_desktop", d.name}
+    local name = d.name
+    go_keys[d.key]   = { function() mshell.desktop.focus(name) end,
+                         desc = name }
+    move_keys[d.key] = { function() mshell.window.move.to_desktop(name) end,
+                         desc = "→ " .. name }
 end
 
 -- The numbered desktops work in both maps too (leader g 3 goes to the desktop
@@ -555,18 +599,22 @@ end
 -- go there. Digits can't collide with the keys above unless you give a desktop
 -- a digit for a key.
 for i = 1, 9 do
-    go_keys[tostring(i)]   = {"switch_desktop",  tostring(i)}
-    move_keys[tostring(i)] = {"move_to_desktop", tostring(i)}
+    local name = tostring(i)
+    go_keys[name]   = { function() mshell.desktop.focus(name) end,
+                        desc = name }
+    move_keys[name] = { function() mshell.window.move.to_desktop(name) end,
+                        desc = "→ " .. name }
 end
-go_keys.Tab = "last_desktop"    -- leader g Tab — bounce to where you came from
+-- leader g Tab — bounce to where you came from
+go_keys.Tab = mshell.desktop.focus.last
 
 -- [ and ] step through the desktops that exist RIGHT NOW, in name order
 -- (numbers first, then words). This is how you get back to a desktop you
 -- created on the fly and never gave a key to. Deliberately not n/p — `n` is the
 -- notes desktop's key, and a desktop key must win in the map that is for
 -- desktop keys.
-go_keys["]"] = "next_desktop"
-go_keys["["] = "prev_desktop"
+go_keys["]"] = mshell.desktop.focus.next
+go_keys["["] = mshell.desktop.focus.prev
 
 ----------------------------------------------------------------------
 -- Submaps
@@ -579,38 +627,38 @@ go_keys["["] = "prev_desktop"
 -- leaves). h/l adjust the master area; j/k grow/shrink the focused window.
 -- To leave with a different key instead of Esc, add e.g. `exit = "q"` to the
 -- opts table — a custom exit key replaces Esc.
-mshell.submap("resize", {
-    h     = "dec_master",
-    l     = "inc_master",
-    j     = "dec_cfact",
-    k     = "inc_cfact",
-    ["0"] = "reset_cfact",
+mshell.keys.submap("resize", {
+    h = mshell.layout.master.ratio.shrink,
+    l = mshell.layout.master.ratio.grow,
+    j = mshell.layout.cfact.shrink,
+    k = mshell.layout.cfact.grow,
+    ["0"] = mshell.layout.cfact.reset,
 }, { persist = true })
 
 -- Window management sub-map (one-shot — one action, then back to root)
-mshell.submap("window", {
-    c     = "close",
-    k     = "kill",
-    f     = "toggle_float",
-    Space = "promote_master",
+mshell.keys.submap("window", {
+    c = mshell.window.close,
+    k = mshell.window.kill,
+    f = mshell.window.float.toggle,
+    Space = mshell.layout.master.promote,
     -- Tab is the window-level twin of the desktop map's Tab: back to the window
     -- you were on before this one, and again to come back. o pins a floating
     -- window over the tiled grid (o for "on top"); toggling off demotes it.
-    Tab   = "last_window",
-    o     = "toggle_always_on_top",
+    Tab = mshell.window.focus.last,
+    o = mshell.window.on_top.toggle,
     -- fullscreen (see the Fullscreen section above): w = the WINDOW fills the
     -- monitor, i = the app's own fullscreen stays INSIDE the window, a = both
-    w     = "fullscreen",
-    i     = "fullscreen_content",
-    a     = "fullscreen_both",
+    w = mshell.window.fullscreen.window,
+    i = mshell.window.fullscreen.content,
+    a = mshell.window.fullscreen.both,
     -- layouts
-    t     = "layout_tiling",
-    m     = "layout_monocle",
-    g     = "layout_grid",
-    s     = "layout_spiral",
-    e     = "layout_centered",
-    b     = "layout_bstack",
-    n     = "layout_columns",
+    t = mshell.layout.tiling,
+    m = mshell.layout.monocle,
+    g = mshell.layout.grid,
+    s = mshell.layout.spiral,
+    e = mshell.layout.centered,
+    b = mshell.layout.bstack,
+    n = mshell.layout.columns,
 })
 
 -- Desktop sub-map (persisting — cycle focus within the current desktop and stay
@@ -619,43 +667,48 @@ mshell.submap("window", {
 -- u goes to whatever asked for attention, WHEREVER it is — including a desktop
 -- you are not on, which is the case that flag exists for: a window that flashes
 -- its taskbar button has no taskbar to flash under mshell, so this is how you
--- find it. It needs mshell.set_urgency(true) (commented out in the Tiling
+-- find it. It needs mshell.appearance.urgency(true) (commented out in the Tiling
 -- policy section above, because tracking urgency is not free); without it
 -- nothing is ever urgent and this key does nothing.
-mshell.submap("desktop", {
-    h   = "focus_prev",
-    l   = "focus_next",
-    Tab = "last_desktop",
-    u   = "jump_urgent",
+mshell.keys.submap("desktop", {
+    h = mshell.window.focus.prev,
+    l = mshell.window.focus.next,
+    Tab = mshell.desktop.focus.last,
+    u = mshell.window.urgent.jump,
 }, { persist = true })
 
--- Launch sub-map (one-shot). Shows the richer {"action", arg} binding form, so
--- sub-maps can spawn programs (and switch desktops, enter other sub-maps, …).
+-- Launch sub-map (one-shot). Shows the {function, desc} binding form, so
+-- sub-maps can start programs (and switch desktops, enter other sub-maps, …).
 -- Built as a table so the Flow Launcher key can be left out entirely when Flow
--- isn't locatable: {"spawn", nil} would fail the config load ("spawn requires a
--- command string") and take every other binding down with it.
--- A spawn payload is either a bare command or {command, arguments}:
---     Return = {"spawn", "alacritty.exe"}
---     t      = {"spawn", {"wt.exe", "-p Ubuntu"}}
+-- isn't locatable: mshell.exec(nil) would fail the config load and take every
+-- other binding down with it.
+--
+-- Anything that has to be TOLD something — a command, a desktop name — goes
+-- inside a function, and a function has no name for the which-key panel to
+-- show. That is what desc is for:
+--
+--     Return = { function() mshell.exec("alacritty.exe") end, desc = "alacritty" }
+--     t      = { function() mshell.exec("wt.exe", "-p Ubuntu") end, desc = "ubuntu" }
+--
 -- Arguments are a separate string because that is how Windows takes them;
 -- packing them into the command would be ambiguous for any path with a space.
 local launch_keys = {
-    Return = {"spawn", "alacritty.exe"},
-    b      = {"spawn", "firefox.exe"},
-    e      = {"spawn", "explorer.exe"},   -- file manager on demand
-    t      = {"spawn", {"wt.exe", "-p Ubuntu"}},
+    Return = { function() mshell.exec("alacritty.exe") end,      desc = "alacritty" },
+    b      = { function() mshell.exec("firefox.exe") end,        desc = "firefox" },
+    e      = { function() mshell.exec("explorer.exe") end,       desc = "files" },
+    t      = { function() mshell.exec("wt.exe", "-p Ubuntu") end, desc = "ubuntu" },
     -- mshell's own launcher: a filter over your Start-menu shortcuts, and a Run
     -- box for anything that matches nothing. It belongs in a ONE-SHOT map: the
     -- launcher takes every keystroke while it is open, and this map has already
     -- dropped you back to root by the time you are typing into it. On the
     -- persisting leader instead, the leader would still be swallowing keys the
     -- moment the launcher closed.
-    p      = "launcher",
+    p = mshell.launcher.open,
 }
 if flow then
-    launch_keys.a = {"spawn", flow}       -- Flow Launcher (pops its search box)
+    launch_keys.a = { function() mshell.exec(flow) end, desc = "flow" }
 end
-mshell.submap("launch", launch_keys)
+mshell.keys.submap("launch", launch_keys)
 
 -- Media sub-map (persisting — volume is something you nudge, not something you
 -- set once, so stay put between presses; Esc leaves).
@@ -667,16 +720,16 @@ mshell.submap("launch", launch_keys)
 -- other route to volume at all, because every Win+key combo belongs to us.
 --
 -- No digit is bound here, which leaves the vim-style repeat count free:
--- `10k` is ten volume steps, because volume_up/volume_down are two of the
+-- `10k` is ten volume steps, because media.volume.up/down are two of the
 -- actions a count is allowed to repeat.
-mshell.submap("media", {
-    k     = "volume_up",
-    j     = "volume_down",
-    m     = "volume_mute",
-    Space = "media_play",
-    l     = "media_next",
-    h     = "media_prev",
-    s     = "media_stop",
+mshell.keys.submap("media", {
+    k = mshell.media.volume.up,
+    j = mshell.media.volume.down,
+    m = mshell.media.volume.mute,
+    Space = mshell.media.play,
+    l = mshell.media.next,
+    h = mshell.media.prev,
+    s = mshell.media.stop,
 }, { persist = true })
 
 -- Power sub-map (one-shot). Nested one layer under `system` below, and that is
@@ -689,13 +742,13 @@ mshell.submap("media", {
 -- Every one of these exists because replacing Explorer removes the route to it:
 -- there is no Start menu to pick "Shut down" from, and `quit` is not a
 -- substitute, since exiting AS THE SHELL ends the session whatever you meant.
-mshell.submap("power", {
-    l = "lock",
-    s = "sleep",
-    h = "hibernate",
-    o = "logoff",
-    r = "reboot",
-    d = {"shutdown", {desc = "shut down (!)"}},
+mshell.keys.submap("power", {
+    l = mshell.system.lock,
+    s = mshell.system.sleep,
+    h = mshell.system.hibernate,
+    o = mshell.system.logoff,
+    r = mshell.system.reboot,
+    d = { mshell.system.shutdown, desc = "shut down (!)" },
 })
 
 -- System sub-map (one-shot). mshell's own lifecycle lives here; the OS's power
@@ -704,23 +757,29 @@ mshell.submap("power", {
 --
 -- reload and quit keep their Win+Shift+r / Win+Shift+q chords as well — this is
 -- an added route, not a replacement.
-mshell.submap("system", {
-    p = {"enter_submap", "power"},
-    r = "reload",
-    q = "quit",
+mshell.keys.submap("system", {
+    p = "power",
+    r = mshell.config.reload,
+    q = mshell.config.quit,
     -- The escape hatch: starts Explorer alongside mshell and stops the hook
     -- binding anything, so a misbehaving shell doesn't need Task Manager. It
     -- deliberately does NOT quit. Nothing you press can undo it (not binding
-    -- keys is the point) — the way back is `mshell.exe --msg reload`, or just
+    -- keys is the point) — the way back is `mshell.exe --msg config.reload`, or just
     -- saving this file, since auto-reload is on.
-    x = "panic",
+    x = mshell.config.panic,
+    -- Stop and restart mshelld's logon task, so the mshelld.exe on disk becomes
+    -- the one running. An update already does this through install.bat; this is
+    -- for a binary you put in place by hand, and for a helper that is alive but
+    -- has stopped answering. No administrator prompt: the task is yours, and
+    -- Task Scheduler starts it at its registered level for you.
+    h = mshell.config.restart_helper,
     -- Fetch the latest GitHub release and install it. Unlike the daily check
     -- (set_update_check, further down) this one APPLIES: it downloads the
     -- release, hashes it against the checksum GitHub published, unpacks it and
     -- runs the install.bat inside — which restarts mshell, so expect the screen
     -- to blink. It declines if this session isn't the installed shell, so
     -- pressing it from a portable copy won't quietly take over your shell.
-    u = "update",
+    u = mshell.config.update,
     -- Anything a config can do, a binding can do — including raising a
     -- notification. mshell.notify is one of the few API calls that is legal at
     -- RUNTIME as well as config time, which is what makes this possible.
@@ -728,8 +787,8 @@ mshell.submap("system", {
     -- Note: a function binding cannot carry a which-key label, so this key is
     -- absent from the hint panel while the rest of the map is listed.
     i = function()
-        local d = mshell.get_current_desktop()
-        local w = mshell.get_focused_window()
+        local d = mshell.desktop.current()
+        local w = mshell.window.get()
         mshell.notify(("%s — %s, %d windows\nfocus: %s")
             :format(d and d.name or "?", d and d.layout or "?",
                     d and d.windows or 0, w and w.process or "nothing"))
@@ -739,9 +798,9 @@ mshell.submap("system", {
 -- Capture sub-map (one-shot — take one, then back to root).
 -- Both write a PNG to Pictures\Screenshots AND put the image on the clipboard,
 -- so it can be pasted straight into whatever asked for it.
-mshell.submap("capture", {
-    s = "screenshot",           -- the whole virtual screen, every monitor
-    w = "screenshot_window",    -- just the focused window
+mshell.keys.submap("capture", {
+    s = mshell.screenshot.screen,   -- the whole virtual screen, every monitor
+    w = mshell.screenshot.window,   -- just the focused window
 })
 
 -- Manual tiling sub-map (persisting — building a layout is several decisions in
@@ -753,20 +812,20 @@ mshell.submap("capture", {
 -- a time. The tree is an index over the window list, not a replacement for it,
 -- so a desktop moves between bsp and the dynamic layouts freely.
 --
--- = and - carry a desc because "split_grow" in a hint panel says less than the
--- key does. They are not count-repeatable, but the map persists, so the answer
+-- = and - carry a desc because "layout.split.grow" in a hint panel says less than
+-- the key does. They are not count-repeatable, but the map persists, so the answer
 -- to wanting more is to press again.
-mshell.submap("bsp", {
-    b = "layout_bsp",           -- put this desktop in the manual layout
-    h = "split_h",              -- next window splits horizontally
-    v = "split_v",              -- …vertically
-    r = "rotate_split",         -- flip the split holding the focused window
-    t = "toggle_tabbed",
-    s = "toggle_stacked",
-    n = "container_next",       -- show the container's other child
-    p = "container_prev",
-    ["="] = {"split_grow",   {desc = "grow split"}},
-    ["-"] = {"split_shrink", {desc = "shrink split"}},
+mshell.keys.submap("bsp", {
+    b = mshell.layout.bsp,              -- put this desktop in the manual layout
+    h = mshell.layout.split.h,          -- next window splits horizontally
+    v = mshell.layout.split.v,          -- …vertically
+    r = mshell.layout.split.rotate,     -- flip the split holding the focused window
+    t = mshell.layout.container.tabbed,
+    s = mshell.layout.container.stacked,
+    n = mshell.layout.container.next,   -- show the container's other child
+    p = mshell.layout.container.prev,
+    ["="] = { mshell.layout.split.grow, desc = "grow split" },
+    ["-"] = { mshell.layout.split.shrink, desc = "shrink split" },
 }, { persist = true })
 
 -- The two desktop maps, both built from the `desktops` table in the Desktops
@@ -782,11 +841,11 @@ mshell.submap("bsp", {
 -- with { persist = true } if you'd rather stay and fire several in a row.)
 -- Both maps also take 1..9 for the numbered desktops, and `go` takes [ and ] to
 -- step through whatever exists at that moment.
-mshell.submap("go",   go_keys)
-mshell.submap("move", move_keys)
+mshell.keys.submap("go",   go_keys)
+mshell.keys.submap("move", move_keys)
 
 -- The leader map. It's an ordinary sub-map — the name is our choice; what makes
--- it the leader is the mshell.set_leader call below. It's persisting, so you
+-- it the leader is the mshell.keys.leader call below. It's persisting, so you
 -- stay in it and can fire several keys in a row. Every sub-map above is reachable
 -- from here without touching Win: w → window, r → resize, d → desktop, o → launch,
 -- g → go (jump to a desktop), m → move (send the focused window to one),
@@ -795,62 +854,65 @@ mshell.submap("move", move_keys)
 -- Those last four are deliberately leader-ONLY, with no Win+key equivalent: a
 -- tap and two bare keys reaches anything here, and nothing in this file asks
 -- you to hold three keys at once to reach a feature.
-mshell.submap("normal", {
+mshell.keys.submap("normal", {
     -- focus navigation (stay in normal — press h/j/k/l as many times as you like)
-    h = "focus_left",
-    j = "focus_down",
-    k = "focus_up",
-    l = "focus_right",
+    h = mshell.window.focus.left,
+    j = mshell.window.focus.down,
+    k = mshell.window.focus.up,
+    l = mshell.window.focus.right,
     -- open a sub-map
-    w = {"enter_submap", "window"},
-    r = {"enter_submap", "resize"},
-    d = {"enter_submap", "desktop"},
-    o = {"enter_submap", "launch"},
-    g = {"enter_submap", "go"},       -- go to a desktop      (g b, g t, g v, …)
-    m = {"enter_submap", "move"},     -- send a window to one  (m b, m t, m v, …)
-    u = {"enter_submap", "media"},    -- volume and track      (u k, u j, u m, …)
-    x = {"enter_submap", "system"},   -- reload/quit/panic, and x p for power
-    c = {"enter_submap", "capture"},  -- screenshots           (c s, c w)
-    b = {"enter_submap", "bsp"},      -- manual tiling         (b h, b v, b t, …)
+    w = "window",
+    r = "resize",
+    d = "desktop",
+    o = "launch",
+    g = "go",       -- go to a desktop      (g b, g t, g v, …)
+    m = "move",     -- send a window to one  (m b, m t, m v, …)
+    u = "media",    -- volume and track      (u k, u j, u m, …)
+    x = "system",   -- reload/quit/panic, and x p for power
+    c = "capture",  -- screenshots           (c s, c w)
+    b = "bsp",      -- manual tiling         (b h, b v, b t, …)
     -- quick one-key actions
-    Return = "promote_master",
-    Space  = "cycle_layout",
-    f      = "toggle_float",
+    Return = mshell.layout.master.promote,
+    Space = mshell.layout.cycle,
+    f = mshell.window.float.toggle,
 }, { persist = true })
 
 -- Make a bare Win tap (press + release, nothing held) enter the map above; tap
 -- Win again — or press Esc — to leave. Point this at any sub-map you like, or
 -- drop the line entirely to leave a Win tap doing nothing.
-mshell.set_leader("normal")
+mshell.keys.leader("normal")
 
 ----------------------------------------------------------------------
 -- Root keybindings  (LWin + key)
 ----------------------------------------------------------------------
 
 -- --- focus navigation (directional, vim keys) ---
-mshell.bind({mod}, "h", "focus_left")
-mshell.bind({mod}, "j", "focus_down")
-mshell.bind({mod}, "k", "focus_up")
-mshell.bind({mod}, "l", "focus_right")
+mshell.keys.bind({mod}, "h", mshell.window.focus.left)
+mshell.keys.bind({mod}, "j", mshell.window.focus.down)
+mshell.keys.bind({mod}, "k", mshell.window.focus.up)
+mshell.keys.bind({mod}, "l", mshell.window.focus.right)
 
 -- --- window swap ---
-mshell.bind({mod, shft}, "h", "move_left")
-mshell.bind({mod, shft}, "j", "move_down")
-mshell.bind({mod, shft}, "k", "move_up")
-mshell.bind({mod, shft}, "l", "move_right")
+mshell.keys.bind({mod, shft}, "h", mshell.window.move.left)
+mshell.keys.bind({mod, shft}, "j", mshell.window.move.down)
+mshell.keys.bind({mod, shft}, "k", mshell.window.move.up)
+mshell.keys.bind({mod, shft}, "l", mshell.window.move.right)
 
 -- --- desktop switching (Win+1 through Win+9) ---
 -- Win+3 goes to the desktop NAMED "3". It doesn't have to exist — pressing the
 -- key is what brings it into being, and it's gone again once you leave it
 -- empty, so these nine cost nothing until you use them.
 for i = 1, 9 do
-    mshell.bind({mod}, tostring(i), "switch_desktop", tostring(i))
-    mshell.bind({mod, shft}, tostring(i), "move_to_desktop", tostring(i))
+    local name = tostring(i)
+    mshell.keys.bind({mod}, name,
+        function() mshell.desktop.focus(name) end, { desc = name })
+    mshell.keys.bind({mod, shft}, name,
+        function() mshell.window.move.to_desktop(name) end, { desc = "→ " .. name })
 end
 
 -- --- step through whatever exists: Win+] / Win+[ ---
-mshell.bind({mod}, "]", "next_desktop")
-mshell.bind({mod}, "[", "prev_desktop")
+mshell.keys.bind({mod}, "]", mshell.desktop.focus.next)
+mshell.keys.bind({mod}, "[", mshell.desktop.focus.prev)
 
 -- --- back to the last desktop: Win+` returns to the desktop you switched away
 -- from, and because every switch records where it came from, pressing it twice
@@ -858,98 +920,168 @@ mshell.bind({mod}, "[", "prev_desktop")
 -- that combo up below our keyboard hook, so Task View would open on top of the
 -- switch. The same action sits on Tab inside the "desktop" submap (Win+d then
 -- Tab), where bare keys never reach the OS. ---
-mshell.bind({mod}, "`", "last_desktop")
+mshell.keys.bind({mod}, "`", mshell.desktop.focus.last)
 
 -- --- game desktop shortcut: Win+v jumps to the "game" desktop (Valorant
 -- auto-launches there when empty and everything on it floats; see its rule in
 -- the desktops table above), Win+Shift+v sends the focused window there. The
 -- leader reaches it as `g v` / `m v` — this is just the Win-chord alias. ---
-mshell.bind({mod}, "v", "switch_desktop", "game")
-mshell.bind({mod, shft}, "v", "move_to_desktop", "game")
+mshell.keys.bind({mod}, "v",
+    function() mshell.desktop.focus("game") end, { desc = "game" })
+mshell.keys.bind({mod, shft}, "v",
+    function() mshell.window.move.to_desktop("game") end, { desc = "→ game" })
 
 -- --- monitors (Win+,/. focus; Win+Shift+,/. send) ---
-mshell.bind({mod}, ",", "focus_monitor_prev")
-mshell.bind({mod}, ".", "focus_monitor_next")
-mshell.bind({mod, shft}, ",", "move_to_monitor_prev")
-mshell.bind({mod, shft}, ".", "move_to_monitor_next")
+mshell.keys.bind({mod}, ",", mshell.monitor.focus.prev)
+mshell.keys.bind({mod}, ".", mshell.monitor.focus.next)
+mshell.keys.bind({mod, shft}, ",", mshell.window.move.to_monitor.prev)
+mshell.keys.bind({mod, shft}, ".", mshell.window.move.to_monitor.next)
+
+-- --- send the whole DESKTOP to a display ---
+-- The runtime counterpart of a desktop rule's `monitor`, and it outranks that
+-- rule from then on: a pin you set with your hands is yours, and survives a
+-- config reload, an unplug/replug and a restart. The payload is the 0-based
+-- display index; -1 drops the pin again and the rules decide.
+-- Commented out because which keys are right depends on how many monitors you
+-- have, and on a single-head machine the action has nothing to do.
+-- mshell.keys.bind({mod, ctrl}, ",", function() mshell.desktop.to_monitor(0) end)
+-- mshell.keys.bind({mod, ctrl}, ".", function() mshell.desktop.to_monitor(1) end)
+--
+-- Cycling takes a function, since the action wants an absolute index —
+-- mshell.desktop.to_monitor is the same operation, callable at runtime:
+-- mshell.keys.bind({mod, ctrl}, "o", function()
+--   local d = mshell.desktop.current()
+--   local n = #mshell.monitor.list()
+--   if n > 1 then mshell.desktop.to_monitor(((d.monitor or 0) + 1) % n) end
+-- end)
+--
+-- Both are reachable from outside mshell, where naming a desktop lets you move
+-- one you are not standing on:
+--   mshell.exe --msg "desktop.to_monitor 1"
+--   mshell.exe --msg "desktop.to_monitor chat 1"
 
 -- --- the focused monitor's display settings ---
 -- Commented out because they change the physical display, which is not
--- something to hand a stray keystroke by default. `toggle_hdr` flips HDR on the
--- monitor you are looking at; `cycle_refresh` steps through the refresh rates
+-- something to hand a stray keystroke by default. `display.hdr.toggle` flips HDR
+-- on the monitor you are looking at; `display.refresh.cycle` steps through rates
 -- that display offers AT ITS CURRENT RESOLUTION (1 forwards, -1 back, wrapping)
 -- — useful for dropping to 60Hz on battery, or for an app that dislikes the
--- high one. Both say what they did in a notification.
--- mshell.bind({mod, alt}, "h", "toggle_hdr")
--- mshell.bind({mod, alt}, "r", "cycle_refresh", 1)
--- mshell.bind({mod, alt, shft}, "r", "cycle_refresh", -1)
+-- high one. `display.portrait.toggle` stands that display on its end and puts it
+-- back; `display.rotation.cycle` goes round all four quarter turns (1 clockwise, -1
+-- anticlockwise). They all say what they did in a notification.
+-- mshell.keys.bind({mod, alt}, "h", mshell.display.hdr.toggle)
+-- mshell.keys.bind({mod, alt}, "r", function() mshell.display.refresh.cycle(1) end)
+-- mshell.keys.bind({mod, alt, shft}, "r", function() mshell.display.refresh.cycle(-1) end)
+-- mshell.keys.bind({mod, alt}, "o", mshell.display.portrait.toggle)
+-- mshell.keys.bind({mod, alt}, "p", function() mshell.display.rotation.cycle(1) end)
+-- mshell.keys.bind({mod, alt, shft}, "p", function() mshell.display.rotation.cycle(-1) end)
 
 -- --- layout ---
-mshell.bind({mod}, "t", "layout_tiling")
-mshell.bind({mod}, "m", "layout_monocle")
-mshell.bind({mod}, "g", "layout_grid")
-mshell.bind({mod}, "Space", "cycle_layout")   -- cycle the seven dynamic layouts
+mshell.keys.bind({mod}, "t", mshell.layout.tiling)
+mshell.keys.bind({mod}, "m", mshell.layout.monocle)
+mshell.keys.bind({mod}, "g", mshell.layout.grid)
+mshell.keys.bind({mod}, "Space", mshell.layout.cycle)  -- cycle the dynamic layouts
                                               -- (bsp is manual: `b b`, above)
-mshell.bind({mod}, "f", "toggle_float")
+mshell.keys.bind({mod}, "f", mshell.window.float.toggle)
 
 -- --- fullscreen (all three flavours; each key is its own toggle) ---
-mshell.bind({mod, shft}, "f", "fullscreen")           -- window fills the monitor
-mshell.bind({mod, ctrl}, "f", "fullscreen_content")   -- app fullscreen stays in the tile
-mshell.bind({mod, alt},  "f", "fullscreen_both")      -- app fullscreen fills the monitor
+-- window fills the monitor / app fullscreen stays in the tile / both
+mshell.keys.bind({mod, shft}, "f", mshell.window.fullscreen.window)
+mshell.keys.bind({mod, ctrl}, "f", mshell.window.fullscreen.content)
+mshell.keys.bind({mod, alt},  "f", mshell.window.fullscreen.both)
 
 -- --- master area: ratio (Win+Ctrl+h/l) and count (Win+Ctrl+j/k) ---
-mshell.bind({mod, ctrl}, "h", "dec_master")
-mshell.bind({mod, ctrl}, "l", "inc_master")
-mshell.bind({mod, ctrl}, "k", "inc_nmaster")
-mshell.bind({mod, ctrl}, "j", "dec_nmaster")
+mshell.keys.bind({mod, ctrl}, "h", mshell.layout.master.ratio.shrink)
+mshell.keys.bind({mod, ctrl}, "l", mshell.layout.master.ratio.grow)
+mshell.keys.bind({mod, ctrl}, "k", mshell.layout.master.count.inc)
+mshell.keys.bind({mod, ctrl}, "j", mshell.layout.master.count.dec)
 
 -- --- promote to master ---
-mshell.bind({mod}, "Return", "promote_master")
+mshell.keys.bind({mod}, "Return", mshell.layout.master.promote)
 
 -- --- spawn programs ---
 -- dwm convention: Win+Return zooms (promote), Win+Shift+Return opens a terminal.
-mshell.bind({mod, shft}, "Return", "spawn", "alacritty.exe")
-mshell.bind({mod}, "p", "spawn", "wt.exe")
+mshell.keys.bind({mod, shft}, "Return",
+    function() mshell.exec("alacritty.exe") end, { desc = "alacritty" })
+mshell.keys.bind({mod}, "p",
+    function() mshell.exec("wt.exe") end, { desc = "terminal" })
 
 -- --- sub-map entry points (the direct Win+chord equivalents of tapping Win
 --     then w/r/d/o in "normal"). Win+w enters the window map, and so on; from
 --     there the map's own flavour decides whether you stay (persisting) or drop
 --     back after one key (one-shot). ---
-mshell.bind({mod}, "w", "enter_submap", "window")
-mshell.bind({mod}, "r", "enter_submap", "resize")
-mshell.bind({mod}, "d", "enter_submap", "desktop")
-mshell.bind({mod}, "o", "enter_submap", "launch")
+mshell.keys.bind({mod}, "w", "window")
+mshell.keys.bind({mod}, "r", "resize")
+mshell.keys.bind({mod}, "d", "desktop")
+mshell.keys.bind({mod}, "o", "launch")
 
 -- "go" and "move" are deliberately leader-only (tap Win, then g / m): the
--- matching Win+g and Win+m chords are layout_grid and layout_monocle below, and
+-- matching Win+g and Win+m chords are layout.grid and layout.monocle below, and
 -- the first binding for a chord wins, so adding them here would silently shadow
 -- one or the other. If you'd rather have the chords, move those two layouts to
 -- the window submap (they're already on Win+w g / Win+w m) and uncomment:
--- mshell.bind({mod}, "g", "enter_submap", "go")
--- mshell.bind({mod}, "m", "enter_submap", "move")
+-- mshell.keys.bind({mod}, "g", "go")     -- a string names a submap to enter
+-- mshell.keys.bind({mod}, "m", "move")
 
 -- --- close / kill ---
--- kill is on Win+Shift+x, NOT Win+Shift+k: Win+Shift+h/j/k/l is the move-window
+-- window.kill is on Win+Shift+x, NOT Win+Shift+k: Win+Shift+h/j/k/l is the move
 -- block above, and the first binding for a chord wins, so a second Win+Shift+k
--- here was silently shadowed by move_up and kill could never fire. It is also
--- on `k` inside the window submap (Win+w then k).
-mshell.bind({mod, shft}, "c", "close")
-mshell.bind({mod, shft}, "x", "kill")
+-- here was silently shadowed by window.move.up and kill could never fire. It
+-- is also on `k` inside the window submap (Win+w then k).
+mshell.keys.bind({mod, shft}, "c", mshell.window.close)
+mshell.keys.bind({mod, shft}, "x", mshell.window.kill)
 
 -- --- a key can also run a Lua function ---
 -- Anything the config can do, a binding can do. The function runs on mshell's
 -- main thread when you press the key, so keep it quick — and note that the
--- config-BUILDING calls (bind, submap, rule, spawn, …) are refused from in
--- here: rebuilding the keymaps while the keyboard hook is reading them is what
--- a reload takes a lock for, and a binding holds no such lock. The query calls
--- and mshell.log are fine.
-mshell.bind({mod, ctrl}, "i", function()
-    local d = mshell.get_current_desktop()
-    local w = mshell.get_focused_window()
+-- config-BUILDING calls (keys.bind, keys.submap, window.rule, exec.startup, …)
+-- are refused from in here: rebuilding the keymaps while the keyboard hook is
+-- reading them is what a reload takes a lock for, and a binding holds no such
+-- lock. The query calls, the window and desktop verbs, and mshell.log are fine.
+mshell.keys.bind({mod, ctrl}, "i", function()
+    local d = mshell.desktop.current()
+    local w = mshell.window.get()
     mshell.log(("desktop '%s' (%s, %d windows) — focused: %s")
         :format(d and d.name or "?", d and d.layout or "?",
                 d and d.windows or 0, w and w.process or "nothing"))
 end)
+
+----------------------------------------------------------------------
+-- The runtime API
+----------------------------------------------------------------------
+-- Everything above binds a key to an action. The same names are also callable,
+-- which is what a function binding and an event handler are made of.
+--
+-- Every window verb takes the window to act on as its first argument, and acts
+-- on the focused one when you leave it out. So these are the same thing:
+--
+--   mshell.window.close()          -- the focused window
+--   mshell.window.close(w)         -- that one
+--   w:close()                      -- same, as a method
+--
+-- The queries hand back windows you can act on, not descriptions of them:
+--
+--   local w = mshell.window.get()             -- focused, or nil
+--   mshell.window.list()                      -- every managed window
+--   mshell.window.list({ desktop = "web" })   -- filtered; also class, process,
+--                                             -- monitor, floating
+--   mshell.desktop.windows("web")             -- the windows on one desktop
+--   mshell.desktop.list()  mshell.desktop.current()
+--   mshell.monitor.list()  mshell.monitor.current()
+--
+-- Move takes a direction, a desktop or a monitor:
+--
+--   mshell.window.move("left")
+--   mshell.window.move({ desktop = "web" })
+--   mshell.window.move(w, { monitor = "next" })
+--
+-- Which makes "send everything Firefox has to the web desktop" a loop:
+--
+-- mshell.keys.bind({mod, ctrl}, "w", function()
+--     for _, w in ipairs(mshell.window.list({ process = "firefox.exe" })) do
+--         w:move({ desktop = "web" })
+--     end
+-- end, { desc = "gather firefox" })
 
 ----------------------------------------------------------------------
 -- Event handlers
@@ -961,10 +1093,14 @@ end)
 --   "desktop_switch"  the visible desktop changed
 --   "focus"           the focused window changed
 --
--- The handler gets one table: the window for the window/focus events, the
--- desktop (plus `from`) for a switch. Handlers run on mshell's main thread,
--- between your keypress and the screen updating, so keep them fast — and the
--- config-BUILDING calls are refused in here, same as in a function binding.
+-- The handler gets one argument: a window for the window/focus events, a table
+-- describing the desktop (plus `from`) for a switch. A window is the same kind
+-- of object mshell.window.get() returns, so a handler can act on it and not
+-- only read it — w:close(), w:move{ desktop = "chat" }, w:float(true).
+--
+-- Handlers run on mshell's main thread, between your keypress and the screen
+-- updating, so keep them fast — and the config-BUILDING calls are refused in
+-- here, same as in a function binding.
 --
 -- Commented out because it writes a line to %TEMP%\mshell.log for every window
 -- you open; uncomment when you want to see what mshell is seeing.
@@ -973,16 +1109,25 @@ end)
 --     mshell.log(("opened %s [%s] on '%s'"):format(w.process, w.class, w.desktop))
 -- end)
 --
+-- Sorting a window as it appears, which a rule cannot express because it needs
+-- to look at more than the window itself:
+--
+-- mshell.on("window_open", function(w)
+--     if w.class == "Chrome_WidgetWin_1" and #mshell.desktop.windows() > 3 then
+--         w:move({ desktop = "web" })
+--     end
+-- end)
+--
 -- mshell.on("desktop_switch", function(d)
 --     mshell.log(("%s -> %s (%d windows, %s)")
 --         :format(d.from or "?", d.name, d.windows, d.layout))
 -- end)
 
 -- --- reload config ---
-mshell.bind({mod, shft}, "r", "reload")
+mshell.keys.bind({mod, shft}, "r", mshell.config.reload)
 
 -- --- quit mshell (logs out the session if we're the shell!) ---
-mshell.bind({mod, shft}, "q", "quit")
+mshell.keys.bind({mod, shft}, "q", mshell.config.quit)
 
 ----------------------------------------------------------------------
 -- Window rules
@@ -1017,14 +1162,14 @@ mshell.bind({mod, shft}, "q", "quit")
 -- specific rules above broad ones.
 
 -- Keep transient/utility windows floating:
-mshell.rule({ process = "Taskmgr.exe" }, "float")
+mshell.window.rule({ process = "Taskmgr.exe" }, "float")
 
 -- Flow Launcher: its search box is a transient popup, not a window to tile.
 -- Float it and drop the focus ring so mshell leaves the overlay alone.
 -- `center = false` because it already places itself where a launcher belongs —
 -- centred horizontally, high on the screen — and the default centring would
 -- drop it to the middle of the display, which is not where you look for it.
-mshell.rule({ process = "Flow.Launcher.exe" },
+mshell.window.rule({ process = "Flow.Launcher.exe" },
             "float", { ring = false, center = false })
 
 -- --- System dialogs: file pickers, message boxes, permission prompts ---
@@ -1050,10 +1195,10 @@ mshell.rule({ process = "Flow.Launcher.exe" },
 -- should float as the dialog it is, not be stripped bare and stretched over the
 -- whole monitor by the library rule further down. To tile one app's dialogs
 -- anyway, add a rule naming it above this line:
---   mshell.rule({ process = "code.exe", dialog = true }, "manage")
+--   mshell.window.rule({ process = "code.exe", dialog = true }, "manage")
 -- Note this is an ordinary "float" rule, so set_float_policy("never") tiles
 -- these along with everything else — that setting means what it says.
-mshell.rule({ dialog = true }, "float")
+mshell.window.rule({ dialog = true }, "float")
 
 -- Admin authentication. Two windows, neither of them a dialog in the sense
 -- above, so they need naming:
@@ -1067,12 +1212,12 @@ mshell.rule({ dialog = true }, "float")
 --   CredentialUIBroker.exe is the "Windows Security" box that asks for a PIN,
 --   a password, a smartcard or Hello — network shares, credential prompts. It
 --   is its own process and is NOT owned by whatever asked for it.
-mshell.rule({ process = "consent.exe"            }, "float")
-mshell.rule({ process = "CredentialUIBroker.exe" }, "float")
+mshell.window.rule({ process = "consent.exe"            }, "float")
+mshell.window.rule({ process = "CredentialUIBroker.exe" }, "float")
 
 -- Explorer's file-operation windows: copy/move progress, "file in use",
 -- "confirm delete". Transient, fixed-size, never worth a tile.
-mshell.rule({ class = "OperationStatusWindow" }, "float")
+mshell.window.rule({ class = "OperationStatusWindow" }, "float")
 
 -- Not listed here because they need no rule: the XAML consent popups
 -- ("Let this app access your camera/location", the Open-with picker) are
@@ -1101,14 +1246,14 @@ mshell.rule({ class = "OperationStatusWindow" }, "float")
 -- the whole monitor is not what you want — so except them FIRST (rules match in
 -- order, first one wins) and let them float with their own frame. These two are
 -- name heuristics: trim or extend them to match what you actually own.
-mshell.rule({ path = [[*\steamapps\common\*]], process = "*launcher*" }, "float")
-mshell.rule({ path = [[*\steamapps\common\*]], process = "*crash*"    }, "float")
+mshell.window.rule({ path = [[*\steamapps\common\*]], process = "*launcher*" }, "float")
+mshell.window.rule({ path = [[*\steamapps\common\*]], process = "*crash*"    }, "float")
 
 -- Every Steam game, on every drive and in every library folder. `*\steamapps\`
 -- rather than a fixed root so a second library on another disk is covered too.
 -- (Non-game apps you install through Steam — Wallpaper Engine, Aseprite — land
 -- here as well; give them a "manage" or plain "float" rule above this one.)
-mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
+mshell.window.rule({ path = [[*\steamapps\common\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 
 -- --- Riot / Valorant ---
@@ -1117,7 +1262,7 @@ mshell.rule({ path = [[*\steamapps\common\*]] }, "float",
 -- (VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe) and
 -- Riot moves and renames it between patches, while the path stays put.
 -- Valorant is auto-launched on its own desktop — see its desktop_rule above.
-mshell.rule({ path = [[*\Riot Games\VALORANT\*]] }, "float",
+mshell.window.rule({ path = [[*\Riot Games\VALORANT\*]] }, "float",
             { ring = false, decorate = false, fullscreen = true })
 
 -- The Riot Client (the launcher/patcher that opens first, and comes back when
@@ -1125,25 +1270,25 @@ mshell.rule({ path = [[*\Riot Games\VALORANT\*]] }, "float",
 -- never tiled, but leave its frame and its own size alone. Matching the folder
 -- covers whichever of its processes owns the window (RiotClientServices.exe /
 -- RiotClientUx.exe — that has changed across releases).
-mshell.rule({ path = [[*\Riot Games\Riot Client\*]] }, "float", { ring = false })
+mshell.window.rule({ path = [[*\Riot Games\Riot Client\*]] }, "float", { ring = false })
 
 -- Games outside any of those folders — match the executable directly:
--- mshell.rule({ process = "eldenring.exe" }, "float",
+-- mshell.window.rule({ process = "eldenring.exe" }, "float",
 --             { ring = false, decorate = false, fullscreen = true })
 
 ----------------------------------------------------------------------
 -- Startup
 ----------------------------------------------------------------------
-mshell.spawn("alacritty.exe")
+mshell.exec.startup("alacritty.exe")
 
--- Give an app a startup spawn OR a desktop `app` in the table above, never
+-- Give an app an exec.startup OR a desktop `app` in the table above, never
 -- both. They do NOT cancel out: mshell only auto-launches a desktop's app when
 -- that desktop is empty, and at startup the spawned terminal's window does not
 -- exist yet when that check runs — so the desktop still reads as empty and BOTH
 -- launches go through, leaving you with two terminals on every boot. This is
 -- why the "term" row above carries no `app`.
 --
--- Rule of thumb: mshell.spawn for things that aren't tied to a desktop (the
+-- Rule of thumb: mshell.exec.startup for things that aren't tied to a desktop (the
 -- launcher below, a sync client, a hotkey daemon) and want to exist from boot;
 -- a desktop rule's `app` for anything that belongs to one desktop and should come
 -- back when you return to it.
@@ -1153,4 +1298,4 @@ mshell.spawn("alacritty.exe")
 -- launch submap: Win+o then a (see the "launch" submap above). Path defined at
 -- the top of this file as `flow`; skipped when it couldn't be resolved, so a
 -- missing Flow install never costs you the terminal above.
-if flow then mshell.spawn(flow) end
+if flow then mshell.exec.startup(flow) end
