@@ -1,4 +1,10 @@
 #include "mshell.h"
+#include "hide_policy.h"
+
+_Static_assert((int)HIDE_PLAN_CLOAK == (int)HIDE_CLOAK,
+               "HidePolicy must map onto HidePlanPolicy");
+_Static_assert((int)HIDE_PLAN_SHOWWINDOW == (int)HIDE_SHOWWINDOW,
+               "HidePolicy must map onto HidePlanPolicy");
 #include "window_internal.h"
 #include "layout_math.h"
 #include "overlay.h"
@@ -132,14 +138,6 @@ static bool window_defer_if_hung(ManagedWindow *mw, const wchar_t *what) {
     return true;
 }
 
-typedef enum {
-    HIDE_BY_SINK = 0,
-    HIDE_BY_CLOAK,
-    HIDE_BY_STASH,
-    HIDE_BY_SW_HIDE,
-    HIDE_STRATEGY_COUNT
-} HideStrategyId;
-
 typedef struct {
     const wchar_t *name;
     bool (*try_hide)(ManagedWindow *mw);
@@ -206,21 +204,26 @@ static const HideStrategy hide_strategies[HIDE_STRATEGY_COUNT] = {
     [HIDE_BY_SW_HIDE] = { L"SW_HIDE", sw_try_hide,    sw_try_show,    sw_in_effect    },
 };
 
-static bool hide_off_screen_without_showwindow(const ManagedWindow *mw) {
-    for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
-        if (hide_strategies[i].in_effect(mw)) return true;
-    return false;
+static HideFlags hide_flags_of(const ManagedWindow *mw) {
+    HideFlags f = {
+        hide_strategies[HIDE_BY_SINK].in_effect(mw),
+        hide_strategies[HIDE_BY_CLOAK].in_effect(mw),
+        hide_strategies[HIDE_BY_STASH].in_effect(mw),
+        hide_strategies[HIDE_BY_SW_HIDE].in_effect(mw),
+    };
+    return f;
 }
 
 static const wchar_t *hide_strategy_name(const ManagedWindow *mw) {
-    for (int i = 0; i < HIDE_STRATEGY_COUNT; i++)
-        if (hide_strategies[i].in_effect(mw)) return hide_strategies[i].name;
-    return L"on screen";
+    HideFlags      f  = hide_flags_of(mw);
+    HideStrategyId id = hide_flags_strategy(&f);
+    return id == HIDE_STRATEGY_NONE ? L"on screen" : hide_strategies[id].name;
 }
 
 static void hide_undo_all(ManagedWindow *mw, bool force) {
-    for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
-        hide_strategies[i].try_show(mw, force);
+    for (int i = 0; i < HIDE_STRATEGY_COUNT; i++)
+        if (hide_strategy_is_off_screen((HideStrategyId)i))
+            hide_strategies[i].try_show(mw, force);
 }
 
 void window_hide(ManagedWindow *mw) {
@@ -234,13 +237,14 @@ void window_hide(ManagedWindow *mw) {
     mw->sunk      = false;
     mw->stashed   = false;
 
-    if (g.cfg.hide_policy == HIDE_CLOAK) {
-        for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
-            if (hide_strategies[i].try_hide(mw)) break;
-    }
+    HideStrategyId plan[HIDE_STRATEGY_COUNT];
+    int  steps  = hide_plan((HidePlanPolicy)g.cfg.hide_policy, plan,
+                            HIDE_STRATEGY_COUNT);
+    bool off    = false;
+    for (int i = 0; i < steps && !off; i++)
+        off = hide_strategies[plan[i]].try_hide(mw);
 
-    if (!hide_off_screen_without_showwindow(mw) &&
-        !hide_strategies[HIDE_BY_SW_HIDE].try_hide(mw)) {
+    if (!off) {
         mw->wm_hidden = false;
         static bool warned;
         if (!warned) {
@@ -311,7 +315,8 @@ void window_restore_all_visibility(void) {
         if (!IsWindow(mw->hwnd)) continue;
         if (mw->app_hidden) continue;
 
-        if (hide_off_screen_without_showwindow(mw) ||
+        HideFlags f = hide_flags_of(mw);
+        if (hide_flags_off_screen_without_showwindow(&f) ||
             !IsWindowVisible(mw->hwnd)) shown++;
 
         hide_undo_all(mw, true);
