@@ -132,6 +132,97 @@ static bool window_defer_if_hung(ManagedWindow *mw, const wchar_t *what) {
     return true;
 }
 
+typedef enum {
+    HIDE_BY_SINK = 0,
+    HIDE_BY_CLOAK,
+    HIDE_BY_STASH,
+    HIDE_BY_SW_HIDE,
+    HIDE_STRATEGY_COUNT
+} HideStrategyId;
+
+typedef struct {
+    const wchar_t *name;
+    bool (*try_hide)(ManagedWindow *mw);
+    void (*try_show)(ManagedWindow *mw, bool force);
+    bool (*in_effect)(const ManagedWindow *mw);
+} HideStrategy;
+
+static bool sink_try_hide(ManagedWindow *mw) { return window_sink(mw); }
+
+static void sink_try_show(ManagedWindow *mw, bool force) {
+    (void)force;
+    window_unsink(mw);
+}
+
+static bool sink_in_effect(const ManagedWindow *mw) { return mw->sunk; }
+
+static bool cloak_try_hide(ManagedWindow *mw) {
+    mw->cloaked = window_set_cloaked(mw->hwnd, true);
+    return mw->cloaked;
+}
+
+static void cloak_try_show(ManagedWindow *mw, bool force) {
+    if (!mw->cloaked && !force) return;
+    if (!window_set_cloaked(mw->hwnd, false) && !force)
+        log_msg(LOG_WARN, L"show: could not uncloak %p — the window stays "
+                          L"invisible", (void *)mw->hwnd);
+    mw->cloaked = false;
+}
+
+static bool cloak_in_effect(const ManagedWindow *mw) { return mw->cloaked; }
+
+static bool stash_try_hide(ManagedWindow *mw) {
+    mw->stashed = window_stash(mw);
+    return mw->stashed;
+}
+
+static void stash_try_show(ManagedWindow *mw, bool force) {
+    (void)force;
+    window_unstash(mw);
+}
+
+static bool stash_in_effect(const ManagedWindow *mw) { return mw->stashed; }
+
+static bool sw_try_hide(ManagedWindow *mw) {
+    ShowWindow(mw->hwnd, SW_HIDE);
+    return !IsWindowVisible(mw->hwnd);
+}
+
+static void sw_try_show(ManagedWindow *mw, bool force) {
+    if (IsWindowVisible(mw->hwnd)) return;
+    ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE
+                                            : force ? SW_SHOWNA
+                                                    : SW_SHOWNOACTIVATE);
+}
+
+static bool sw_in_effect(const ManagedWindow *mw) {
+    return window_hidden_by_showwindow(mw);
+}
+
+static const HideStrategy hide_strategies[HIDE_STRATEGY_COUNT] = {
+    [HIDE_BY_SINK]    = { L"sunk",    sink_try_hide,  sink_try_show,  sink_in_effect  },
+    [HIDE_BY_CLOAK]   = { L"cloaked", cloak_try_hide, cloak_try_show, cloak_in_effect },
+    [HIDE_BY_STASH]   = { L"stashed", stash_try_hide, stash_try_show, stash_in_effect },
+    [HIDE_BY_SW_HIDE] = { L"SW_HIDE", sw_try_hide,    sw_try_show,    sw_in_effect    },
+};
+
+static bool hide_off_screen_without_showwindow(const ManagedWindow *mw) {
+    for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
+        if (hide_strategies[i].in_effect(mw)) return true;
+    return false;
+}
+
+static const wchar_t *hide_strategy_name(const ManagedWindow *mw) {
+    for (int i = 0; i < HIDE_STRATEGY_COUNT; i++)
+        if (hide_strategies[i].in_effect(mw)) return hide_strategies[i].name;
+    return L"on screen";
+}
+
+static void hide_undo_all(ManagedWindow *mw, bool force) {
+    for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
+        hide_strategies[i].try_show(mw, force);
+}
+
 void window_hide(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->wm_hidden) return;
@@ -144,36 +235,30 @@ void window_hide(ManagedWindow *mw) {
     mw->stashed   = false;
 
     if (g.hide_policy == HIDE_CLOAK) {
-        if (!window_sink(mw)) {
-            mw->cloaked = window_set_cloaked(mw->hwnd, true);
-            if (!mw->cloaked) mw->stashed = window_stash(mw);
-        }
+        for (int i = 0; i < HIDE_BY_SW_HIDE; i++)
+            if (hide_strategies[i].try_hide(mw)) break;
     }
 
-    if (!mw->cloaked && !mw->sunk && !mw->stashed) {
-        ShowWindow(mw->hwnd, SW_HIDE);
-
-        if (IsWindowVisible(mw->hwnd)) {
-            mw->wm_hidden = false;
-            static bool warned;
-            if (!warned) {
-                warned = true;
-                log_err(L"hide: %p could not be taken off the screen by any "
-                        L"means — not sunk, not cloaked, not stashed, and "
-                        L"SW_HIDE was refused. It will be visible on every "
-                        L"desktop. This is what mshelld.exe exists for: run "
-                        L"`install.bat /helper` from an administrator prompt "
-                        L"(see INSTALL.md).", (void *)mw->hwnd);
-            }
-            return;
+    if (!hide_off_screen_without_showwindow(mw) &&
+        !hide_strategies[HIDE_BY_SW_HIDE].try_hide(mw)) {
+        mw->wm_hidden = false;
+        static bool warned;
+        if (!warned) {
+            warned = true;
+            log_err(L"hide: %p could not be taken off the screen by any "
+                    L"means — not sunk, not cloaked, not stashed, and "
+                    L"SW_HIDE was refused. It will be visible on every "
+                    L"desktop. This is what mshelld.exe exists for: run "
+                    L"`install.bat /helper` from an administrator prompt "
+                    L"(see INSTALL.md).", (void *)mw->hwnd);
         }
+        return;
     }
 
     mw->vis_deferred = false;
 
     log_msg(LOG_DEBUG, L"hide: %p (%ls)", (void *)mw->hwnd,
-            mw->sunk ? L"sunk" : mw->cloaked ? L"cloaked"
-                               : mw->stashed ? L"stashed" : L"SW_HIDE");
+            hide_strategy_name(mw));
 }
 
 void window_show(ManagedWindow *mw) {
@@ -183,23 +268,13 @@ void window_show(ManagedWindow *mw) {
 
     bool was_off_screen = mw->wm_hidden || mw->cloaked || mw->sunk ||
                           mw->stashed;
-    bool was_cloaked    = mw->cloaked;
     bool was_stashed    = mw->stashed;
     bool was_sunk       = mw->sunk;
+    const wchar_t *was  = hide_strategy_name(mw);
 
-    if (mw->cloaked) {
-        if (!window_set_cloaked(mw->hwnd, false))
-            log_msg(LOG_WARN, L"show: could not uncloak %p — the window stays "
-                              L"invisible", (void *)mw->hwnd);
-        mw->cloaked = false;
-    }
-    window_unsink(mw);
-    window_unstash(mw);
+    hide_undo_all(mw, false);
 
-    if (!IsWindowVisible(mw->hwnd)) {
-        ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE
-                                                : SW_SHOWNOACTIVATE);
-    }
+    hide_strategies[HIDE_BY_SW_HIDE].try_show(mw, false);
 
     if (was_off_screen) {
         RedrawWindow(mw->hwnd, NULL, NULL,
@@ -219,9 +294,7 @@ void window_show(ManagedWindow *mw) {
             mw->needs_repaint = false;
         }
 
-        log_msg(LOG_DEBUG, L"show: %p (was %ls)", (void *)mw->hwnd,
-                was_sunk ? L"sunk" : was_cloaked ? L"cloaked"
-                                   : was_stashed ? L"stashed" : L"hidden");
+        log_msg(LOG_DEBUG, L"show: %p (was %ls)", (void *)mw->hwnd, was);
     }
 
     mw->wm_hidden    = false;
@@ -238,20 +311,16 @@ void window_restore_all_visibility(void) {
         if (!IsWindow(mw->hwnd)) continue;
         if (mw->app_hidden) continue;
 
-        if (mw->cloaked || mw->sunk || mw->stashed ||
+        if (hide_off_screen_without_showwindow(mw) ||
             !IsWindowVisible(mw->hwnd)) shown++;
 
-        window_set_cloaked(mw->hwnd, false);
-        mw->cloaked   = false;
-
-        window_unsink(mw);
-        window_unstash(mw);
+        hide_undo_all(mw, true);
 
         mw->wm_hidden = false;
 
         if (IsWindowVisible(mw->hwnd)) continue;
 
-        ShowWindow(mw->hwnd, IsIconic(mw->hwnd) ? SW_SHOWMINNOACTIVE : SW_SHOWNA);
+        hide_strategies[HIDE_BY_SW_HIDE].try_show(mw, true);
         shown++;
     }
 
