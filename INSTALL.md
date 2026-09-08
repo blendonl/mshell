@@ -210,6 +210,18 @@ it would also put the helper in session 0, where it cannot touch your windows at
 all. The log says which identity it granted on the line above `listening on`, so
 if mshell is not connecting, start there.
 
+**What running it trusts.** The helper is elevated and does what it is asked —
+place a window, band it topmost, cloak it, close it — for any window, including
+ones owned by elevated processes. That is the whole point of it: tiling an
+administrator's window means being able to move an administrator's window.
+mshelld only accepts requests from the `mshell.exe` sitting in its own
+directory, and logs every refusal to `%TEMP%\mshelld.log`, so other programs
+running under your account cannot just open the pipe and drive it. But that
+check identifies a file, not an intention: anything running as you that can
+replace or relaunch that `mshell.exe` gets the same reach. The boundary the
+helper draws is your login session, not administrator — so keep the install
+directory writable by administrators only, and that is the whole of it.
+
 **What it does not do:** keybinds still stop responding while an elevated window
 has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
 deliberately left in mshell — moving it would mean putting the whole keymap
