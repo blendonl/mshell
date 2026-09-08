@@ -174,7 +174,7 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
             $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
 
 # --- Rules ---
-.PHONY: all clean check-lua dist test regs msi print-version
+.PHONY: all clean check-lua dist test regs msi print-version meta
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -319,11 +319,14 @@ msi: $(TARGET) $(HELPER)
 dist: $(TARGET) $(HELPER)
 	@echo "  DIST  $(DISTNAME)"
 	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip"
-	mkdir -p "$(DISTDIR)/config"
+	mkdir -p "$(DISTDIR)/config" "$(DISTDIR)/meta"
 	cp $(TARGET)          "$(DISTDIR)/"
 	cp $(HELPER)          "$(DISTDIR)/"
 	cp config/init.lua      "$(DISTDIR)/config/"
 	cp config/init.full.lua "$(DISTDIR)/config/"
+	cp meta/mshell.lua      "$(DISTDIR)/meta/"
+	cp meta/types.lua       "$(DISTDIR)/meta/"
+	cp config/.luarc.json   "$(DISTDIR)/config/"
 	cp $(DIST_FILES)      "$(DISTDIR)/"
 	cd dist && python3 -m zipfile -c "$(DISTNAME).zip" "$(DISTNAME)"
 	@echo "  ->    dist/$(DISTNAME).zip"
@@ -352,6 +355,16 @@ $(TEST_DIR)/test_api_spec: $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c $(S
 	@echo "  HOSTCC $@"
 	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c
 
+GEN_META = tools/gen_lua_meta
+
+$(GEN_META): tools/gen_lua_meta.c $(SRC_DIR)/api_spec.c $(SRC_DIR)/api_spec.h
+	@echo "  HOSTCC $@"
+	$(HOST_CC) -O1 -Wall -Wextra -o $@ tools/gen_lua_meta.c $(SRC_DIR)/api_spec.c
+
+meta: $(GEN_META)
+	@echo "  META   meta/mshell.lua"
+	@./$(GEN_META) meta/mshell.lua
+
 test: $(TEST_BINS)
 	@echo "  TEST"
 	@fail=0; for t in $(TEST_BINS); do ./$$t || fail=1; done; \
@@ -359,7 +372,7 @@ test: $(TEST_BINS)
 	 echo "  all tests passed"
 
 clean:
-	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS)
+	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(GEN_META)
 	rm -f .version-*
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
