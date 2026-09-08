@@ -517,6 +517,181 @@ static void test_churn_keeps_the_tree_consistent(void) {
     }
 }
 
+static void test_split_orientation_survives_a_tabbed_toggle(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_H);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_H);
+
+    CHECK(t.root->mode == TREE_SPLIT_H, "the container starts horizontal");
+    CHECK(t.root->split == TREE_SPLIT_H, "the remembered split is horizontal");
+
+    CHECK(tree_set_container(&t, win(1), TREE_SPLIT_TABBED),
+          "toggling to tabbed succeeds");
+    CHECK(t.root->mode == TREE_SPLIT_TABBED, "the container is tabbed");
+    CHECK(t.root->split == TREE_SPLIT_H,
+          "tabbing does not overwrite the remembered orientation");
+
+    CHECK(tree_set_container(&t, win(1), TREE_SPLIT_TABBED),
+          "toggling tabbed off succeeds");
+    CHECK(t.root->mode == TREE_SPLIT_H,
+          "toggling tabbed off restores horizontal, not a hardcoded vertical");
+
+    Capture c = run(&t, rect(0, 0, 800, 600));
+    CHECK(c.placed_n == 2, "both windows are visible again");
+    CHECK(rect_eq(placed_for(&c, win(0))->area, rect(0, 0, 800, 300)),
+          "the restored split is horizontal");
+}
+
+static void test_stacked_toggle_also_restores_the_orientation(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+
+    tree_rotate(&t, win(1));
+    CHECK(t.root->mode == TREE_SPLIT_H, "rotate made it horizontal");
+    CHECK(t.root->split == TREE_SPLIT_H, "rotate updated the remembered split");
+
+    tree_set_container(&t, win(1), TREE_SPLIT_STACKED);
+    tree_set_container(&t, win(1), TREE_SPLIT_STACKED);
+    CHECK(t.root->mode == TREE_SPLIT_H,
+          "a stacked round trip restores the rotated orientation");
+}
+
+static void test_switching_between_tabbed_and_stacked(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_H);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_H);
+
+    tree_set_container(&t, win(1), TREE_SPLIT_TABBED);
+    tree_set_container(&t, win(1), TREE_SPLIT_STACKED);
+    CHECK(t.root->mode == TREE_SPLIT_STACKED,
+          "a different container mode replaces rather than toggles");
+    CHECK(t.root->split == TREE_SPLIT_H,
+          "the remembered orientation survives the detour");
+
+    tree_set_container(&t, win(1), TREE_SPLIT_STACKED);
+    CHECK(t.root->mode == TREE_SPLIT_H, "toggling off still restores it");
+}
+
+static void test_set_container_marks_the_asking_window_active(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+
+    tree_set_container(&t, win(0), TREE_SPLIT_TABBED);
+    CHECK(t.root->active == 0, "the a-side window becomes the shown tab");
+    Capture c = run(&t, rect(0, 0, 800, 600));
+    CHECK(c.placed[0].window == win(0), "the a-side window is shown");
+
+    tree_set_container(&t, win(1), TREE_SPLIT_TABBED);
+    CHECK(t.root->active == 1, "the b-side window becomes the shown tab");
+}
+
+static void test_remove_preserves_the_remembered_split(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+    tree_insert(&t, tree_find(&t, win(1)), win(2), TREE_SPLIT_H);
+
+    TreeNode *inner = tree_find(&t, win(1))->parent;
+    tree_set_container(&t, win(1), TREE_SPLIT_TABBED);
+    CHECK(inner->mode == TREE_SPLIT_TABBED, "the inner container is tabbed");
+    CHECK(inner->split == TREE_SPLIT_H, "it remembers horizontal");
+
+    tree_insert(&t, tree_find(&t, win(0)), win(3), TREE_SPLIT_V);
+    CHECK(tree_remove(&t, win(3)), "removing the newcomer succeeds");
+
+    TreeNode *still = tree_find(&t, win(1))->parent;
+    CHECK(still->mode == TREE_SPLIT_TABBED,
+          "the untouched container keeps its mode");
+    CHECK(still->split == TREE_SPLIT_H,
+          "the untouched container keeps its remembered orientation");
+}
+
+static void test_splice_carries_the_remembered_split_up(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+    tree_insert(&t, tree_find(&t, win(1)), win(2), TREE_SPLIT_V);
+    tree_insert(&t, tree_find(&t, win(2)), win(3), TREE_SPLIT_H);
+
+    TreeNode *deep   = tree_find(&t, win(2))->parent;
+    TreeNode *absorb = tree_find(&t, win(1))->parent;
+    CHECK(deep->split == TREE_SPLIT_H, "the deep container remembers horizontal");
+    CHECK(absorb->split == TREE_SPLIT_V,
+          "the node that will absorb it remembers vertical, so the two differ");
+
+    tree_set_container(&t, win(2), TREE_SPLIT_TABBED);
+    CHECK(deep->split == TREE_SPLIT_H, "tabbing keeps the deep orientation");
+
+    CHECK(tree_remove(&t, win(1)), "removing the sibling splices the deep node up");
+
+    TreeNode *moved = tree_find(&t, win(2))->parent;
+    CHECK(moved->mode == TREE_SPLIT_TABBED, "the mode came up with it");
+    CHECK(moved->split == TREE_SPLIT_H,
+          "the remembered orientation came up with it too");
+
+    tree_set_container(&t, win(2), TREE_SPLIT_TABBED);
+    CHECK(moved->mode == TREE_SPLIT_H,
+          "toggling off after a splice restores horizontal");
+}
+
+static void test_cycle_container_walks_up_to_the_container(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+    t.root->mode = TREE_SPLIT_TABBED;
+    t.root->active = 1;
+
+    void *focus = NULL;
+    CHECK(tree_cycle_container(&t, win(1), 1, &focus), "cycling succeeds");
+    CHECK(t.root->active == 0, "the active tab flipped");
+    CHECK(focus == win(0), "the new focus is the newly shown leaf");
+
+    CHECK(tree_cycle_container(&t, win(0), 1, &focus), "cycling back succeeds");
+    CHECK(t.root->active == 1, "the active tab flipped back");
+    CHECK(focus == win(1), "focus follows again");
+}
+
+static void test_cycle_container_needs_a_container(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+
+    void *focus = (void *)1;
+    CHECK(!tree_cycle_container(&t, win(1), 1, &focus),
+          "a plain split has no container to cycle");
+    CHECK(!tree_cycle_container(&t, win(9), 1, &focus),
+          "an absent window cannot cycle");
+    CHECK(!tree_set_container(&t, win(9), TREE_SPLIT_TABBED),
+          "an absent window has no container to set");
+}
+
+static void test_cycle_container_finds_a_nested_container(void) {
+    Tree t;
+    tree_reset(&t);
+    tree_insert(&t, NULL, win(0), TREE_SPLIT_V);
+    tree_insert(&t, NULL, win(1), TREE_SPLIT_V);
+    tree_insert(&t, tree_find(&t, win(1)), win(2), TREE_SPLIT_H);
+
+    t.root->mode   = TREE_SPLIT_TABBED;
+    t.root->active = 1;
+
+    void *focus = NULL;
+    CHECK(tree_cycle_container(&t, win(2), 1, &focus),
+          "a window below a tabbed root cycles that root");
+    CHECK(t.root->active == 0, "the root container flipped");
+    CHECK(focus == win(0), "focus moved to the other branch");
+}
+
 int main(void) {
     test_empty();
     test_null_window_is_rejected();
@@ -539,6 +714,15 @@ int main(void) {
     test_rotate_flips_the_parent_split();
     test_resize_moves_the_seam_and_clamps();
     test_clamp_ratio_bounds();
+    test_split_orientation_survives_a_tabbed_toggle();
+    test_stacked_toggle_also_restores_the_orientation();
+    test_switching_between_tabbed_and_stacked();
+    test_set_container_marks_the_asking_window_active();
+    test_remove_preserves_the_remembered_split();
+    test_splice_carries_the_remembered_split_up();
+    test_cycle_container_walks_up_to_the_container();
+    test_cycle_container_needs_a_container();
+    test_cycle_container_finds_a_nested_container();
     test_churn_keeps_the_tree_consistent();
     return tests_report("tree_algebra");
 }
