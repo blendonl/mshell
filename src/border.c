@@ -145,10 +145,24 @@ void border_refresh(void) {
     if (window_is_float_tier(fmw))  s_color = g.border_color_float;
     if (fmw && fmw->urgent)      s_color = g.border_color_urgent;
 
-    int x = r.left - bw;
-    int y = r.top  - bw;
-    int w = (r.right  - r.left) + bw * 2;
-    int h = (r.bottom - r.top)  + bw * 2;
+    RECT ring = { r.left - bw, r.top - bw, r.right + bw, r.bottom + bw };
+
+    RECT limit;
+    UnionRect(&limit, &g.monitors[monitor_of_window(focus)].work_area, &r);
+    if (ring.left   < limit.left)   ring.left   = limit.left;
+    if (ring.top    < limit.top)    ring.top    = limit.top;
+    if (ring.right  > limit.right)  ring.right  = limit.right;
+    if (ring.bottom > limit.bottom) ring.bottom = limit.bottom;
+
+    int x = ring.left;
+    int y = ring.top;
+    int w = ring.right  - ring.left;
+    int h = ring.bottom - ring.top;
+
+    if (w <= bw * 2 || h <= bw * 2) {
+        border_hide();
+        return;
+    }
 
     /* Hollow region: the overlay is only the ring, never the interior. */
     HRGN outer = CreateRectRgn(0, 0, w, h);
