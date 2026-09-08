@@ -1565,8 +1565,8 @@ static int push_window_field(lua_State *L, HWND hwnd, const char *k) {
     }
 
     if (strcmp(k, "title") == 0) {
-        wchar_t title[256] = {0};
-        GetWindowTextW(hwnd, title, 256);
+        wchar_t title[256];
+        window_title(hwnd, title, ARRAYSIZE(title));
         push_wstr(L, title);
         return 1;
     }
@@ -1631,8 +1631,8 @@ static int lua_window_eq(lua_State *L) {
 
 static int lua_window_tostring(lua_State *L) {
     HWND    hwnd     = to_window(L, 1);
-    wchar_t title[80] = {0};
-    if (IsWindow(hwnd)) GetWindowTextW(hwnd, title, 80);
+    wchar_t title[80];
+    window_title(hwnd, title, ARRAYSIZE(title));
     char t[240];
     WideCharToMultiByte(CP_UTF8, 0, title, -1, t, sizeof t, NULL, NULL);
     lua_pushfstring(L, "window(%p, \"%s\")", (void *)hwnd, t);
