@@ -5,6 +5,27 @@ static void desktop_unlink_at(Desktop *dt, int i);
 
 static void desktop_fill_monitors(void);
 
+static bool desktop_insert_window(Desktop *dt, HWND hwnd, bool focus_it) {
+    if (!dt || dt->count >= MAX_WINDOWS_PER_DESKTOP) return false;
+
+    int idx = desktop_attach_index(g.attach_policy, dt->focused, dt->count);
+    if (idx < 0)         idx = 0;
+    if (idx > dt->count) idx = dt->count;
+
+    if (idx < dt->count)
+        memmove(&dt->windows[idx + 1], &dt->windows[idx],
+                (size_t)(dt->count - idx) * sizeof(HWND));
+
+    dt->windows[idx] = hwnd;
+    dt->count++;
+
+    if (focus_it)                dt->focused = idx;
+    else if (dt->focused >= idx) dt->focused++;
+
+    dt->app_pending = false;
+    return true;
+}
+
 bool desktop_name_ok(const wchar_t *name) {
     return desktop_list_name_ok(name, DESKTOP_NAME_MAX);
 }
@@ -419,7 +440,7 @@ void desktop_switch(const wchar_t *name) {
 
             desktop_unlink_at(prev_dt, i);
 
-            new_dt->windows[new_dt->count++] = h;
+            desktop_insert_window(new_dt, h, false);
             mw->desktop_id  = target_id;
             mw->has_applied = false;
 
@@ -436,6 +457,7 @@ void desktop_switch(const wchar_t *name) {
     if (other >= 0) {
         desktop_place_on_monitor(prev_id, other);
         desktop_place_on_monitor(target_id, mon);
+        if (!prev_id) desktop_fill_monitors();
     } else {
         if (prev_dt) {
             for (int i = 0; i < prev_dt->count; i++)
@@ -547,10 +569,7 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     }
 
     Desktop *new_dt = &g.desktops[slot];
-    new_dt->windows[new_dt->count] = hwnd;
-    new_dt->focused = new_dt->count;
-    new_dt->count++;
-    new_dt->app_pending = false;
+    desktop_insert_window(new_dt, hwnd, true);
 
     desktop_focus_hist_push(new_dt, hwnd);
 
@@ -594,18 +613,7 @@ bool desktop_add_window(HWND hwnd, int slot) {
         return false;
     }
 
-    int idx = desktop_attach_index(g.attach_policy, dt->focused, dt->count);
-
-    if (idx < dt->count)
-        memmove(&dt->windows[idx + 1], &dt->windows[idx],
-                (size_t)(dt->count - idx) * sizeof(HWND));
-
-    dt->windows[idx] = hwnd;
-    dt->count++;
-    dt->focused = idx;
-
-    dt->app_pending = false;
-    return true;
+    return desktop_insert_window(dt, hwnd, true);
 }
 
 void desktop_remove_window(HWND hwnd) {
