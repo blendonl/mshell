@@ -149,125 +149,12 @@ const char *vk_to_key_name(DWORD vk) {
     return NULL;
 }
 
-/* ===========================================================================
- * Action-name → enum lookup
- * =========================================================================== */
-typedef struct {
-    const char *name;
-    Action      action;
-} ActionNameEntry;
-
-static const ActionNameEntry action_names[] = {
-    {"focus_left",       ACTION_FOCUS_LEFT},
-    {"focus_down",       ACTION_FOCUS_DOWN},
-    {"focus_up",         ACTION_FOCUS_UP},
-    {"focus_right",      ACTION_FOCUS_RIGHT},
-    {"focus_next",       ACTION_FOCUS_NEXT},
-    {"focus_prev",       ACTION_FOCUS_PREV},
-    {"move_left",        ACTION_MOVE_LEFT},
-    {"move_down",        ACTION_MOVE_DOWN},
-    {"move_up",          ACTION_MOVE_UP},
-    {"move_right",       ACTION_MOVE_RIGHT},
-    {"switch_desktop",   ACTION_SWITCH_DESKTOP},
-    {"move_to_desktop",  ACTION_MOVE_TO_DESKTOP},
-    {"last_desktop",     ACTION_LAST_DESKTOP},
-    {"next_desktop",     ACTION_NEXT_DESKTOP},
-    {"prev_desktop",     ACTION_PREV_DESKTOP},
-    {"focus_monitor_next", ACTION_FOCUS_MONITOR_NEXT},
-    {"focus_monitor_prev", ACTION_FOCUS_MONITOR_PREV},
-    {"move_to_monitor_next", ACTION_MOVE_TO_MONITOR_NEXT},
-    {"move_to_monitor_prev", ACTION_MOVE_TO_MONITOR_PREV},
-    {"close",            ACTION_CLOSE},
-    {"kill",             ACTION_KILL},
-    {"minimize",         ACTION_MINIMIZE},
-    {"restore",          ACTION_RESTORE},
-    {"toggle_sticky",    ACTION_TOGGLE_STICKY},
-    {"mark_scratchpad",  ACTION_MARK_SCRATCHPAD},
-    {"toggle_scratchpad",ACTION_TOGGLE_SCRATCHPAD},
-    {"toggle_always_on_top", ACTION_TOGGLE_ALWAYS_ON_TOP},
-    {"last_window",      ACTION_LAST_WINDOW},
-    {"toggle_float",     ACTION_TOGGLE_FLOAT},
-    {"resize_left",      ACTION_RESIZE_LEFT},
-    {"resize_down",      ACTION_RESIZE_DOWN},
-    {"resize_up",        ACTION_RESIZE_UP},
-    {"resize_right",     ACTION_RESIZE_RIGHT},
-    {"fullscreen",         ACTION_FULLSCREEN},
-    {"fullscreen_content", ACTION_FULLSCREEN_CONTENT},
-    {"fullscreen_both",    ACTION_FULLSCREEN_BOTH},
-    {"layout_tiling",    ACTION_LAYOUT_TILING},
-    {"layout_monocle",   ACTION_LAYOUT_MONOCLE},
-    {"layout_grid",      ACTION_LAYOUT_GRID},
-    {"layout_spiral",    ACTION_LAYOUT_SPIRAL},
-    {"layout_centered",  ACTION_LAYOUT_CENTERED},
-    {"layout_bstack",    ACTION_LAYOUT_BSTACK},
-    {"layout_columns",   ACTION_LAYOUT_COLUMNS},
-    {"cycle_layout",     ACTION_CYCLE_LAYOUT},
-    {"promote_master",   ACTION_PROMOTE_MASTER},
-    {"zoom",             ACTION_ZOOM},
-    {"inc_master",       ACTION_INC_MASTER},
-    {"dec_master",       ACTION_DEC_MASTER},
-    {"inc_nmaster",      ACTION_INC_NMASTER},
-    {"dec_nmaster",      ACTION_DEC_NMASTER},
-    {"inc_cfact",        ACTION_INC_CFACT},
-    {"dec_cfact",        ACTION_DEC_CFACT},
-    {"reset_cfact",      ACTION_RESET_CFACT},
-    {"enter_submap",     ACTION_ENTER_SUBMAP},
-    {"spawn",            ACTION_SPAWN},
-    {"reload",           ACTION_RELOAD},
-    {"quit",             ACTION_QUIT},
-    {"update",           ACTION_UPDATE},
-    {"panic",            ACTION_PANIC},
-    {"lock",             ACTION_LOCK},
-    {"logoff",           ACTION_LOGOFF},
-    {"reboot",           ACTION_REBOOT},
-    {"shutdown",         ACTION_SHUTDOWN},
-    {"sleep",            ACTION_SLEEP},
-    {"hibernate",        ACTION_HIBERNATE},
-    {"volume_up",        ACTION_VOLUME_UP},
-    {"volume_down",      ACTION_VOLUME_DOWN},
-    {"volume_mute",      ACTION_VOLUME_MUTE},
-    {"media_play",       ACTION_MEDIA_PLAY},
-    {"media_next",       ACTION_MEDIA_NEXT},
-    {"media_prev",       ACTION_MEDIA_PREV},
-    {"media_stop",       ACTION_MEDIA_STOP},
-    {"screenshot",       ACTION_SCREENSHOT},
-    {"screenshot_window", ACTION_SCREENSHOT_WINDOW},
-    {"notify",           ACTION_NOTIFY},
-    {"jump_urgent",      ACTION_JUMP_URGENT},
-    {"launcher",         ACTION_LAUNCHER},
-    {"toggle_bar",       ACTION_TOGGLE_BAR},
-    {"bar_top",          ACTION_BAR_TOP},
-    {"bar_floating",     ACTION_BAR_FLOATING},
-    {"toggle_hdr",       ACTION_TOGGLE_HDR},
-    {"cycle_refresh",    ACTION_CYCLE_REFRESH},
-    {"split_h",          ACTION_SPLIT_H},
-    {"split_v",          ACTION_SPLIT_V},
-    {"rotate_split",     ACTION_ROTATE_SPLIT},
-    {"toggle_tabbed",    ACTION_TOGGLE_TABBED},
-    {"toggle_stacked",   ACTION_TOGGLE_STACKED},
-    {"container_next",   ACTION_CONTAINER_NEXT},
-    {"container_prev",   ACTION_CONTAINER_PREV},
-    {"split_grow",       ACTION_SPLIT_GROW},
-    {"split_shrink",     ACTION_SPLIT_SHRINK},
-    {"layout_bsp",       ACTION_LAYOUT_BSP},
-    {NULL, ACTION_NONE}
-};
-
 Action action_name_to_enum(const char *name) {
-    for (const ActionNameEntry *e = action_names; e->name; e++) {
-        if (_stricmp(e->name, name) == 0) return e->action;
-    }
-    return ACTION_NONE;
+    return api_action_from_name(name);
 }
 
-/* Reverse of action_name_to_enum: the canonical name for an action, or NULL.
- * The which-key hint uses this as the label for bindings that aren't spawn /
- * enter_submap (which it formats specially). */
 const char *action_enum_to_name(Action action) {
-    for (const ActionNameEntry *e = action_names; e->name; e++) {
-        if (e->action == action) return e->name;
-    }
-    return NULL;
+    return api_action_path(action);
 }
 
 /* ===========================================================================
@@ -974,26 +861,7 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
  * for five.
  * --------------------------------------------------------------------------- */
 bool action_is_repeatable(Action action) {
-    switch (action) {
-    case ACTION_FOCUS_LEFT:  case ACTION_FOCUS_DOWN:
-    case ACTION_FOCUS_UP:    case ACTION_FOCUS_RIGHT:
-    case ACTION_FOCUS_NEXT:  case ACTION_FOCUS_PREV:
-    case ACTION_MOVE_LEFT:   case ACTION_MOVE_DOWN:
-    case ACTION_MOVE_UP:     case ACTION_MOVE_RIGHT:
-    case ACTION_RESIZE_LEFT: case ACTION_RESIZE_DOWN:
-    case ACTION_RESIZE_UP:   case ACTION_RESIZE_RIGHT:
-    case ACTION_NEXT_DESKTOP: case ACTION_PREV_DESKTOP:
-    case ACTION_FOCUS_MONITOR_NEXT: case ACTION_FOCUS_MONITOR_PREV:
-    case ACTION_MOVE_TO_MONITOR_NEXT: case ACTION_MOVE_TO_MONITOR_PREV:
-    case ACTION_INC_MASTER:  case ACTION_DEC_MASTER:
-    case ACTION_INC_NMASTER: case ACTION_DEC_NMASTER:
-    case ACTION_INC_CFACT:   case ACTION_DEC_CFACT:
-    case ACTION_CYCLE_LAYOUT:
-    case ACTION_VOLUME_UP:   case ACTION_VOLUME_DOWN:
-        return true;
-    default:
-        return false;
-    }
+    return api_action_repeatable(action);
 }
 
 /* Grow/shrink the focused window within its stack (cfact). */
