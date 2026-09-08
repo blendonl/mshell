@@ -421,7 +421,7 @@ bool ipc_client_try(int *exit_code) {
         }
         if (wcscmp(argv[i], L"--msg") == 0) {
             console_print("error: --msg needs a command, e.g. "
-                         "--msg \"switch_desktop web\"");
+                         "--msg \"desktop.focus web\"");
             *exit_code = 1;
             handled = true;
             break;
