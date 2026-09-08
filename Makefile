@@ -116,6 +116,12 @@ DIST_FILES = install.bat uninstall.bat \
              services.reg services-undo.reg \
              INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
 
+CPPCHECK       = cppcheck
+CPPCHECK_DIR   = .github/cppcheck
+CPPCHECK_FLAGS = --enable=warning,portability --quiet --error-exitcode=1 \
+                 --suppress=missingIncludeSystem \
+                 --suppressions-list=$(CPPCHECK_DIR)/suppressions.txt
+
 HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
@@ -278,6 +284,14 @@ check-config: $(HOST_LUA)
 	@echo "  CONFIG"
 	@./$(HOST_LUA) $(TEST_DIR)/check_config.lua $(SRC_DIR)/api_spec.c \
 	    config/init.lua config/init.full.lua README.md
+
+cppcheck:
+	@if command -v $(CPPCHECK) >/dev/null 2>&1; then \
+	    echo "  CHECK $(SRC_DIR)"; \
+	    $(CPPCHECK) $(CPPCHECK_FLAGS) $(SRC_DIR)/; \
+	else \
+	    echo "  SKIP  cppcheck — not installed (apt install cppcheck)"; \
+	fi
 
 run-host-tests: $(TEST_BINS)
 	@echo "  TEST  $(if $(TEST_SUFFIX),sanitized,host)"
