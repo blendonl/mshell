@@ -8,6 +8,7 @@ typedef struct TreeNode {
     struct TreeNode *a, *b;
     struct TreeNode *parent;
     SplitMode        mode;
+    SplitMode        split;
     float            ratio;
     int              active;
     bool             used;
@@ -84,6 +85,11 @@ static TreeNode *node_alloc(Tree *t) {
     return NULL;
 }
 
+static void node_set_mode(TreeNode *n, SplitMode mode) {
+    if (mode == SPLIT_V || mode == SPLIT_H) n->split = mode;
+    n->mode = mode;
+}
+
 static void node_free(Tree *t, TreeNode *n) {
     if (!n || !n->used) return;
     n->used = false;
@@ -127,9 +133,9 @@ static void tree_insert(Tree *t, TreeNode *at, HWND hwnd, SplitMode mode) {
     at->hwnd   = NULL;
     at->a      = moved;
     at->b      = fresh;
-    at->mode   = mode;
     at->ratio  = 0.5f;
     at->active = 1;
+    node_set_mode(at, mode);
 }
 
 static void tree_remove(Tree *t, HWND hwnd) {
@@ -147,6 +153,7 @@ static void tree_remove(Tree *t, HWND hwnd) {
 
     p->hwnd   = sib->hwnd;
     p->mode   = sib->mode;
+    p->split  = sib->split;
     p->ratio  = sib->ratio;
     p->active = sib->active;
     p->a      = sib->a;
@@ -159,25 +166,23 @@ static void tree_remove(Tree *t, HWND hwnd) {
 }
 
 static void tree_sync(Tree *t, Desktop *dt, int mon) {
-    for (int guard = 0; guard < TREE_MAX_NODES; guard++) {
-        HWND stale = NULL;
+    HWND stale[TREE_MAX_NODES];
+    int  stale_n = 0;
 
-        for (int i = 0; i < TREE_MAX_NODES && !stale; i++) {
-            TreeNode *n = &t->pool[i];
-            if (!n->used || !n->hwnd) continue;
+    for (int i = 0; i < TREE_MAX_NODES; i++) {
+        TreeNode *n = &t->pool[i];
+        if (!n->used || !n->hwnd) continue;
 
-            bool present = false;
-            for (int j = 0; j < dt->count; j++) {
-                if (dt->windows[j] != n->hwnd) continue;
-                present = tree_owns_window(dt->windows[j], mon);
-                break;
-            }
-            if (!present) stale = n->hwnd;
+        bool present = false;
+        for (int j = 0; j < dt->count; j++) {
+            if (dt->windows[j] != n->hwnd) continue;
+            present = tree_owns_window(dt->windows[j], mon);
+            break;
         }
-
-        if (!stale) break;
-        tree_remove(t, stale);
+        if (!present) stale[stale_n++] = n->hwnd;
     }
+
+    for (int i = 0; i < stale_n; i++) tree_remove(t, stale[i]);
 
     HWND focus = desktop_focused_of(dt);
     for (int i = 0; i < dt->count; i++) {
@@ -274,7 +279,7 @@ void layout_tree_rotate(void) {
     if (!n || !n->parent) return;
 
     TreeNode *p = n->parent;
-    p->mode = (p->mode == SPLIT_V) ? SPLIT_H : SPLIT_V;
+    node_set_mode(p, (p->mode == SPLIT_V) ? SPLIT_H : SPLIT_V);
     tile_current();
 }
 
@@ -287,7 +292,7 @@ void layout_tree_set_container(SplitMode mode) {
     if (!n || !n->parent) return;
 
     TreeNode *p = n->parent;
-    p->mode   = (p->mode == mode) ? SPLIT_V : mode;
+    node_set_mode(p, (p->mode == mode) ? p->split : mode);
     p->active = (p->b == n) ? 1 : 0;
     tile_current();
 }
