@@ -26,6 +26,9 @@ SRC_DIR  = src
 LUA_DIR  = vendor/lua/src
 
 MSHELL_SRCS = $(SRC_DIR)/main.c       \
+              $(SRC_DIR)/cli.c        \
+              $(SRC_DIR)/msgwin.c     \
+              $(SRC_DIR)/monitors.c   \
               $(SRC_DIR)/keys.c       \
               $(SRC_DIR)/input_hook.c \
               $(SRC_DIR)/actions.c    \
