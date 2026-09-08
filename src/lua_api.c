@@ -1355,8 +1355,8 @@ static int lua_mshell_set_mouse_tbl(lua_State *L) {
  *   which — a device-name pattern ("\\\\.\\DISPLAY2", "*DISPLAY2") or a
  *           0-based index.
  *   opts  — how mshell tiles this display: gaps, nmaster, master_ratio,
- *           layout; and what the display itself is doing: resolution, refresh,
- *           hdr.
+ *           layout; what the display itself is doing: resolution, refresh,
+ *           rotation, hdr; and where it sits: primary, position.
  *
  * Prefer the name form. An index is easier to write and is also what changes
  * when a display is unplugged: the rest renumber, and "monitor 1 uses columns"
@@ -1526,6 +1526,36 @@ static int lua_mshell_monitor_rule(lua_State *L) {
     if (lua_isboolean(L, -1)) {
         r->set_hdr = true;
         r->hdr     = (bool)lua_toboolean(L, -1);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "primary");
+    if (lua_isboolean(L, -1)) {
+        r->set_primary = true;
+        r->primary     = (bool)lua_toboolean(L, -1);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 2, "position");
+    if (lua_istable(L, -1)) {
+        int t = lua_absindex(L, -1);
+        lua_rawgeti(L, t, 1);
+        lua_rawgeti(L, t, 2);
+        bool ok = lua_isnumber(L, -2) && lua_isnumber(L, -1);
+        int  x  = (int)lua_tointeger(L, -2);
+        int  y  = (int)lua_tointeger(L, -1);
+        lua_pop(L, 2);
+        if (!ok) {
+            lua_pop(L, 1);
+            return luaL_error(L, "monitor_rule: position needs an x and a y, "
+                                 "e.g. { 3840, 0 }");
+        }
+        r->set_position = true;
+        r->pos_x = x; r->pos_y = y;
+    } else if (!lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return luaL_error(L, "monitor_rule: position must be a table like "
+                             "{ 3840, 0 }");
     }
     lua_pop(L, 1);
 
