@@ -1470,7 +1470,7 @@ void execute_action(Action action, int arg, const wchar_t *command,
     /* Go to whatever asked for attention, wherever it is — including a desktop
      * you are not on, which is the case the flag exists for. */
     case ACTION_LAUNCHER:
-        launcher_open();
+        if (!launcher_spawn_mrun()) launcher_open();
         break;
 
     case ACTION_TOGGLE_BAR:
