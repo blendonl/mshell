@@ -1,5 +1,6 @@
 #include "mshell.h"
 #include "pipe_sd.h"
+#include "ipc_state.h"
 
 #define IPC_REPLY_MAX    16384
 #define IPC_CMD_MAX      1024
@@ -22,123 +23,68 @@ static void ipc_pipe_name(wchar_t *out, size_t cap) {
     out[cap - 1] = L'\0';
 }
 
-typedef struct {
-    char  *buf;
-    size_t cap;
-    size_t len;
-    bool   full;
-} StrBuf;
-
-static void sb_init(StrBuf *b, char *buf, size_t cap) {
-    b->buf  = buf;
-    b->cap  = cap;
-    b->len  = 0;
-    b->full = (cap == 0);
-    if (cap) buf[0] = '\0';
-}
-
-static void sb_addf(StrBuf *b, const char *fmt, ...) {
-    if (b->full) return;
-
-    size_t  room = b->cap - b->len;
-    va_list ap;
-
-    va_start(ap, fmt);
-    int n = vsnprintf(b->buf + b->len, room, fmt, ap);
-    va_end(ap);
-
-    if (n < 0) {
-        b->buf[b->len] = '\0';
-        b->full        = true;
-        return;
-    }
-
-    if ((size_t)n >= room) {
-        b->len  = b->cap - 1;
-        b->full = true;
-        return;
-    }
-
-    b->len += (size_t)n;
-}
-
-static void json_escape(const wchar_t *w, char *out, size_t cap) {
-    char   u8[1024];
-    StrBuf b;
-
-    sb_init(&b, out, cap);
-
-    if (WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, u8, (int)sizeof u8,
+static void w_to_u8(const wchar_t *w, char *out, size_t cap) {
+    if (!cap) return;
+    if (WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, out, (int)cap,
                             NULL, NULL) <= 0)
-        return;
-
-    for (size_t i = 0; u8[i] && !b.full; i++) {
-        unsigned char c = (unsigned char)u8[i];
-        if (c == '"' || c == '\\') sb_addf(&b, "\\%c", c);
-        else if (c < 0x20)         sb_addf(&b, "\\u%04x", c);
-        else                       sb_addf(&b, "%c", c);
-    }
+        out[0] = '\0';
+    out[cap - 1] = '\0';
 }
 
 static void ipc_build_state(char *out, size_t cap) {
-    StrBuf b;
-    char   esc[1024];
+    IpcDesktop dts[MAX_DESKTOPS];
+    IpcMonitor mons[MAX_MONITORS];
+    char       dt_name[MAX_DESKTOPS][4 * DESKTOP_NAME_MAX];
+    char       mon_dev[MAX_MONITORS][4 * CCHDEVICENAME];
+    char       mon_desk[MAX_MONITORS][4 * DESKTOP_NAME_MAX];
+    char       title[4 * 256];
 
-    sb_init(&b, out, cap);
-
-    sb_addf(&b, "{\"version\":\"%s\",", MSHELL_VERSION);
-
-    sb_addf(&b, "\"desktops\":[");
-    for (int i = 0; i < g.desktop_count && !b.full; i++) {
+    int nd = g.desktop_count > MAX_DESKTOPS ? MAX_DESKTOPS : g.desktop_count;
+    for (int i = 0; i < nd; i++) {
         const Desktop *d = &g.desktops[i];
-        json_escape(d->name, esc, sizeof esc);
-        sb_addf(&b, "%s{\"name\":\"%s\",\"current\":%s,\"windows\":%d,"
-                    "\"layout\":\"%s\",\"monitor\":%d}",
-                i ? "," : "", esc,
-                d->id == g.current_desktop_id ? "true" : "false",
-                d->count, layout_to_name(d->layout), d->monitor);
+        w_to_u8(d->name, dt_name[i], sizeof dt_name[i]);
+        dts[i] = (IpcDesktop){ dt_name[i], d->id, d->count,
+                               layout_to_name(d->layout), d->monitor };
     }
-    sb_addf(&b, "],");
 
-    sb_addf(&b, "\"monitors\":[");
-    for (int i = 0; i < g.monitor_count && !b.full; i++) {
+    int nm = g.monitor_count > MAX_MONITORS ? MAX_MONITORS : g.monitor_count;
+    for (int i = 0; i < nm; i++) {
         const Monitor *m = &g.monitors[i];
 
-        json_escape(m->device, esc, sizeof esc);
+        w_to_u8(m->device, mon_dev[i], sizeof mon_dev[i]);
+
+        const Desktop *shown = desktop_by_id(desktop_on_monitor(i));
+        if (shown) w_to_u8(shown->name, mon_desk[i], sizeof mon_desk[i]);
+        else       mon_desk[i][0] = '\0';
+
         DisplayMode mode = {0};
         display_current_mode(m->device, &mode);
         int hdr = display_hdr_state(m->device);
 
-        char dname[4 * DESKTOP_NAME_MAX];
-        const Desktop *shown = desktop_by_id(desktop_on_monitor(i));
-        if (shown) json_escape(shown->name, dname, sizeof dname);
-        else       dname[0] = '\0';
-
-        sb_addf(&b, "%s{\"index\":%d,\"device\":\"%s\",\"desktop\":\"%s\","
-                    "\"x\":%ld,\"y\":%ld,"
-                    "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
-                    "\"rotation\":%d,\"hdr\":%s,\"focused\":%s}",
-                i ? "," : "", i, esc, dname,
-                (long)m->full.left, (long)m->full.top,
-                (long)(m->full.right - m->full.left),
-                (long)(m->full.bottom - m->full.top),
-                monitor_dpi(i), mode.refresh,
-                display_rotation(m->device),
-                hdr == HDR_UNSUPPORTED ? "null" : hdr == HDR_ON ? "true"
-                                                                : "false",
-                i == g.focused_monitor ? "true" : "false");
+        mons[i] = (IpcMonitor){
+            i, mon_dev[i], mon_desk[i],
+            (long)m->full.left, (long)m->full.top,
+            (long)(m->full.right - m->full.left),
+            (long)(m->full.bottom - m->full.top),
+            monitor_dpi(i), mode.refresh, display_rotation(m->device),
+            hdr == HDR_UNSUPPORTED ? IPC_HDR_UNSUPPORTED
+                : hdr == HDR_ON    ? IPC_HDR_ON : IPC_HDR_OFF,
+            i == g.focused_monitor,
+        };
     }
-    sb_addf(&b, "],");
 
-    HWND f = desktop_get_focused();
+    const char *focused = NULL;
+    HWND        f       = desktop_get_focused();
     if (f && IsWindow(f)) {
-        wchar_t title[256] = {0};
-        GetWindowTextW(f, title, 256);
-        json_escape(title, esc, sizeof esc);
-        sb_addf(&b, "\"focused\":\"%s\"}", esc);
-    } else {
-        sb_addf(&b, "\"focused\":null}");
+        wchar_t wtitle[256] = {0};
+        GetWindowTextW(f, wtitle, 256);
+        w_to_u8(wtitle, title, sizeof title);
+        focused = title;
     }
+
+    IpcState st = { MSHELL_VERSION, dts, nd, g.current_desktop_id,
+                    mons, nm, focused };
+    ipc_state_build(out, cap, &st);
 }
 
 void ipc_handle_request(void *req_ptr) {
