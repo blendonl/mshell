@@ -114,13 +114,19 @@ DIST_FILES = install.bat uninstall.bat \
              services.reg services-undo.reg \
              INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
 
-HOST_CC   = cc
-TEST_DIR  = test
-TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
-            $(TEST_DIR)/test_whichkey_math $(TEST_DIR)/test_update_parse \
-            $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
+HOST_CC     = cc
+TEST_DIR    = test
+TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
+               api_spec
+TEST_SUFFIX =
+HOST_CFLAGS = -O1 -Wall -Wextra
+ASAN_CFLAGS = -O1 -g -Wall -Wextra \
+              -fsanitize=address,undefined -fno-omit-frame-pointer \
+              -fno-sanitize-recover=all
+TEST_BINS   = $(TEST_MODULES:%=$(TEST_DIR)/test_%$(TEST_SUFFIX))
 
-.PHONY: all clean check-lua dist test regs msi print-version probe meta check-config
+.PHONY: all clean check-lua dist test test-asan run-host-tests regs msi \
+        print-version probe meta check-config cppcheck symbols
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -226,29 +232,9 @@ dist: $(TARGET) $(HELPER)
 	cd dist && python3 -m zipfile -c "$(DISTNAME).zip" "$(DISTNAME)"
 	@echo "  ->    dist/$(DISTNAME).zip"
 
-$(TEST_DIR)/test_match: $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c $(SRC_DIR)/match.h
+$(TEST_DIR)/test_%$(TEST_SUFFIX): $(TEST_DIR)/test_%.c $(SRC_DIR)/%.c $(SRC_DIR)/%.h
 	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_match.c $(SRC_DIR)/match.c
-
-$(TEST_DIR)/test_layout_math: $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c $(SRC_DIR)/layout_math.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_layout_math.c $(SRC_DIR)/layout_math.c
-
-$(TEST_DIR)/test_whichkey_math: $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c $(SRC_DIR)/whichkey_math.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_whichkey_math.c $(SRC_DIR)/whichkey_math.c
-
-$(TEST_DIR)/test_update_parse: $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c $(SRC_DIR)/update_parse.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_update_parse.c $(SRC_DIR)/update_parse.c
-
-$(TEST_DIR)/test_desktop_list: $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/desktop_list.c $(SRC_DIR)/desktop_list.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/desktop_list.c
-
-$(TEST_DIR)/test_api_spec: $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c $(SRC_DIR)/api_spec.h
-	@echo "  HOSTCC $@"
-	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_DIR)/test_$*.c $(SRC_DIR)/$*.c
 
 GEN_META = tools/gen_lua_meta
 
@@ -291,14 +277,22 @@ check-config: $(HOST_LUA)
 	@./$(HOST_LUA) $(TEST_DIR)/check_config.lua $(SRC_DIR)/api_spec.c \
 	    config/init.lua config/init.full.lua README.md
 
-test: $(TEST_BINS) check-config
-	@echo "  TEST"
+run-host-tests: $(TEST_BINS)
+	@echo "  TEST  $(if $(TEST_SUFFIX),sanitized,host)"
 	@fail=0; for t in $(TEST_BINS); do ./$$t || fail=1; done; \
 	 if [ $$fail -ne 0 ]; then echo "  TESTS FAILED"; exit 1; fi; \
 	 echo "  all tests passed"
 
+test: check-config run-host-tests
+
+test-asan:
+	@$(MAKE) --no-print-directory run-host-tests \
+	    TEST_SUFFIX=.asan HOST_CFLAGS="$(ASAN_CFLAGS)"
+
 clean:
-	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(PROBE) $(GEN_META) $(HOST_LUA)
+	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) \
+	      $(TEST_BINS) $(TEST_MODULES:%=$(TEST_DIR)/test_%.asan) \
+	      $(PROBE) $(GEN_META) $(HOST_LUA)
 	rm -f .version-*
 	rm -f $(LUA_DIR)/lua.o $(LUA_DIR)/luac.o $(LUA_DIR)/liblua.a \
 	      $(LUA_DIR)/lua $(LUA_DIR)/luac
