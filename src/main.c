@@ -514,6 +514,32 @@ void update_work_area(void) {
     g.work_area = g.monitors[g.primary_monitor].work_area;
 }
 
+static int s_spi_broadcast_depth;
+
+BOOL spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param) {
+    s_spi_broadcast_depth++;
+    BOOL ok = SystemParametersInfoW(action, ui_param, pv_param, SPIF_SENDCHANGE);
+    if (s_spi_broadcast_depth > 0) s_spi_broadcast_depth--;
+    return ok;
+}
+
+static bool setting_change_affects_layout(WPARAM wp, LPARAM lp) {
+    if (s_spi_broadcast_depth > 0) return false;
+
+    switch (wp) {
+    case SPI_SETWORKAREA:
+    case SPI_SETNONCLIENTMETRICS:
+        return true;
+    default:
+        break;
+    }
+
+    if (wp != 0) return false;
+
+    const wchar_t *area = (const wchar_t *)lp;
+    return area && _wcsicmp(area, L"WindowMetrics") == 0;
+}
+
 /* ---------------------------------------------------------------------------
  * Hidden message-only window — hosts the message pump that drives both
  * the low-level keyboard hook and the WinEvent hooks.
@@ -595,6 +621,13 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_SETTINGCHANGE:
+        if (!setting_change_affects_layout(wp, lp)) {
+            const wchar_t *area = (wp == 0 && lp) ? (const wchar_t *)lp : L"";
+            log_w(L"settings: ignoring WM_SETTINGCHANGE wParam=%u area='%ls'%ls",
+                  (unsigned)wp, area,
+                  s_spi_broadcast_depth > 0 ? L" (our own broadcast)" : L"");
+            return 0;
+        }
         update_work_area();
         desktop_monitors_changed();
         background_update();
@@ -1007,8 +1040,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                                &g_prev_fg_lock_timeout, 0))
         g_prev_fg_lock_timeout = 0;
 
-    if (!SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
-                               (PVOID)(UINT_PTR)0, SPIF_SENDCHANGE))
+    if (!spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)(UINT_PTR)0))
         log_w(L"SPI_SETFOREGROUNDLOCKTIMEOUT failed: %lu — window_focus() will "
               L"fall back to SwitchToThisWindow", GetLastError());
 
@@ -1182,9 +1214,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Hand the foreground-lock timeout back. It is a persisted, system-wide
      * setting; leaving it at zero would outlive mshell and let anything on the
      * machine steal focus, with nothing left behind to explain why. */
-    SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
-                          (PVOID)(UINT_PTR)g_prev_fg_lock_timeout,
-                          SPIF_SENDCHANGE);
+    spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
+                      (PVOID)(UINT_PTR)g_prev_fg_lock_timeout);
 
     /* Same argument, for the same reason: pointer speed, acceleration and the
      * button swap are the machine's, and mshell only borrowed them. */
