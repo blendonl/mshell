@@ -1622,6 +1622,7 @@ void     background_update(void);         /* resize/repaint on display change   
  * =========================================================================== */
 void     helper_init(void);
 void     helper_shutdown(void);
+void     helper_restart_async(void);
 bool     helper_available(void);
 bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
 bool     helper_set_topmost(HWND hwnd, bool on);   /* the always-on-top band  */
