@@ -845,6 +845,8 @@ typedef struct {
     bool    set_refresh;    int refresh;
     bool    set_hdr;        bool hdr;
     bool    set_rotation;   int rotation;
+    bool    set_primary;    bool primary;
+    bool    set_position;   int pos_x, pos_y;
 } MonitorRule;
 
 /* ---------------------------------------------------------------------------
