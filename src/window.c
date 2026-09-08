@@ -1157,8 +1157,17 @@ void window_manage(HWND hwnd) {
             const Desktop *dt = desktop_by_id(desk_id);
             int mon = monitor_of_window(hwnd);
             if (rule && rule->set_monitor) mon = rule->monitor;
-            if (dt && dt->monitor >= 0 && dt->monitor < g.monitor_count)
+
+            /* Where the desktop actually IS beats where a rule says it belongs:
+             * a desktop can be sent to the other display at runtime, and its
+             * windows live where it is shown, not where it was pinned. The pin
+             * is the answer only while the desktop is off screen. */
+            int shown = desktop_monitor_showing(desk_id);
+            if (shown >= 0)
+                mon = shown;
+            else if (dt && dt->monitor >= 0 && dt->monitor < g.monitor_count)
                 mon = dt->monitor;
+
             window_set_monitor(mw, mon);
         }
 
@@ -1192,7 +1201,7 @@ void window_manage(HWND hwnd) {
 
     /* Hide it if it landed somewhere you are not looking — desktop membership
      * is show/hide here, and only the current desktop is ever tiled. */
-    if (desk_id != g.current_desktop_id) {
+    if (!desktop_is_visible(desk_id)) {
         events_suppress_begin();
         window_hide(mw);
         events_suppress_end();
@@ -1298,7 +1307,7 @@ void window_unmanage(HWND hwnd) {
      * window on a desktop you can't see is exactly the case dynamic desktops
      * exist to clean up. The one you are on survives (desktop_gc's rule), so
      * closing everything in front of you leaves you somewhere, not nowhere. */
-    bool was_current = (desk_id == g.current_desktop_id);
+    bool was_current = desktop_is_visible(desk_id);
     desktop_gc(desktop_slot_by_id(desk_id));
 
     tile_current();
@@ -1708,6 +1717,115 @@ static void window_place_float(ManagedWindow *mw) {
     window_center_float(mw->hwnd);   /* no-op unless it should be centred */
 }
 
+/* ===========================================================================
+ * Which display does a window BELONG to?
+ *
+ * The display its desktop is shown on, and the one its desktop is pinned to
+ * while that desktop is off screen. -1 when the desktop has no opinion, in
+ * which case wherever the window is IS where it belongs.
+ * =========================================================================== */
+int window_home_monitor(const ManagedWindow *mw) {
+    if (!mw) return -1;
+
+    int shown = desktop_monitor_showing(mw->desktop_id);
+    if (shown >= 0 && shown < g.monitor_count) return shown;
+
+    const Desktop *dt = desktop_by_id(mw->desktop_id);
+    if (dt && dt->monitor >= 0 && dt->monitor < g.monitor_count)
+        return dt->monitor;
+
+    return -1;
+}
+
+/* ===========================================================================
+ * Put a window on the display it has just been assigned to.
+ *
+ * window_set_monitor only RECORDS the display; what turns that into a window
+ * that moved is the next tiling pass — and the tiler skips floats. So every
+ * path that hands a float a display has to finish the job here, or the record
+ * is fiction: a desktop pinned to one monitor with its game sitting on the
+ * other, and the move keybindings apparently doing nothing because as far as
+ * mshell was concerned the window was already there.
+ *
+ * The WINDOW is asked where it is, never the record. The two disagree exactly
+ * when this function is needed.
+ * =========================================================================== */
+bool window_follow_monitor(ManagedWindow *mw, int mon) {
+    if (!mw || !IsWindow(mw->hwnd)) return false;
+
+    window_set_monitor(mw, mon);
+    if (!mw->is_floating) return false;      /* the tiling pass moves this one */
+
+    mon = mw->monitor;
+    if (mon < 0 || mon >= g.monitor_count) return false;
+
+    /* Stashed: it is parked clear of every display, and the rect that has to
+     * move is the one it will come back to. window_clamp_into_monitor knows. */
+    if (mw->stashed) return window_clamp_into_monitor(mw, mon);
+    if (IsIconic(mw->hwnd)) return false;
+
+    /* A window parked over a whole display has to be re-parked over the new
+     * one — clamping a fullscreen rect into a work area would shrink it by the
+     * bar and leave the game in a window. */
+    if (mw->fullscreen || window_is_screen_fullscreen(mw)) {
+        if (monitor_of_window(mw->hwnd) == mon &&
+            window_covers_monitor(mw->hwnd)) return false;
+        window_park_over_monitor(mw->hwnd);
+        return true;
+    }
+
+    if (monitor_of_window(mw->hwnd) == mon) return false;
+    return window_clamp_into_monitor(mw, mon);
+}
+
+/* ===========================================================================
+ * A floating window moved and mshell did not move it.
+ *
+ * Called from the LOCATIONCHANGE handler, which sees every move a float makes
+ * — a drag by its title bar, mod+drag, the app repositioning itself.
+ * =========================================================================== */
+void window_float_moved(ManagedWindow *mw) {
+    if (!mw || !mw->is_floating || !IsWindow(mw->hwnd)) return;
+    if (IsIconic(mw->hwnd)) return;
+
+    int at   = monitor_of_window(mw->hwnd);
+    int home = mw->fullscreen ? window_home_monitor(mw) : -1;
+
+    /* An ordinary float goes wherever it is put, and its record follows it:
+     * that index picks the screen for centring and for fullscreening, and a
+     * stale one grew a float on the display it had been dragged off. */
+    if (home < 0 || at == home) {
+        window_set_monitor(mw, at);
+        return;
+    }
+
+    /* A window a RULE parks over a whole display is not that window. Which
+     * display it covers is the desktop's answer, not the app's — and a game
+     * applies its own display preference when its graphics device comes up,
+     * long after mshell placed it. Recording that move as the new truth is
+     * what silently carried the game off the monitor its desktop is pinned to
+     * and left it there, with nothing that would ever bring it back.
+     *
+     * Bounded like the tiled snap-back next door: an app that insists gets its
+     * way after three tries in a second, because we cannot outlast it and each
+     * round trip costs a frame. */
+    ULONGLONG now = GetTickCount64();
+    if (now - mw->snap_first_at > 1000) {
+        mw->snap_first_at = now;
+        mw->snap_tries    = 0;
+    }
+    if (++mw->snap_tries > 3) {
+        if (mw->snap_tries == 4)
+            log_msg(LOG_WARN, L"%p keeps putting itself on monitor %d when its "
+                              L"desktop is on %d — leaving it there rather "
+                              L"than fighting it.", (void *)mw->hwnd, at, home);
+        window_set_monitor(mw, at);
+        return;
+    }
+
+    window_follow_monitor(mw, home);
+}
+
 /* A saved pre-fullscreen rect belongs to the float it was saved from. A window
  * that leaves the floating tier must forget it: the layout owns a tiled
  * window's geometry, so the rect is meaningless there, and keeping it made the
@@ -1912,16 +2030,25 @@ static void zorder_mark_promoted(ManagedWindow *mw) {
  * Fullscreen beats mshell's own surfaces too — the bar included — which is why
  * this runs after overlay_raise_all(). */
 static void zorder_raise_over_floats(void) {
-    Desktop *dt = desktop_current();
+    /* Every display that is showing something, not just the one you are
+     * pointing at. A desktop is shown on at most one display but several
+     * displays each show one, so scoping this to desktop_current() left a
+     * fullscreen game on the other monitor sitting under the floats and the
+     * bar — the exact thing the topmost band exists to prevent, on the window
+     * that needs it most. */
+    for (int m = 0; m < g.monitor_count; m++) {
+        Desktop *dt = desktop_by_id(desktop_on_monitor(m));
+        if (!dt) continue;            /* this display is showing nothing */
 
-    for (int i = 0; i < dt->count; i++) {
-        ManagedWindow *mw = window_find(dt->windows[i]);
-        if (!mw || !IsWindow(mw->hwnd)) continue;
-        if (!window_is_screen_fullscreen(mw) && !mw->always_on_top) continue;
-        if (!window_on_screen(mw)) continue;
+        for (int i = 0; i < dt->count; i++) {
+            ManagedWindow *mw = window_find(dt->windows[i]);
+            if (!mw || !IsWindow(mw->hwnd)) continue;
+            if (!window_is_screen_fullscreen(mw) && !mw->always_on_top) continue;
+            if (!window_on_screen(mw)) continue;
 
-        zorder_mark_promoted(mw);
-        window_set_band(mw->hwnd, HWND_TOPMOST, true);
+            zorder_mark_promoted(mw);
+            window_set_band(mw->hwnd, HWND_TOPMOST, true);
+        }
     }
 }
 
@@ -1954,18 +2081,53 @@ void window_raise_floats(void) {
     HWND floats[MAX_WINDOWS_PER_DESKTOP];
     int  n = 0;
 
+    /* How many floats there are to find, counted before the walk below starts
+     * looking for them.
+     *
+     * The walk's only bound used to be MAX_WINDOWS_PER_DESKTOP on `n`, which is
+     * a bound on what it COLLECTS and never on how far it goes: with two floats
+     * on screen it still enumerated every top-level window on the machine —
+     * hundreds, each with a linear window_find — and it runs from both
+     * window_enforce_zorder and window_focus, so a desktop switch paid for it
+     * twice before the foreground event paid a third time. Knowing the answer
+     * up front lets it stop at the last float instead of at the last window.
+     *
+     * Counted over every managed window and filtered by desktop_is_visible,
+     * exactly as the walk filters — NOT over the focused desktop's list. A
+     * desktop is shown on at most one display, but several displays each show
+     * one, so "visible" is a wider set than "the desktop you are pointing at".
+     * Counting the narrow set would stop the walk early and leave the floats on
+     * every other monitor buried, which is the whole thing this function
+     * exists to prevent. */
+    int wanted = 0;
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+        if (!window_is_float_tier(mw)) continue;
+        if (!desktop_is_visible(mw->desktop_id)) continue;
+        if (!window_on_screen(mw) || IsIconic(mw->hwnd)) continue;
+        wanted++;
+    }
+    if (wanted == 0) { zorder_raise_over_floats(); return; }
+    /* floats[] is sized for one desktop; the visible set can span several. */
+    if (wanted > MAX_WINDOWS_PER_DESKTOP) wanted = MAX_WINDOWS_PER_DESKTOP;
+
     /* Walk the system z-order (top first) rather than Desktop.windows[], so a
      * pass preserves how the floats are already stacked against each other.
      * Raising them in desktop order would re-shuffle two overlapping floats on
-     * every focus change, which is a worse tic than the bug being fixed. */
-    for (HWND h = GetTopWindow(NULL); h && n < MAX_WINDOWS_PER_DESKTOP;
-         h = GetWindow(h, GW_HWNDNEXT)) {
+     * every focus change, which is a worse tic than the bug being fixed.
+     *
+     * ZORDER_WALK_MAX is the backstop for a float that is not in the z-order at
+     * all, which would otherwise leave `n < wanted` forever. */
+    int steps = 0;
+    for (HWND h = GetTopWindow(NULL);
+         h && n < wanted && steps < ZORDER_WALK_MAX;
+         h = GetWindow(h, GW_HWNDNEXT), steps++) {
         ManagedWindow *mw = window_find(h);
         /* The TIER, not the exemption: a tracked window is floating only in the
          * sense that the layout leaves it alone, and putting one in the topmost
          * band is doing something to a window the tier promises not to touch. */
         if (!window_is_float_tier(mw)) continue;
-        if (mw->desktop_id != g.current_desktop_id) continue;
+        if (!desktop_is_visible(mw->desktop_id)) continue;
         /* window_on_screen, not IsWindowVisible: a window mshell has cloaked —
          * a stowed scratchpad is the floating case — keeps its visible bit, so
          * IsWindowVisible would hand it a place in the chain and leave an
@@ -2046,8 +2208,6 @@ void window_enforce_zorder(void) {
         }
     }
 
-    Desktop *dt = desktop_current();
-
     /* Everything that goes UP happens in here: the floats, then our overlays,
      * then the fullscreen and pinned windows over both. */
     window_raise_floats();
@@ -2057,13 +2217,27 @@ void window_enforce_zorder(void) {
      * fullscreen, was unpinned, or went off-screen onto another desktop — is
      * demoted here, and only here.
      *
+     * EVERY managed window, deliberately, and this is the half that used to be
+     * missing: the loop walked the focused desktop's list, so a window we had
+     * promoted and then hid, or that moved to a desktop nobody is looking at,
+     * was never visited and kept the topmost band with nothing left to take it
+     * back. "Went off-screen onto another desktop" is the case this comment
+     * already claimed, and scoping the walk to one desktop was exactly what
+     * stopped it being true. A window on a display you are not focused on is
+     * reached too, so leaving fullscreen over there demotes it now rather than
+     * when you next look at it.
+     *
+     * Demoting a hidden window is harmless and self-correcting: it is not on
+     * screen to be seen in either band, and the raise pass above puts it back
+     * the moment its desktop is showing again.
+     *
      * made_topmost records whether WE promoted it, so a window that was topmost
-     * on its own account is never demoted out from under its app. */
-    for (int i = 0; i < dt->count; i++) {
-        ManagedWindow *mw = window_find(dt->windows[i]);
-        if (!mw || !IsWindow(mw->hwnd)) continue;
+     * on its own account is never demoted out from under its app — and because
+     * this clears the flag, each window costs one call, not one per pass. */
+    for (int i = 0; i < g.managed_count; i++) {
+        ManagedWindow *mw = &g.managed[i];
+        if (!mw->made_topmost || !IsWindow(mw->hwnd)) continue;
         if (zorder_wants_topmost(mw) && window_on_screen(mw)) continue;
-        if (!mw->made_topmost) continue;
 
         mw->made_topmost = false;
         window_set_band(mw->hwnd, HWND_NOTOPMOST, false);
@@ -2097,7 +2271,7 @@ void window_set_floating(HWND hwnd, bool floating) {
      * another desktop is a different question, and is left alone. */
     if (mw->layout_hidden) {
         mw->layout_hidden = false;
-        if (floating && mw->desktop_id == g.current_desktop_id) {
+        if (floating && desktop_is_visible(mw->desktop_id)) {
             events_suppress_begin();
             window_show(mw);
             events_suppress_end();
@@ -2223,8 +2397,30 @@ void window_focus(HWND hwnd) {
      * the user actually is rather than from the last monitor keybind. */
     {
         ManagedWindow *mw = window_find(hwnd);
-        int mon = mw ? mw->monitor : monitor_of_window(hwnd);
-        if (mon >= 0 && mon < g.monitor_count) g.focused_monitor = mon;
+        int mon = mw ? desktop_monitor_of_window(mw) : monitor_of_window(hwnd);
+        if (mon >= 0 && mon < g.monitor_count) {
+            bool crossed = (mon != g.focused_monitor);
+            g.focused_monitor = mon;
+
+            /* The desktop you are driving is DERIVED from the focused display
+             * (desktop_sync_current), so moving one without the other leaves
+             * the pair naming two different displays — and everything below
+             * here reads the pair. border_refresh() asks desktop_get_focused(),
+             * which answers from desktop_current(): with the focus on this
+             * display and current_desktop_id still on the last one, it returns
+             * the window you just LEFT and hugs it with the ring — the focus
+             * ring sitting on the other monitor, around a window you are not
+             * in. bar_refresh() reads the same stale pair for its layout and
+             * title.
+             *
+             * focus_monitor() has always paired these itself. Pairing them here
+             * instead — at the one place g.focused_monitor is assigned outside
+             * that function — covers every other way the focus crosses a
+             * display: mouse-follow, a closing window handing focus to a
+             * sibling, summoning the scratchpad, jumping to an urgent window,
+             * a rule that opened something over there. */
+            if (crossed) desktop_sync_current();
+        }
 
         /* Looking at it is what "attention given" means. */
         if (mw) mw->urgent = false;
