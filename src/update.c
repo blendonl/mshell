@@ -1,40 +1,3 @@
-/* ===========================================================================
- * update.c — noticing that a new release exists, and applying one when asked.
- *
- * TWO HALVES, and the line between them is the whole design decision.
- *
- * The BACKGROUND CHECK (update_check_async) is notify-only, deliberately, and
- * stays that way. mshell is the Windows shell: an updater that downloaded code
- * and swapped out the process the session depends on *unattended* would turn a
- * bad release into a black screen at sign-in with no desktop left to fix it
- * from. A once-a-day check that raises one notification cannot do that.
- *
- * The `update` ACTION (update_install_async) is the half that applies, and
- * what makes it defensible is precisely what the background check lacks:
- * somebody pressed a key. It is attended, it is one keystroke away from not
- * having happened, and the user is sitting in front of the machine when the
- * shell restarts. That is a different risk from an unattended swap rather than
- * a smaller helping of the same one.
- *
- * It does NOT reimplement the install. install.bat already gets the hard part
- * right — it renames the running image instead of overwriting it, restarts
- * only when Winlogon is willing to put a shell back, and leaves the old build
- * running if the kill is refused. Duplicating that sequence here would mean
- * two copies of it, and the one in C would be the less tested. So this fetches
- * the release, checks it, unpacks it, and runs the install.bat that came in
- * the zip.
- *
- * There is still no code-signing certificate, so nothing here proves the
- * binary is ours. What it does prove is that the bytes on disk are the bytes
- * GitHub's API described: the release metadata carries a SHA-256 per asset and
- * arrives over TLS, and the download is hashed against it before anything is
- * unpacked. That catches the truncated or corrupted download, which is the
- * failure this is actually able to detect.
- *
- * Both halves run on their own thread — WinHTTP blocks, and neither may sit on
- * the thread that services keybinds — and report back by posting to the
- * message window, the same pattern the config watcher and IPC server use.
- * =========================================================================== */
 #include "mshell.h"
 #include "update_parse.h"
 
@@ -46,29 +9,13 @@
 #define UPDATE_URL   L"https://api.github.com/repos/blendonl/mshell/releases/latest"
 #define UPDATE_KEY   L"Software\\mshell"
 
-/* Read twice: for "is the registered shell us" (both hives) and for
- * AutoRestartShell (HKLM), which decides whether exiting is a restart. */
 #define WINLOGON_KEY L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
 
-/* The release zip is ~500 KB today. The cap is not a prediction, it is a
- * ceiling on what a hostile or broken response can make us allocate. */
 #define UPDATE_MAX_DOWNLOAD  (64u * 1024u * 1024u)
 #define UPDATE_MAX_JSON      (1u * 1024u * 1024u)
 
-/* Which asset in the release is the one we install. `make dist` names it after
- * DISTNAME, and the folder inside the zip has the same name minus the suffix,
- * which is how the install.bat inside it is found without guessing. */
 #define UPDATE_ASSET_SUFFIX  "-win64.zip"
 
-/* ===========================================================================
- * HTTP
- * =========================================================================== */
-
-/* GET `url` into a malloc'd, NUL-terminated buffer. Follows redirects, which
- * the asset download needs — browser_download_url is a github.com link that
- * lands on a CDN host. Returns NULL and logs on any failure, including a
- * non-200 status: the previous code parsed whatever body came back, so a 404
- * read as "no tag_name" rather than as the error it was. */
 static BYTE *http_get(const wchar_t *url, DWORD *out_len,
                       DWORD max_bytes, DWORD recv_timeout_ms) {
     HINTERNET ses = NULL, con = NULL, req = NULL;
@@ -88,19 +35,15 @@ static BYTE *http_get(const wchar_t *url, DWORD *out_len,
         return NULL;
     }
 
-    /* Path and query go to WinHttpOpenRequest as one string. */
     wchar_t target[4096];
     _snwprintf(target, ARRAYSIZE(target) - 1, L"%ls%ls", path, extra);
     target[ARRAYSIZE(target) - 1] = L'\0';
 
-    /* GitHub's API requires a User-Agent; WinHttpOpen supplies ours. */
     ses = WinHttpOpen(L"mshell/" MSHELL_VERSION_W,
                       WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!ses) goto out;
 
-    /* Connect quickly or not at all, but allow a download the time to arrive:
-     * a hung connection must not keep this thread alive across a shutdown. */
     WinHttpSetTimeouts(ses, 5000, 5000, 5000, (int)recv_timeout_ms);
 
     con = WinHttpConnect(ses, host, uc.nPort, 0);
@@ -146,11 +89,11 @@ static BYTE *http_get(const wchar_t *url, DWORD *out_len,
 
         DWORD got = 0;
         if (!WinHttpReadData(req, buf + used, cap - used, &got)) goto out;
-        if (got == 0) break;                     /* the whole body is in */
+        if (got == 0) break;
         used += got;
     }
 
-    buf[used] = '\0';                            /* callers may treat it as text */
+    buf[used] = '\0';
     if (out_len) *out_len = used;
     ok = true;
 
@@ -162,12 +105,6 @@ out:
     return buf;
 }
 
-/* ===========================================================================
- * Integrity
- * =========================================================================== */
-
-/* Lowercase hex SHA-256 of `data`. Windows supplies the primitive; the point
- * is only to compare against the digest the API stated. */
 static bool sha256_hex(const BYTE *data, DWORD len, char out[65]) {
     BCRYPT_ALG_HANDLE  alg = NULL;
     BCRYPT_HASH_HANDLE h   = NULL;
@@ -191,14 +128,6 @@ out:
     return ok;
 }
 
-/* ===========================================================================
- * Reporting
- * =========================================================================== */
-
-/* Raise a toast from the update thread. Overlays are painted on the main
- * thread, so the text is handed over by PostMessage and freed there. The
- * duration rides along in wParam because a failure worth reading and a
- * progress line worth glancing at should not sit on screen for equal time. */
 static void update_notify(NotifyKind kind, int ms, const wchar_t *fmt, ...) {
     wchar_t msg[NOTIFY_TEXT_CAP];
     va_list ap;
@@ -215,11 +144,6 @@ static void update_notify(NotifyKind kind, int ms, const wchar_t *fmt, ...) {
                      MAKEWPARAM((WORD)kind, (WORD)ms), (LPARAM)_wcsdup(msg));
 }
 
-/* ===========================================================================
- * The daily check — notify only
- * =========================================================================== */
-
-/* Last check, as a day number, so "at most once a day" survives a restart. */
 static bool checked_today(void) {
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -230,7 +154,7 @@ static bool checked_today(void) {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, UPDATE_KEY, 0, NULL,
                         REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
                         NULL, &k, NULL) != ERROR_SUCCESS)
-        return true;                        /* cannot record it: do not ask */
+        return true;
 
     RegQueryValueExW(k, L"LastUpdateCheck", NULL, NULL, (LPBYTE)&last, &sz);
     bool done = (last == today);
@@ -241,9 +165,6 @@ static bool checked_today(void) {
     return done;
 }
 
-/* Fetch the latest release and copy out its tag with any leading "v" dropped,
- * so it reads as a version everywhere it is used. The body is handed back
- * because the caller may want the assets out of it too. */
 static BYTE *fetch_latest_release(char *tag, size_t tag_cap) {
     DWORD len = 0;
     BYTE *body = http_get(UPDATE_URL, &len, UPDATE_MAX_JSON, 10000);
@@ -256,7 +177,7 @@ static BYTE *fetch_latest_release(char *tag, size_t tag_cap) {
         return NULL;
     }
 
-    if (tag[0] == 'v' || tag[0] == 'V')     /* tags are conventionally v-prefixed */
+    if (tag[0] == 'v' || tag[0] == 'V')
         memmove(tag, tag + 1, strlen(tag));
 
     return body;
@@ -288,21 +209,11 @@ void update_check_async(void) {
     if (checked_today()) return;
 
     HANDLE t = CreateThread(NULL, 0, update_thread, NULL, 0, NULL);
-    if (t) CloseHandle(t);   /* fire and forget: it reports by PostMessage */
+    if (t) CloseHandle(t);
 }
 
-/* ===========================================================================
- * The `update` action — fetch, verify, unpack, hand over to install.bat
- * =========================================================================== */
-
-/* One at a time. Holding the key down, or pressing it again while a download
- * is in flight, must not start a second one racing the first into the same
- * working directory. */
 static volatile LONG s_update_running = 0;
 
-/* Run a command line to completion. Used for the unpack step, where the exit
- * code is the answer. The buffer is copied because CreateProcessW writes to
- * the command line it is given. */
 static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
                      DWORD timeout_ms, DWORD *exit_code) {
     wchar_t buf[2048];
@@ -315,7 +226,7 @@ static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
     memset(&pi, 0, sizeof(pi));
     si.cb = sizeof(si);
     si.dwFlags     = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;              /* unpacking is not a spectacle */
+    si.wShowWindow = SW_HIDE;
 
     if (!CreateProcessW(NULL, buf, NULL, NULL, FALSE,
                         CREATE_NO_WINDOW, NULL, cwd, &si, &pi))
@@ -329,35 +240,23 @@ static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
     return ok;
 }
 
-/* %TEMP%\mshell-update — emptied first, so a failed attempt cannot leave a
- * half-unpacked tree for the next one to run install.bat out of. */
 static bool prepare_workdir(wchar_t *out, size_t cap) {
     wchar_t tmp[MAX_PATH];
     DWORD n = GetTempPathW(MAX_PATH, tmp);
     if (!n || n >= MAX_PATH) return false;
 
-    _snwprintf(out, cap - 1, L"%lsmshell-update", tmp);  /* GetTempPath ends in \ */
+    _snwprintf(out, cap - 1, L"%lsmshell-update", tmp);
     out[cap - 1] = L'\0';
 
     wchar_t cmd[MAX_PATH + 64];
     _snwprintf(cmd, ARRAYSIZE(cmd) - 1, L"cmd.exe /c rd /s /q \"%ls\"", out);
     cmd[ARRAYSIZE(cmd) - 1] = L'\0';
-    run_wait(cmd, NULL, 15000, NULL);        /* absent is a fine outcome */
+    run_wait(cmd, NULL, 15000, NULL);
 
     return CreateDirectoryW(out, NULL) ||
            GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-/* Is the running mshell.exe the copy that install.bat manages?
- *
- * install.bat installs to a fixed location and makes that path the user's
- * shell. Running it from a session started somewhere else — a portable tree,
- * `--test` alongside Explorer, a dev build out of the source directory —
- * would not update anything; it would install mshell as the shell for the
- * first time, which is a much bigger thing than what the key was pressed for.
- * So the registered shell is the reference: if that path is us, this is an
- * upgrade. Anything else stops short of install.bat, with the unpacked tree
- * left behind and named so it can be run by hand. */
 static bool running_as_installed_shell(void) {
     wchar_t self[MAX_PATH];
     DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
@@ -377,18 +276,10 @@ static bool running_as_installed_shell(void) {
         if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
             continue;
 
-        /* Registry strings are not required to be stored NUL-terminated, so
-         * terminate at the length that was actually returned rather than
-         * trusting the data. */
         DWORD chars = sz / sizeof(wchar_t);
         if (chars >= ARRAYSIZE(shell)) chars = ARRAYSIZE(shell) - 1;
         shell[chars] = L'\0';
 
-        /* The value is "<path>\mshell.exe --shell": take the exe, and allow it
-         * to have been written quoted. REG_EXPAND_SZ is expanded rather than
-         * compared literally — install.bat writes REG_SZ, but a value someone
-         * set by hand as "%LOCALAPPDATA%\..." would otherwise never match and
-         * silently turn every update into a refusal. */
         wchar_t path[MAX_PATH * 2];
         if (type == REG_EXPAND_SZ) {
             if (!ExpandEnvironmentStringsW(shell, path, ARRAYSIZE(path)))
@@ -412,34 +303,25 @@ static bool running_as_installed_shell(void) {
     return false;
 }
 
-/* Where install.bat's output goes. Beside mshell.log, because that is where
- * somebody already looks when the shell misbehaves, and because an install
- * that went wrong is exactly when %TEMP% is the wrong place for the evidence. */
 static void install_log_path(wchar_t *out, size_t cap) {
     wchar_t dir[MAX_PATH];
     DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH);
     if (!n || n >= MAX_PATH) {
         if (!GetTempPathW(MAX_PATH, dir)) { out[0] = L'\0'; return; }
-        _snwprintf(out, cap - 1, L"%lsmshell-install.log", dir);  /* ends in \ */
+        _snwprintf(out, cap - 1, L"%lsmshell-install.log", dir);
     } else {
         _snwprintf(out, cap - 1, L"%ls\\mshell\\install.log", dir);
     }
     out[cap - 1] = L'\0';
 }
 
-/* Would Windows put a shell back if this one exited?
- *
- * AutoRestartShell (HKLM, 1 by default) is what makes exiting a restart rather
- * than a logout. With it off, the session ends when the shell does — so the
- * update stops one step short and says so, the same call install.bat makes
- * before it would kill anything. */
 static bool winlogon_restarts_the_shell(void) {
     HKEY  k;
     DWORD v = 1, sz = sizeof v, type = 0;
 
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, WINLOGON_KEY, 0, KEY_READ, &k)
         != ERROR_SUCCESS)
-        return true;   /* unreadable: the documented default is on */
+        return true;
 
     if (RegQueryValueExW(k, L"AutoRestartShell", NULL, &type, (LPBYTE)&v, &sz)
             != ERROR_SUCCESS || type != REG_DWORD)
@@ -449,9 +331,6 @@ static bool winlogon_restarts_the_shell(void) {
     return v != 0;
 }
 
-/* The staged image install.bat left behind: it renames the running mshell.exe
- * aside because Windows will not overwrite a live one. Deleting it is the new
- * instance's job — by the time anything runs this, nothing holds it open. */
 void update_clear_staged_image(void) {
     wchar_t self[MAX_PATH];
     DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
@@ -466,13 +345,6 @@ void update_clear_staged_image(void) {
         log_msg(LOG_INFO, L"update: removed the previous build (%ls)", old);
 }
 
-/* Hand the session over to the build just installed.
- *
- * We exit; Winlogon starts the Shell value again, which now names the new
- * binary. Nothing else can be trusted to do it — see the comment at the call
- * site — and this process is the one thing with an unconditional right to
- * stop itself. The quit runs on the main thread, because that is where the
- * shutdown sequence (decorations restored, windows uncloaked) belongs. */
 static void update_restart_self(const wchar_t *version) {
     if (!winlogon_restarts_the_shell()) {
         update_notify(NOTIFY_WARN, 30000,
@@ -484,7 +356,7 @@ static void update_restart_self(const wchar_t *version) {
 
     update_notify(NOTIFY_INFO, 5000,
                   L"mshell %ls installed — restarting.", version);
-    Sleep(1200);   /* let the toast reach the screen before we take it away */
+    Sleep(1200);
 
     if (g.message_window)
         PostMessageW(g.message_window, WM_MSHELL_RESTART, 0, 0);
@@ -540,9 +412,6 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    /* Verify before anything is written where a script might run it. An
-     * absent digest costs the check, not the update — releases made before
-     * GitHub exposed the field have none. */
     if (digest_u8[0]) {
         const char *want = digest_u8;
         if (_strnicmp(want, "sha256:", 7) == 0) {
@@ -595,8 +464,6 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    /* tar.exe has shipped in Windows since 1803 and reads zips; PowerShell's
-     * Expand-Archive is the fallback for a machine where it is missing. */
     update_notify(NOTIFY_INFO, 6000, L"Unpacking mshell %ls …", latest);
 
     wchar_t cmd[MAX_PATH * 3];
@@ -618,8 +485,6 @@ static DWORD WINAPI install_thread(LPVOID param) {
         }
     }
 
-    /* The zip keeps a versioned top-level folder named after the asset without
-     * its ".zip", which is where install.bat lands. */
     wchar_t root[MAX_PATH], bat[MAX_PATH];
     _snwprintf(root, ARRAYSIZE(root) - 1, L"%ls\\%ls", dir, asset);
     root[ARRAYSIZE(root) - 1] = L'\0';
@@ -635,8 +500,6 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    /* The one irreversible step, and the one place this declines to act on its
-     * own. See running_as_installed_shell(). */
     if (!running_as_installed_shell()) {
         update_notify(NOTIFY_WARN, 20000,
                       L"mshell %ls is unpacked, but this session is not the "
@@ -647,21 +510,6 @@ static DWORD WINAPI install_thread(LPVOID param) {
 
     update_notify(NOTIFY_INFO, 15000, L"Installing mshell %ls …", latest);
 
-    /* WAITED ON, not handed over — and /norestart, so the restart is ours.
-     *
-     * This used to spawn install.bat in a console and return, letting the
-     * script kill this process and start the new build. Both halves of that
-     * could fail quietly: the kill needs rights a child process may not have,
-     * the console can be closed before it gets there, and either way nothing
-     * checked. The update then "succeeded" — toast, log line and all — while
-     * the OLD build kept running, which is indistinguishable from the new one
-     * being broken and is exactly how a fix can look like it did not work.
-     *
-     * So: run it to completion, read its exit code, and restart ourselves.
-     * Exiting is the one thing this process can always do, and Winlogon puts
-     * the shell back — no privileged kill in the loop. The script's output
-     * goes to a file rather than a console nobody keeps: a console that has
-     * already scrolled past (or been closed) is not a record. */
     wchar_t ilog[MAX_PATH];
     install_log_path(ilog, ARRAYSIZE(ilog));
 

@@ -6,10 +6,7 @@ has — the entries explain why a change was made, not just that it was. So the
 release does not generate prose over the top of it. It promotes what is
 already there:
 
-    ## Unreleased          ->    ## Unreleased
-    ### Added
     - a thing                    ## 0.13.4 - 2026-07-28
-                                 ### Added
                                  - a thing
 
 Because every push to main releases, some releases will arrive with nothing
@@ -24,7 +21,6 @@ import sys
 
 HEADING = re.compile(r"^## ", re.M)
 
-
 def split_unreleased(text):
     """Return (before, body, after) around the Unreleased section's body."""
     m = re.search(r"^## Unreleased[^\n]*\n", text, re.M)
@@ -35,7 +31,6 @@ def split_unreleased(text):
     nxt = HEADING.search(text, body_start)
     body_end = nxt.start() if nxt else len(text)
     return text[: m.start()], text[body_start:body_end], text[body_end:]
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -60,7 +55,6 @@ def main():
 
     body = "\n" + body.strip("\n") + "\n"
 
-    # The em dash matches every heading already in the file.
     rolled = (
         before
         + "## Unreleased\n\n"
@@ -77,7 +71,6 @@ def main():
         f.write(body.strip("\n") + "\n")
 
     print(f"rolled Unreleased into {args.version} ({'generated' if generated else 'hand-written'} notes)")
-
 
 if __name__ == "__main__":
     main()

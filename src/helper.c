@@ -1,62 +1,16 @@
-/*
- * helper.c — the shell's side of the privileged helper (see proto.h, mshelld.c).
- *
- * The whole of the integration is one idea: TRY LOCALLY FIRST, ASK ONLY ON
- * REFUSAL. mshell attempts every SetWindowPos itself; if Windows refuses
- * because the target belongs to a higher-integrity process (UIPI), and only
- * then, the request is forwarded to mshelld.exe.
- *
- * That shape is deliberate and worth stating, because the obvious alternative —
- * work out up front which windows are elevated and route those — would mean
- * opening every window's process to ask, on the busiest path in the program,
- * to answer a question the failing call already answers for free. It would also
- * be wrong more often: UIPI is not the only reason a placement can fail.
- *
- * When no helper is running, nothing changes: the failure is reported the way
- * it always was and the window simply is not moved. The helper is opt-in and
- * absent by default.
- */
-
 #include "mshell.h"
 #include "proto.h"
 
-/* ---------------------------------------------------------------------------
- * Nothing here may block the shell.
- *
- * Every call below runs on the thread that pumps messages — window_set_pos is
- * reached from the tiling pass, the animation timer and the drag handler — and
- * this process IS the shell. There is no taskbar behind it to recover with.
- *
- * A helper that DIES was always handled: the read fails and the handle is
- * dropped. A helper that is alive and simply not reading was not, and it is the
- * easier state to reach — suspended, sitting in a Windows Error Reporting
- * dialog, or blocked inside its own cross-process DwmSetWindowAttribute call. A
- * synchronous ReadFile on a PIPE_WAIT pipe then never returns and the session
- * is gone.
- *
- * So the I/O is overlapped and bounded. 250 ms is roughly a thousand times what
- * a local pipe round trip to a process doing one SetWindowPos actually costs,
- * and deliberately not IPC_WAIT_MS (5 s), which is the timeout a human waits at
- * a command line rather than one the message loop can afford.
- *
- * And a bound alone is not enough. At one window per timeout, per tiling pass,
- * a wedged helper still costs seconds per keystroke — so consecutive timeouts
- * trip a breaker and mshell stops asking for a while. What that degrades to is
- * exactly the documented no-helper behaviour: elevated windows float and stay
- * put. That is a fallback; a frozen shell is not.
- * --------------------------------------------------------------------------- */
 #define HELPER_IO_TIMEOUT_MS   250
-#define HELPER_FAIL_LIMIT      3      /* consecutive timeouts before backing off */
+#define HELPER_FAIL_LIMIT      3
 #define HELPER_BACKOFF_MS      5000
 
 static HANDLE    g_pipe = INVALID_HANDLE_VALUE;
-static HANDLE    g_event;           /* completion event for the overlapped I/O */
-static bool      g_tried;           /* we have attempted a connection at least once */
-static int       g_timeouts;        /* consecutive, reset by any clean exchange */
-static ULONGLONG g_blocked_until;   /* GetTickCount64 deadline; 0 = not backed off */
+static HANDLE    g_event;
+static bool      g_tried;
+static int       g_timeouts;
+static ULONGLONG g_blocked_until;
 
-/* True while the breaker is open. Also closes it again once the wait is up, so
- * the caller does not have to know the breaker exists. */
 static bool helper_backed_off(void) {
     if (!g_blocked_until) return false;
 
@@ -91,14 +45,6 @@ static void helper_disconnect(void) {
     g_pipe = INVALID_HANDLE_VALUE;
 }
 
-/* One overlapped transfer, bounded. Returns 1 on success, 0 on error, and -1
- * specifically on TIMEOUT, which is the only outcome the breaker counts.
- *
- * The cancel path matters: `ov` lives on this stack frame, and the kernel may
- * still write to it after CancelIoEx returns. GetOverlappedResult with bWait
- * blocks until the cancelled operation has actually been reaped, so the frame
- * cannot go away underneath it. That wait is bounded by the cancellation
- * itself, not by the peer. */
 static int helper_io(void *buf, DWORD len, bool write) {
     OVERLAPPED ov = {0};
     ov.hEvent = g_event;
@@ -119,16 +65,6 @@ static int helper_io(void *buf, DWORD len, bool write) {
     return (n == len) ? 1 : 0;
 }
 
-/* Connect and shake hands. Cheap to call repeatedly: it returns immediately
- * when already connected, and gives up quickly when the helper simply is not
- * there.
- *
- * NB the 1 ms: WaitNamedPipeW takes NMPWAIT_USE_DEFAULT_WAIT for 0, which is
- * the SERVER's default timeout, not "do not wait". This used to pass 0 and
- * claim in a comment that it was a zero timeout; it returned promptly only
- * because a missing pipe fails immediately regardless. Against a pipe that
- * exists but is busy it was the server's default — 50 ms here — once per
- * window, per pass, on the message thread. */
 static bool helper_connect(void) {
     if (g_pipe != INVALID_HANDLE_VALUE) return true;
     if (helper_backed_off()) return false;
@@ -136,17 +72,13 @@ static bool helper_connect(void) {
     wchar_t name[MAX_PATH];
     helper_pipe_name(name, MAX_PATH);
 
-    if (!WaitNamedPipeW(name, 1)) return false;   /* not running */
+    if (!WaitNamedPipeW(name, 1)) return false;
 
-    /* FILE_FLAG_OVERLAPPED so every exchange can be given a deadline. */
     HANDLE p = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
     if (p == INVALID_HANDLE_VALUE) return false;
 
     if (!g_event) {
-        /* Manual-reset, unnamed, one for the life of the process: every
-         * exchange is synchronous from this thread's point of view, so there is
-         * never more than one operation in flight to wait on. */
         g_event = CreateEventW(NULL, TRUE, FALSE, NULL);
         if (!g_event) {
             CloseHandle(p);
@@ -160,7 +92,7 @@ static bool helper_connect(void) {
     DWORD mode = PIPE_READMODE_MESSAGE;
     SetNamedPipeHandleState(p, &mode, NULL, NULL);
 
-    g_pipe = p;   /* helper_io works on g_pipe, so publish it before the shake */
+    g_pipe = p;
 
     ProtoMsg hello = { .type = PROTO_HELLO, .version = MSHELLD_PROTO_VERSION };
     ProtoMsg reply = {0};
@@ -201,16 +133,6 @@ bool helper_available(void) {
     return g_pipe != INVALID_HANDLE_VALUE;
 }
 
-/* ===========================================================================
- * The fallback itself.
- *
- * Called ONLY after the local attempt has already failed. Returns true if the
- * helper performed it.
- * =========================================================================== */
-
-/* The request/response round trip, for a caller that holds the connection.
- * A failed conversation drops the handle so the next call reconnects rather
- * than failing forever on a dead pipe. */
 static bool helper_exchange(ProtoMsg *req) {
     ProtoMsg reply = {0};
 
@@ -219,20 +141,14 @@ static bool helper_exchange(ProtoMsg *req) {
 
     if (r != 1) {
         helper_disconnect();
-        /* Only a TIMEOUT counts towards the breaker. An ordinary error means
-         * the helper went away, which the reconnect on the next call handles
-         * and which costs nothing to retry. */
         if (r < 0) helper_note_timeout();
         return false;
     }
 
-    g_timeouts = 0;   /* it answered; whatever went before is not a pattern */
+    g_timeouts = 0;
     return reply.type == PROTO_OK;
 }
 
-/* Connect, or explain once (per call site) why the operation is not going to
- * happen. `warned` is the caller's static, so each operation gets its own
- * one-shot message naming what was refused. */
 static bool helper_ready(const wchar_t *op, bool *warned) {
     if (!g_tried) helper_init();
 
@@ -300,23 +216,6 @@ bool helper_close_window(HWND hwnd) {
     return helper_exchange(&req);
 }
 
-/* ===========================================================================
- * Restarting the helper.
- *
- * mshelld is started by a logon task, and it holds a singleton mutex — so
- * dropping a new mshelld.exe next to the old one changes nothing until the
- * running one dies. install.bat does this stop/start as part of an update
- * (:helper_refresh); this is the same sequence for a build put in place by
- * hand, and for a helper that is alive but no longer answering.
- *
- * Elevation is not needed even though the task is registered /rl highest: it
- * belongs to this user, and Task Scheduler starts it at its registered level
- * on our behalf. A machine where the task was never created is the one case
- * this cannot fix, and it says so rather than looking like it worked.
- *
- * On its own thread: two waited-on schtasks calls plus a settle between them
- * is seconds, and this is the thread that answers the keyboard.
- * =========================================================================== */
 #define HELPER_TASK_NAME  L"mshelld"
 #define HELPER_SETTLE_MS  1500
 #define HELPER_SCHTASKS_TIMEOUT_MS 15000
@@ -370,9 +269,6 @@ static bool helper_schtasks(const wchar_t *verb, DWORD *exit_code) {
 static DWORD WINAPI helper_restart_thread(LPVOID unused) {
     (void)unused;
 
-    /* Our handle names a pipe the process about to die is serving. Dropped
-     * first so nothing tries to use it across the gap, and so the reconnect
-     * below is a real one. */
     helper_disconnect();
 
     DWORD rc = 1;
@@ -392,9 +288,6 @@ static DWORD WINAPI helper_restart_thread(LPVOID unused) {
     }
     Sleep(HELPER_SETTLE_MS);
 
-    /* g_tried is what makes the lazy init a one-shot; clearing it lets the
-     * next privileged call reconnect on its own even if the handshake here
-     * lost a race with a helper that is still starting. */
     g_tried = false;
     if (helper_connect())
         helper_notify(NOTIFY_INFO, L"helper restarted — the mshelld.exe on "

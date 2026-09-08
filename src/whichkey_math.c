@@ -1,13 +1,9 @@
-/* ===========================================================================
- * whichkey_math.c — see whichkey_math.h for what this is and why.
- * =========================================================================== */
 #include "whichkey_math.h"
 
 void wk_layout(const WkMetrics *m, WkLayout *out) {
     int count = m->count > 0 ? m->count : 0;
     int row_h = m->row_h > 0 ? m->row_h : 1;
 
-    /* --- rows per column: the configured wrap point, tightened by max_h --- */
     int per_cap  = m->max_rows > 0 ? m->max_rows : 1;
     int rows_fit = (m->max_h - m->header_h - m->pad * 2) / row_h;
     if (rows_fit < 1)     rows_fit = 1;
@@ -16,9 +12,6 @@ void wk_layout(const WkMetrics *m, WkLayout *out) {
     int cols = (count + per_cap - 1) / per_cap;
     if (cols < 1) cols = 1;
 
-    /* --- column width ---
-     * Narrow the label column first; drop a column only once the labels would
-     * be too short to read anything from. */
     int inner_max = m->max_w - m->pad * 2;
     if (inner_max < 1) inner_max = 1;
     while (cols > 1) {
@@ -27,9 +20,6 @@ void wk_layout(const WkMetrics *m, WkLayout *out) {
         cols--;
     }
 
-    /* Even the columns out for the shape we ended up with, then let the height
-     * cap have the last word — losing a column must not also mean leaving
-     * vertical room unused. */
     int per_col = (count + cols - 1) / cols;
     if (per_col > per_cap) per_col = per_cap;
     if (per_col < 1)       per_col = 1;
@@ -38,15 +28,13 @@ void wk_layout(const WkMetrics *m, WkLayout *out) {
     int fit_cell = (inner_max - (cols - 1) * m->col_gap) / cols;
     if (m->key_w + m->key_gap + label_w > fit_cell) {
         label_w = fit_cell - m->key_w - m->key_gap;
-        /* A key column wider than the whole cell: the keys are what the panel
-         * is FOR, so they keep their width and the panel stops at max_w. */
         if (label_w < 1) label_w = 1;
     }
 
     int cell_w  = m->key_w + m->key_gap + label_w;
     int inner_w = cols * cell_w + (cols - 1) * m->col_gap;
-    if (m->header_w > inner_w) inner_w = m->header_w;  /* don't clip the header */
-    if (inner_w > inner_max)   inner_w = inner_max;    /* …but max_w wins       */
+    if (m->header_w > inner_w) inner_w = m->header_w;
+    if (inner_w > inner_max)   inner_w = inner_max;
 
     int shown = cols * per_col;
     if (shown > count) shown = count;

@@ -1,46 +1,10 @@
-/* ===========================================================================
- * anim.c — window movement animation, and dimming of unfocused windows.
- *
- * Both are off by default. They are the two features here that cost frames
- * rather than bytes, and a tiling WM's whole appeal is that windows are where
- * you put them instantly.
- *
- * ANIMATION and the two mechanisms it has to not fight.
- *
- * The tiler's anti-flicker skip (`rect_eq(mw->applied_rect, want)`) and the
- * drift detector (`events.c`, EPS=4) both exist to answer "did WE put the
- * window there?". An animation makes the honest answer "not yet" for a few
- * hundred milliseconds, during which the window is deliberately not where the
- * layout says it should be — which is exactly the condition the drift detector
- * reads as a window escaping and snaps back.
- *
- * So `applied_rect` records the TARGET, not the current frame. The layout's
- * bookkeeping stays truthful about where the window is going, the drift
- * detector compares against that, and each frame is applied with suppression
- * held so our own moves never re-enter the event handler. An animation is a
- * detour on the way to a rect the rest of mshell already believes in.
- *
- * DIMMING, and why it does not touch the app's window.
- *
- * The obvious implementation — WS_EX_LAYERED plus SetLayeredWindowAttributes on
- * each unfocused window — is wrong here. Making another process's top-level
- * window layered changes how it is composited: GPU-accelerated and fullscreen
- * apps can lose their swap chain, render black, or drop to a software path, and
- * a window manager that quietly breaks the rendering of the applications it
- * manages is worse than one that does not dim.
- *
- * Instead there is ONE overlay per monitor: a click-through scrim covering the
- * work area with the focused window's rect PUNCHED OUT of its region. Nothing
- * is done to anybody's window at all — the same SetWindowRgn technique border.c
- * already uses for the focus ring, applied inside-out.
- * =========================================================================== */
 #include "mshell.h"
 #include "overlay.h"
 
 static const wchar_t *DIM_CLASS = L"mshell_Dim";
 
 #define ANIM_TIMER_ID 1
-#define ANIM_FPS_MS   16      /* ~60 Hz */
+#define ANIM_FPS_MS   16
 
 typedef struct {
     HWND      hwnd;
@@ -53,12 +17,6 @@ static Anim s_anims[MAX_WINDOWS_PER_DESKTOP];
 static int  s_anim_n;
 static HWND s_dim[MAX_MONITORS];
 
-/* ---------------------------------------------------------------------------
- * Animation
- * --------------------------------------------------------------------------- */
-
-/* Ease-out cubic: fast to start, settling at the end. Movement that decelerates
- * reads as the window arriving; linear movement reads as it being dragged. */
 static float ease(float t) {
     float inv = 1.f - t;
     return 1.f - inv * inv * inv;
@@ -68,10 +26,6 @@ static int lerp(int a, int b, float t) {
     return a + (int)((float)(b - a) * t + (b > a ? 0.5f : -0.5f));
 }
 
-/* Where an animation has the window at `now`. One function so a re-target and
- * a frame agree on what "currently" means: the re-target continues from what
- * is on screen instead of restarting from where the last move began, which is
- * a visible jump backwards before the window sets off again. */
 static RECT anim_rect_at(const Anim *a, ULONGLONG now) {
     float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
     if (t < 0.f) t = 0.f;
@@ -86,27 +40,11 @@ static RECT anim_rect_at(const Anim *a, ULONGLONG now) {
     return r;
 }
 
-/* Called by the tiler instead of moving a window directly. Returns false when
- * animation is off or the move is not worth animating, in which case the caller
- * places the window itself. */
 bool anim_begin(HWND hwnd, RECT from, RECT to) {
     if (!g.anim_ms) return false;
 
-    /* Re-target an animation already running for this window rather than
-     * queueing a second one: two animations of one window fight.
-     *
-     * Tested BEFORE the heuristics below, which decide whether to START
-     * moving — a window already in flight has answered that question. Asking
-     * them first would measure the distance from a `from` that is stale by
-     * definition, and a "too small to animate" verdict hands the window back
-     * to the caller to place outright: a teleport, mid-motion, with the
-     * animation still running behind it. */
     for (int i = 0; i < s_anim_n; i++) {
         if (s_anims[i].active && s_anims[i].hwnd == hwnd) {
-            /* `from` is where the CALLER thinks the window is — the last rect
-             * the layout assigned, which for a window mid-flight is where it
-             * is headed, not where it is. Continue from the frame actually on
-             * screen. */
             ULONGLONG now    = GetTickCount64();
             s_anims[i].from  = anim_rect_at(&s_anims[i], now);
             s_anims[i].to    = to;
@@ -115,9 +53,6 @@ bool anim_begin(HWND hwnd, RECT from, RECT to) {
         }
     }
 
-    /* A window that is appearing (no previous rect) or moving a trivial
-     * distance is placed outright — animating either looks like a glitch
-     * rather than motion. */
     int dx = abs(to.left - from.left), dy = abs(to.top - from.top);
     int dw = abs((to.right - to.left) - (from.right - from.left));
     int dh = abs((to.bottom - to.top) - (from.bottom - from.top));
@@ -138,8 +73,6 @@ bool anim_begin(HWND hwnd, RECT from, RECT to) {
     return true;
 }
 
-/* One frame. Suppression is held across the whole pass: these are our moves and
- * must not re-enter the drift detector. */
 void anim_tick(void) {
     if (s_anim_n == 0) return;
 
@@ -155,12 +88,6 @@ void anim_tick(void) {
 
         float t = g.anim_ms ? (float)(now - a->start) / (float)g.anim_ms : 1.f;
 
-        /* window_set_pos, deliberately NOT window_apply_rect: this is an
-         * intermediate frame, and applied_rect must keep naming the animation's
-         * TARGET (see the file header). Recording each frame would make the
-         * layout's bookkeeping track the motion instead of the destination, and
-         * the drift detector — which compares against applied_rect — would then
-         * see every frame as the window arriving. */
         RECT r   = anim_rect_at(a, now);
         RECT adj = window_adjust_for_frame(a->hwnd, r);
         window_set_pos(a->hwnd, adj.left, adj.top,
@@ -172,7 +99,6 @@ void anim_tick(void) {
     }
     events_suppress_end();
 
-    /* Compact so the array does not grow without bound over a session. */
     int n = 0;
     for (int i = 0; i < s_anim_n; i++)
         if (s_anims[i].active) s_anims[n++] = s_anims[i];
@@ -180,14 +106,10 @@ void anim_tick(void) {
 
     if (live == 0 && g.message_window) {
         KillTimer(g.message_window, TIMER_ANIM);
-        /* The ring follows the window; it was left behind during the motion
-         * because refreshing it per frame is a repaint per frame. */
         border_refresh();
     }
 }
 
-/* A window that is being animated must not be re-placed by a tiling pass
- * mid-flight, or it teleports. */
 bool anim_is_animating(HWND hwnd) {
     for (int i = 0; i < s_anim_n; i++)
         if (s_anims[i].active && s_anims[i].hwnd == hwnd) return true;
@@ -204,9 +126,6 @@ void anim_cancel_all(void) {
     if (g.message_window) KillTimer(g.message_window, TIMER_ANIM);
 }
 
-/* ---------------------------------------------------------------------------
- * Dimming
- * --------------------------------------------------------------------------- */
 static LRESULT CALLBACK dim_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT: {
@@ -231,7 +150,6 @@ bool anim_dim_init(void) {
             DIM_CLASS,
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE |
             WS_EX_TOOLWINDOW);
-        /* Alpha is set per refresh, not here: the config can change it. */
     }
     return true;
 }
@@ -242,7 +160,6 @@ void anim_dim_shutdown(void) {
     UnregisterClassW(DIM_CLASS, g.hinst);
 }
 
-/* Re-place the scrims. Called from the same points as border_refresh. */
 void anim_dim_refresh(void) {
     if (!g.dim_enabled) {
         for (int i = 0; i < MAX_MONITORS; i++)
@@ -262,8 +179,6 @@ void anim_dim_refresh(void) {
         int  w = area.right - area.left, h = area.bottom - area.top;
         if (w <= 0 || h <= 0) { ShowWindow(d, SW_HIDE); continue; }
 
-        /* The scrim covers the monitor with the focused window punched out. In
-         * window-local coordinates, so the region moves with it. */
         HRGN rgn = CreateRectRgn(0, 0, w, h);
         if (have_hole) {
             RECT l = hole;
@@ -276,21 +191,14 @@ void anim_dim_refresh(void) {
                 DeleteObject(cut);
             }
         }
-        SetWindowRgn(d, rgn, FALSE);   /* the window owns `rgn` now */
+        SetWindowRgn(d, rgn, FALSE);
         SetLayeredWindowAttributes(d, 0, g.dim_alpha, LWA_ALPHA);
 
-        /* Just below the focused window: over everything else, under the thing
-         * you are looking at, and under the ring which is raised after it. */
         SetWindowPos(d, focus ? focus : HWND_TOP,
                      area.left, area.top, w, h,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(d, NULL, TRUE);
     }
 
-    /* A focused float lives in the topmost band, and inserting the scrim under
-     * it drags the scrim up there too — over the status bar, which would then
-     * be dimmed along with the wallpaper. Our own surfaces stay above it. The
-     * scrim demotes itself again the moment the focus is an ordinary window,
-     * because SetWindowPos below a non-topmost window clears the style. */
     overlay_raise_all();
 }

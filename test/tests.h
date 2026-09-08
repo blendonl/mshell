@@ -1,14 +1,5 @@
 #pragma once
 
-/*
- * tests.h — a deliberately tiny assertion harness.
- *
- * mshell cross-compiles to Windows, so its own code cannot run here. What CAN
- * run is the logic that has no Windows in it, and those units (match.c,
- * layout_math.c) are compiled natively by `make test` and exercised directly.
- * No framework, no dependency: a counter, a macro, and a non-zero exit code.
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>

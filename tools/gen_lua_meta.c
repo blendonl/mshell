@@ -38,8 +38,6 @@ static int split_params(const char *params, char out[][160], int max) {
     return n;
 }
 
-/* "win: mshell.Window?" is written type-first here and name-first in LuaLS, so
- * the trailing ? moves from the type onto the name. */
 static void param_parts(const char *param, char *name, size_t ncap,
                         char *type, size_t tcap) {
     const char *colon = strchr(param, ':');

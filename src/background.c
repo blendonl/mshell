@@ -1,12 +1,3 @@
-/*
- * background.c — desktop backdrop.
- *
- * When mshell is the shell there is no Explorer painting the desktop, so an
- * empty workspace would be pure black. We host one bottom-most, non-activating
- * window that fills the whole virtual screen and paints a solid color. It sits
- * below every managed window and never participates in tiling or focus.
- */
-
 #include "mshell.h"
 #include "overlay.h"
 
@@ -37,8 +28,6 @@ static LRESULT CALLBACK bg_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 bool background_init(void) {
-    /* The arrow cursor matters here and nowhere else: the backdrop is the one
-     * overlay the pointer can come to rest over. */
     if (!overlay_register(BG_CLASS, bg_wndproc, true)) return false;
 
     g.background_window = overlay_create(BG_CLASS,

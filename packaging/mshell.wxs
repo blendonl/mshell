@@ -1,22 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  mshell.wxs — MSI definition, built on Linux with wixl (msitools).
 
-  DELIBERATELY MINIMAL, and it does NOT set the Winlogon Shell key.
-
-  Installing the files and making mshell your shell are different decisions with
-  very different blast radii: the first is reversible by uninstalling, the second
-  can leave you staring at a black screen if anything is wrong. An installer that
-  did both would make "try mshell" and "replace my desktop" the same click.
-
-  So the MSI lays down C:\Program Files\mshell and stops. `mshell.exe -t` runs
-  it alongside Explorer; install.bat is what commits. (That is the short form
-  of the test flag, spelled with one hyphen because an XML comment may not
-  contain two in a row — which is what kept this file from parsing at all.)
-
-  UNSIGNED — there is no code-signing certificate, so SmartScreen will warn on
-  first run. The release zip remains the primary artifact.
--->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="mshell"
@@ -29,8 +12,6 @@
              InstallScope="perMachine"
              Description="Keyboard-driven tiling window manager shell for Windows" />
 
-    <!-- Upgrading in place rather than side-by-side: two copies of a shell
-         replacement is never what anyone wants. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of mshell is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
@@ -46,8 +27,6 @@
       <Component Id="cmpMshell" Guid="*">
         <File Id="filMshell" Source="mshell.exe" KeyPath="yes" />
       </Component>
-      <!-- The privileged helper ships but is not started: it is opt-in, and
-           starting it is what makes elevated windows tileable. -->
       <Component Id="cmpHelper" Guid="*">
         <File Id="filHelper" Source="mshelld.exe" KeyPath="yes" />
       </Component>

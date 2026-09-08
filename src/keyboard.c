@@ -1,28 +1,5 @@
-/*
- * keyboard.c — low-level keyboard hook, submap state machine, action dispatch
- *
- * The WH_KEYBOARD_LL hook runs on its OWN dedicated thread (see kb_init), NOT
- * the main message thread. This is deliberate and important: a low-level hook
- * fires on the thread that installed it, during that thread's message pump. If
- * the hook shared the main thread, then every time the main thread ran a focus
- * change / tiling pass the hook could not fire — and while the Win key is held
- * it autorepeats a stream of Win-down events that MUST be swallowed. A missed
- * (starved) Win-down gets processed by the OS, and once the hook resumes it
- * swallows the Win-up, leaving the OS convinced Win is still held (bare "k"
- * then fires Win+K). A dedicated thread that does nothing but pump the hook can
- * never be starved, so no Win event is ever missed.
- */
-
 #include "mshell.h"
 
-/* ===========================================================================
- * Keymap lock + dedicated hook thread
- *
- * Because the hook now runs on a separate thread, its reads of the keymaps race
- * with a config reload rebuilding them on the main thread. A single critical
- * section serialises the two. It is held only for the fast keymap lookup in the
- * hook and for the (rare, user-initiated) reload — never around focus/tiling.
- * =========================================================================== */
 static CRITICAL_SECTION g_kb_cs;
 static bool             g_kb_cs_ready = false;
 static HANDLE           g_kb_thread   = NULL;
@@ -38,27 +15,21 @@ void kb_locks_init(void) {
 void kb_lock(void)   { if (g_kb_cs_ready) EnterCriticalSection(&g_kb_cs); }
 void kb_unlock(void) { if (g_kb_cs_ready) LeaveCriticalSection(&g_kb_cs); }
 
-/* ===========================================================================
- * Key-name → virtual-key lookup
- * =========================================================================== */
 typedef struct {
     const char *name;
     DWORD       vk;
 } KeyNameEntry;
 
 static const KeyNameEntry key_names[] = {
-    /* letters */
     {"a", 'A'}, {"b", 'B'}, {"c", 'C'}, {"d", 'D'}, {"e", 'E'},
     {"f", 'F'}, {"g", 'G'}, {"h", 'H'}, {"i", 'I'}, {"j", 'J'},
     {"k", 'K'}, {"l", 'L'}, {"m", 'M'}, {"n", 'N'}, {"o", 'O'},
     {"p", 'P'}, {"q", 'Q'}, {"r", 'R'}, {"s", 'S'}, {"t", 'T'},
     {"u", 'U'}, {"v", 'V'}, {"w", 'W'}, {"x", 'X'}, {"y", 'Y'}, {"z", 'Z'},
 
-    /* digits */
     {"0", '0'}, {"1", '1'}, {"2", '2'}, {"3", '3'}, {"4", '4'},
     {"5", '5'}, {"6", '6'}, {"7", '7'}, {"8", '8'}, {"9", '9'},
 
-    /* punctuation */
     {"`",  VK_OEM_3},     {"~",  VK_OEM_3},
     {"-",  VK_OEM_MINUS}, {"_",  VK_OEM_MINUS},
     {"=",  VK_OEM_PLUS},  {"+",  VK_OEM_PLUS},
@@ -71,7 +42,6 @@ static const KeyNameEntry key_names[] = {
     {".",  VK_OEM_PERIOD},{">",  VK_OEM_PERIOD},
     {"/",  VK_OEM_2},     {"?",  VK_OEM_2},
 
-    /* navigation */
     {"Left",      VK_LEFT},
     {"Right",     VK_RIGHT},
     {"Up",        VK_UP},
@@ -81,7 +51,6 @@ static const KeyNameEntry key_names[] = {
     {"PageUp",    VK_PRIOR},
     {"PageDown",  VK_NEXT},
 
-    /* special */
     {"Return",    VK_RETURN},
     {"Enter",     VK_RETURN},
     {"Space",     VK_SPACE},
@@ -95,10 +64,6 @@ static const KeyNameEntry key_names[] = {
     {"Pause",     VK_PAUSE},
     {"CapsLock",  VK_CAPITAL},
 
-    /* Media and browser keys, so a keyboard that HAS them can rebind them —
-     * bare, without a modifier, since that is how they are pressed. The
-     * volume and media ACTIONS are the other direction: they synthesise these
-     * same keys for a keyboard that lacks them. */
     {"VolumeUp",   VK_VOLUME_UP},
     {"VolumeDown", VK_VOLUME_DOWN},
     {"VolumeMute", VK_VOLUME_MUTE},
@@ -113,12 +78,10 @@ static const KeyNameEntry key_names[] = {
     {"NumLock",   VK_NUMLOCK},
     {"ScrollLock", VK_SCROLL},
 
-    /* function keys */
     {"F1",  VK_F1},  {"F2",  VK_F2},  {"F3",  VK_F3},  {"F4",  VK_F4},
     {"F5",  VK_F5},  {"F6",  VK_F6},  {"F7",  VK_F7},  {"F8",  VK_F8},
     {"F9",  VK_F9},  {"F10", VK_F10}, {"F11", VK_F11}, {"F12", VK_F12},
 
-    /* numpad */
     {"Numpad0", VK_NUMPAD0}, {"Numpad1", VK_NUMPAD1}, {"Numpad2", VK_NUMPAD2},
     {"Numpad3", VK_NUMPAD3}, {"Numpad4", VK_NUMPAD4}, {"Numpad5", VK_NUMPAD5},
     {"Numpad6", VK_NUMPAD6}, {"Numpad7", VK_NUMPAD7}, {"Numpad8", VK_NUMPAD8},
@@ -131,17 +94,12 @@ DWORD key_name_to_vk(const char *name) {
     for (const KeyNameEntry *e = key_names; e->name; e++) {
         if (_stricmp(e->name, name) == 0) return e->vk;
     }
-    /* fallback: if name is a single ASCII char, use uppercase VK */
     if (name[0] && !name[1]) {
         return (DWORD)toupper((unsigned char)name[0]);
     }
     return 0;
 }
 
-/* Reverse of key_name_to_vk: the display name for a virtual-key, or NULL if we
- * don't have one. Returns the FIRST table entry for the vk, so aliases resolve
- * to the canonical label ("Return" not "Enter", "a" not the bare char). Used by
- * the which-key hint to print each binding's key. */
 const char *vk_to_key_name(DWORD vk) {
     for (const KeyNameEntry *e = key_names; e->name; e++) {
         if (e->vk == vk) return e->name;
@@ -157,9 +115,6 @@ const char *action_enum_to_name(Action action) {
     return api_action_path(action);
 }
 
-/* ===========================================================================
- * Modifier-name → flag
- * =========================================================================== */
 DWORD mod_name_to_flag(const char *name) {
     if (_stricmp(name, "LWin")  == 0) return MOD_LWIN;
     if (_stricmp(name, "RWin")  == 0) return MOD_LWIN;
@@ -170,9 +125,6 @@ DWORD mod_name_to_flag(const char *name) {
     return 0;
 }
 
-/* ===========================================================================
- * KeyMap allocation / manipulation
- * =========================================================================== */
 KeyMap *keymap_new(const wchar_t *name, bool persist) {
     if (g.keymap_count >= MAX_KEYMAPS) return NULL;
 
@@ -182,7 +134,7 @@ KeyMap *keymap_new(const wchar_t *name, bool persist) {
     km->bindings = (KeyBinding *)calloc((size_t)km->capacity, sizeof(KeyBinding));
     km->count    = 0;
     km->persist  = persist;
-    km->exit_vk  = 0;        /* 0 => Escape; a custom key is set by lua_api */
+    km->exit_vk  = 0;
     return km;
 }
 
@@ -193,21 +145,15 @@ void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
                         bool terminal) {
     if (!map) return;
 
-    /* grow the array if it's full */
     if (map->count >= map->capacity) {
         int new_cap = map->capacity * 2;
         KeyBinding *grown = (KeyBinding *)realloc(
             map->bindings, (size_t)new_cap * sizeof(KeyBinding));
-        if (!grown) return;   /* out of memory — drop the binding */
+        if (!grown) return;
         map->bindings = grown;
         map->capacity = new_cap;
     }
 
-    /* Warn about a chord bound twice in the same map. keymap_find returns the
-     * FIRST match, so the later binding can never fire — silently, which reads
-     * as "that keybind doesn't work". Not an error: shadowing is harmless as
-     * long as it is visible, and failing the load would break configs that
-     * already have a duplicate. */
     for (int i = 0; i < map->count; i++) {
         if (map->bindings[i].vk == vk && map->bindings[i].mod_flags == mods) {
             log_err(L"config: %ls: mods=0x%X vk=0x%02X is already bound — the "
@@ -230,9 +176,6 @@ void keymap_add_binding(KeyMap *map, DWORD mods, DWORD vk,
     kb->terminal  = terminal;
 }
 
-/* ===========================================================================
- * Find a binding in a keymap
- * =========================================================================== */
 static KeyBinding *keymap_find(KeyMap *map, DWORD mods, DWORD vk) {
     if (!map) return NULL;
     for (int i = 0; i < map->count; i++) {
@@ -242,30 +185,10 @@ static KeyBinding *keymap_find(KeyMap *map, DWORD mods, DWORD vk) {
     return NULL;
 }
 
-/* ===========================================================================
- * Modifier state — tracked MANUALLY from the events the hook observes.
- *
- * We cannot use GetAsyncKeyState/GetKeyState here: we swallow the Win key
- * (return 1), and a key blocked by a low-level hook is not reflected in those
- * APIs. A global WH_KEYBOARD_LL hook sees every keystroke, so we just watch
- * the modifier key up/down events ourselves. This is the standard approach.
- * =========================================================================== */
 static bool mod_lwin, mod_shift, mod_ctrl, mod_alt;
 
-/* Per-side state behind the three combined flags above. Held separately so
- * that releasing one Shift while the other is still down doesn't report the
- * modifier as released. */
 static bool mod_lshift, mod_rshift, mod_lctrl, mod_rctrl, mod_lalt, mod_ralt;
 
-/* Win-tap detection. Win is both a held modifier (Win+key chords, still live at
- * the root map) AND a leader: a *bare* tap — Win pressed and released with no
- * other key in between — enters the leader map (whichever submap the config
- * chose via mshell.set_leader). `win_used` records whether any key was seen
- * while Win was held; if not, the Win-up is a bare tap. Reset on a
- * fresh Win-down, set by the first non-Win key observed while Win is held. */
-/* Pending vim-style repeat count, built from digits typed inside a submap and
- * consumed by the next action. Hook-thread state, guarded by kb_lock like the
- * map pointer it sits beside. */
 static int s_count;
 
 static bool win_used;
@@ -279,76 +202,40 @@ static DWORD current_mods(void) {
     return m;
 }
 
-/* Which-key bridge. The submap hint must be drawn from the MAIN thread (GDI),
- * but g.current_map flips here on the hook thread — so whenever the active map
- * changes we only POST a nudge and let the main thread (whichkey_notify) do the
- * drawing. The static guard suppresses a post on every root-map keystroke (the
- * common case, where the active map doesn't actually change). The LPARAM is a
- * hint; whichkey_notify re-reads the authoritative map under the lock anyway.
- * Callers must hold kb_lock (this reads g.current_map). */
 static KeyMap *g_wk_last_map = (KeyMap *)-1;
 static void notify_submap(void) {
     KeyMap *m = (g.current_map && g.current_map != g.root_map) ? g.current_map : NULL;
-    if (m == g_wk_last_map) return;      /* no change — nothing to redraw */
+    if (m == g_wk_last_map) return;
     g_wk_last_map = m;
     if (g.message_window)
         PostMessageW(g.message_window, WM_MSHELL_SUBMAP, 0, (LPARAM)m);
 }
 
-/* Re-sync input state after returning from a secure desktop (session unlock,
- * fast-user-switch, UAC prompt, RDP reconnect). While the secure desktop is up
- * our hook does not run, so key-up events for anything held at lock time —
- * notably Win, e.g. after an idle-timeout lock or a Win+L we couldn't block —
- * never reach us, and the modifier would otherwise stay stuck "down" in our
- * tracking. main.c calls this on WM_WTSSESSION_CHANGE. */
 void kb_reset_state(void) {
     mod_lwin = mod_shift = mod_ctrl = mod_alt = false;
     mod_lshift = mod_rshift = mod_lctrl = mod_rctrl = false;
     mod_lalt = mod_ralt = false;
     win_used = false;
     kb_lock();
-    s_count = 0;              /* a half-typed count must not survive this */
+    s_count = 0;
     g.current_map = g.root_map;
-    notify_submap();          /* drop the hint if a submap was showing */
+    notify_submap();
     kb_unlock();
 }
 
-/* ===========================================================================
- * Pending-action ring — how a keystroke reaches the main thread.
- *
- * The hook must stay fast: doing SetForegroundWindow / ShellExecute, or ANY
- * logging or blocking call, inline can blow LowLevelHooksTimeout, which makes
- * Windows drop the hook for an event and leaves the swallowed Win key stuck
- * (the OS sees the Win-down but the hook still eats the Win-up). So the hook
- * only records what to do and posts; all heavy work happens on the main thread.
- *
- * What is recorded is the action BY VALUE, not the KeyBinding it came from.
- * Posting the pointer was a use-after-free: a config reload frees every
- * binding (config_free_owned), and two keystrokes can sit in the queue at once
- * — press Win+Shift+R and then any bound key before the main thread drains,
- * and the reload runs first, freeing the second message's binding out from
- * under it. Key autorepeat alone gets you there. FIFO ordering does not help,
- * because the reload is itself one of the queued actions.
- *
- * The sequence number travels in lParam and is stored in the slot too, so a
- * burst deep enough to lap the ring is detected on read rather than silently
- * executing whatever overwrote it.
- * =========================================================================== */
-#define KB_PENDING_N 64            /* power of two — index is seq & (N-1) */
+#define KB_PENDING_N 64
 
 typedef struct {
-    unsigned seq;                  /* 0 = never written */
-    unsigned gen;                  /* g.config_gen when this was dispatched */
+    unsigned seq;
+    unsigned gen;
     Action   action;
     int      arg;
     wchar_t  command[MAX_PATH];
     wchar_t  args[SPAWN_ARGS_MAX];
     wchar_t  cwd[MAX_PATH];
-    int      count;                /* vim-style repeat; 0 or 1 = once */
+    int      count;
 } PendingAction;
 
-/* Bounded copy that does not zero-pad the destination (unlike wcsncpy). Used
- * inside the hook, so it stays cheap: it writes exactly what is there. */
 static void pend_copy(wchar_t *dst, size_t cap, const wchar_t *src) {
     if (!cap) return;
     if (!src) { dst[0] = L'\0'; return; }
@@ -359,9 +246,8 @@ static void pend_copy(wchar_t *dst, size_t cap, const wchar_t *src) {
 }
 
 static PendingAction s_pending[KB_PENDING_N];
-static unsigned      s_pend_seq = 1;   /* seq 0 is reserved for "empty slot" */
+static unsigned      s_pend_seq = 1;
 
-/* Called from the hook, which already holds kb_lock (see kb_hook_proc). */
 static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
     if (!g.message_window || !b) return;
 
@@ -375,20 +261,14 @@ static void dispatch(KeyBinding *b, DWORD vk, DWORD mods) {
     pend_copy(p->args,    SPAWN_ARGS_MAX,  b->args);
     pend_copy(p->cwd,     MAX_PATH,        b->cwd);
     p->count  = s_count;
-    s_count   = 0;   /* consumed by this action, whatever it turns out to be */
-    p->seq = seq;   /* last: the slot is only valid once fully written */
+    s_count   = 0;
+    p->seq = seq;
 
-    /* wParam still carries the triggering key (low word) + modifiers (high
-     * word) purely so the main thread can log the match — the hook itself must
-     * never touch I/O. */
     PostMessageW(g.message_window, WM_MSHELL_ACTION,
                  (WPARAM)((vk & 0xFFFF) | ((mods & 0xFFFF) << 16)),
                  (LPARAM)seq);
 }
 
-/* Main-thread side: copy out the action `seq` refers to. False when the ring
- * lapped before we got here, which is the only way to lose a keystroke and is
- * worth saying out loud. */
 bool kb_take_pending(unsigned seq, Action *action, int *arg,
                      wchar_t *cmd, size_t cmd_cap,
                      wchar_t *args, size_t args_cap,
@@ -399,11 +279,6 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
     PendingAction *p = &s_pending[seq & (KB_PENDING_N - 1)];
     bool stale_lua = false;
     if (p->seq == seq) {
-        /* A Lua binding carries a registry ref, which belongs to the lua_State
-         * that created it. If a reload landed between the keypress and now,
-         * that state is closed and the ref would index into a different one —
-         * so drop it. Everything else was copied by value and is still safe to
-         * run, so only Lua calls are gated on the generation. */
         if (p->action == ACTION_LUA_CALL && p->gen != g.config_gen) {
             stale_lua = true;
         } else {
@@ -426,9 +301,6 @@ bool kb_take_pending(unsigned seq, Action *action, int *arg,
     return ok;
 }
 
-/* ===========================================================================
- * WH_KEYBOARD_LL hook procedure — fast, no blocking calls
- * =========================================================================== */
 LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode != HC_ACTION)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
@@ -436,52 +308,27 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lParam;
     DWORD vk = kb->vkCode;
 
-    /* Our own synthetic keystroke, injected by window_focus() to claim
-     * foreground rights (see claim_foreground_rights() in window.c). Let it
-     * through untouched and before anything else: swallowing it would deny us
-     * the "last input event" credit that is the whole point of sending it, and
-     * running it through the modifier tracking below would corrupt our idea of
-     * which keys the user is holding. */
     if (kb->dwExtraInfo == MSHELL_INPUT_TAG)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
-    /* Panic mode: pass everything, bind nothing. Checked here rather than by
-     * unhooking so the state is reversible from a reload — and because
-     * unhooking from the hook thread while inside the callback is not something
-     * to do. Win, Alt+Tab and the Start menu all work again from this point. */
     if (g.panicked)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
 
-    /* ---- launcher capture mode ----
-     * Checked before the modifier tracking and before every keymap: while the
-     * launcher is open it owns the keyboard completely, which is the only way
-     * to type into a window that never takes focus.
-     *
-     * Translation happens HERE rather than in the launcher because ToUnicodeEx
-     * needs the keyboard state as it was at this keystroke — by the time the
-     * main thread runs, Shift may already be up.
-     *
-     * Escape is handled by the launcher itself (it closes), so nothing special
-     * is needed here; the modifier keys are passed to the tracker below so a
-     * Shift held for a capital letter does not desynchronise our idea of what
-     * is down. */
     if (g.launcher_open) {
-        if (!down) return 1;            /* swallow key-ups too */
+        if (!down) return 1;
 
         switch (vk) {
         case VK_LSHIFT: case VK_RSHIFT: case VK_SHIFT:
         case VK_LCONTROL: case VK_RCONTROL: case VK_CONTROL:
         case VK_LMENU: case VK_RMENU: case VK_MENU:
-            break;                      /* fall through to modifier tracking */
+            break;
         default: {
             BYTE   ks[256];
             wchar_t buf[8] = {0};
             wchar_t ch = 0;
             if (GetKeyboardState(ks)) {
-                /* Our hook has swallowed these, so GetKeyboardState does not
-                 * know about them — tell it what we are tracking. */
                 ks[VK_SHIFT] = mod_shift ? 0x80 : 0;
                 int n = ToUnicodeEx(vk, (UINT)((lParam >> 16) & 0xFF), ks,
                                     buf, 8, 0, GetKeyboardLayout(0));
@@ -494,28 +341,16 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         }
     }
 
-
-    /* Any non-Win key seen while Win is held means the Win press was USED (a
-     * chord, or a keystroke handled by a modal submap), so the eventual Win-up
-     * is not a bare tap. Covers ordinary keys and the modifier keys below. */
     if (down && mod_lwin && vk != VK_LWIN && vk != VK_RWIN)
         win_used = true;
 
-    /* ---- modifier tracking + Win capture ----
-     * These touch only file-static modifier flags (and, on Win release, the
-     * current-map pointer under the lock); they never read the keymaps, so they
-     * return immediately without taking the lock for the common case. */
     switch (vk) {
     case VK_LWIN: case VK_RWIN:
         if (down) {
-            if (!mod_lwin) win_used = false;   /* fresh press: tap candidate */
+            if (!mod_lwin) win_used = false;
             mod_lwin = true;
-            return 1;                          /* swallow Win-DOWN entirely */
+            return 1;
         }
-        /* Win release. A bare tap (nothing pressed while held) toggles the
-         * leader map: from the root it enters the configured leader (if any);
-         * from within any submap it backs out to the root. When the tap did land
-         * a chord/modal key, win_used is set and we leave the current map alone. */
         mod_lwin = false;
         kb_lock();
         if (!win_used) {
@@ -524,28 +359,16 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
             } else {
                 g.current_map = g.root_map;
             }
-            s_count = 0;              /* leaving the map abandons its count */
+            s_count = 0;
         }
-        notify_submap();            /* show/hide the hint as the map changes */
+        notify_submap();
         kb_unlock();
-        /* Swallow every Win-DOWN (Win is a pure modifier / leader), but let the
-         * Win-UP reach the OS. A handful of reserved shortcuts — Win+L, Win+G,
-         * Win+Tab — are detected BELOW this hook and latch the Win key "down" in
-         * the OS no matter what we return here; if we also eat the Win-up, the
-         * OS stays convinced Win is held and bare "k" then fires Win+K. Passing
-         * the up through clears that latch. It is a no-op in the normal case:
-         * the OS never saw our swallowed Win-down, so a lone up does nothing and
-         * never opens the Start menu (that needs an OS-visible down + up with no
-         * key between). */
         return CallNextHookEx(NULL, nCode, wParam, lParam);
-    /* Left and right are tracked separately and OR'd, so releasing one while
-     * the other is still held does not clear the modifier. A single flag made
-     * Shift+Shift+release read as "shift is up" while it was still down. */
     case VK_LSHIFT:   mod_lshift = down; mod_shift = mod_lshift || mod_rshift;
                       return CallNextHookEx(NULL, nCode, wParam, lParam);
     case VK_RSHIFT:   mod_rshift = down; mod_shift = mod_lshift || mod_rshift;
                       return CallNextHookEx(NULL, nCode, wParam, lParam);
-    case VK_SHIFT:    mod_shift = down;   /* synthetic/unsided */
+    case VK_SHIFT:    mod_shift = down;
                       return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     case VK_LCONTROL: mod_lctrl = down; mod_ctrl = mod_lctrl || mod_rctrl;
@@ -563,62 +386,35 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
                       return CallNextHookEx(NULL, nCode, wParam, lParam);
     }
 
-    /* Only act on key-down for ordinary keys. */
     if (!down)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     DWORD mods = current_mods();
 
-    /* Everything below reads/mutates the keymaps, which a config reload may be
-     * rebuilding on the main thread — so hold the keymap lock. Single exit via
-     * `done` keeps it balanced; `pass` defers CallNextHookEx until after the
-     * lock is released (no blocking call while holding the lock). */
-    LRESULT result = 1;      /* default: swallow */
-    bool    pass   = false;  /* true => CallNextHookEx after unlock */
+    LRESULT result = 1;
+    bool    pass   = false;
 
     kb_lock();
 
     KeyMap *map   = g.current_map ? g.current_map : g.root_map;
     bool    modal = (map != g.root_map);
 
-    /* ---- modal submap: intercept every key, Win not required ----
-     * We're "inside" a submap, reached either by a bare Win tap (the leader) or
-     * by a held Win+key that ran enter_submap. Submap bindings are stored with
-     * no Win, so match on the modifiers minus Win. The map's `persist` flag,
-     * not the Win key, decides whether we stay. */
     if (modal) {
         DWORD kmods   = mods & ~MOD_LWIN;
         DWORD exit_vk = map->exit_vk ? map->exit_vk : VK_ESCAPE;
         KeyBinding *b = keymap_find(map, kmods, vk);
 
-        /* ---- vim-style counts ----
-         * A digit typed inside a submap builds a repeat count for the next
-         * action: "3j" focuses down three times.
-         *
-         * It only applies to a digit the map does NOT bind, which is what keeps
-         * it from breaking any existing config — the shipped one puts the
-         * desktops on 1..9 inside the `go` map, and those keep working exactly
-         * as before because the binding is found first. A leading 0 is likewise
-         * left alone, so a desktop named "0" stays reachable; 0 only counts once
-         * a count is already being built ("10j").
-         *
-         * Root-map chords are deliberately excluded: they need Win held, and
-         * "Win+3 Win+j" is not a gesture anyone wants. Counts belong to the
-         * bare-key mode, which is what a submap is. */
         if (!b && kmods == 0 && vk >= '0' && vk <= '9' &&
             (s_count > 0 || vk > '0')) {
             int d = (int)(vk - '0');
-            s_count = (s_count > 99) ? 999 : s_count * 10 + d;  /* cap, no wrap */
-            goto done;                    /* swallowed; the map is unchanged */
+            s_count = (s_count > 99) ? 999 : s_count * 10 + d;
+            goto done;
         }
 
         if (map->persist) {
-            /* Persisting: the exit key leaves (checked first so it can't be
-             * shadowed by a binding); a bound key fires and, unless flagged
-             * terminal, keeps us here; any other key is ignored — you stay. */
             if (vk == exit_vk) {
                 g.current_map = g.root_map;
-                s_count = 0;          /* abandon a half-typed count too */
+                s_count = 0;
             } else if (b) {
                 if (b->action == ACTION_ENTER_SUBMAP) {
                     g.current_map = b->submap;
@@ -628,9 +424,6 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
                 }
             }
         } else {
-            /* Unpersisting: the next key disables the map no matter what.
-             * Entering a nested submap is the one move that keeps us modal;
-             * a bound key fires then drops to root; anything else just drops. */
             if (b && b->action == ACTION_ENTER_SUBMAP) {
                 g.current_map = b->submap;
             } else {
@@ -638,66 +431,43 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g.current_map = g.root_map;
             }
         }
-        goto done;                       /* modal mode consumes every key */
+        goto done;
     }
 
-    /* ================= at the root map ================= */
-
-    /* ---- block leftover Windows system shortcuts ----
-     * Win+* combos are already dead (we ate the Win key). These are the
-     * remaining OS shortcuts a low-level hook CAN intercept. We deliberately
-     * never touch Ctrl+Shift+Esc (Task Manager) — it's the recovery hatch —
-     * and Ctrl+Alt+Del is a kernel SAS that no hook can block. (Modal submaps,
-     * above, swallow every key already, so this only needs to run at root.) */
     if (g.block_system_keys) {
         bool ctrl_shift_esc = (vk == VK_ESCAPE) && mod_ctrl && mod_shift;
         if (!ctrl_shift_esc) {
-            if (mod_alt && (vk == VK_TAB ||      /* Alt+Tab   task switch  */
-                            vk == VK_ESCAPE ||   /* Alt+Esc   cycle windows*/
-                            vk == VK_SPACE))     /* Alt+Space system menu  */
-                goto done;                       /* swallow */
-            if (mod_ctrl && vk == VK_ESCAPE)     /* Ctrl+Esc  open Start   */
-                goto done;                       /* swallow */
+            if (mod_alt && (vk == VK_TAB ||
+                            vk == VK_ESCAPE ||
+                            vk == VK_SPACE))
+                goto done;
+            if (mod_ctrl && vk == VK_ESCAPE)
+                goto done;
         }
     }
 
-    /* Root bindings are Win+key chords; without Win, a keystroke is plain
-     * typing and passes through untouched. */
     if (!mod_lwin) { pass = true; goto done; }
 
     {
-        /* NB: no logging in the hook — it must never block (see file header and
-         * dispatch()). The match is logged on the main thread in the
-         * WM_MSHELL_ACTION handler instead. */
         KeyBinding *b = keymap_find(map, mods, vk);
         if (b) {
             if (b->action == ACTION_ENTER_SUBMAP) {
-                g.current_map = b->submap;   /* enter the modal submap */
+                g.current_map = b->submap;
             } else {
                 dispatch(b, vk, mods);
                 if (b->terminal) g.current_map = g.root_map;
             }
         }
-        /* Matched, or Win + unbound key: swallow either way so the leftover
-         * Windows shortcut can't fire (result stays 1). */
     }
 
 done:
-    notify_submap();     /* enter/leave submap → refresh the hint (guarded) */
+    notify_submap();
     kb_unlock();
     if (pass)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
     return result;
 }
 
-/* ===========================================================================
- * Directional navigation helpers
- *
- * Focus/move by direction picks the geometrically nearest window in that
- * direction (by window-rect centers), which matches what the eye expects in
- * grid and master-stack layouts. When nothing lies in the requested direction
- * we fall back to simple prev/next cycling so a keypress is never a no-op.
- * =========================================================================== */
 typedef enum { DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_DOWN } Direction;
 
 static Direction action_to_dir(Action a) {
@@ -717,7 +487,6 @@ static bool center_of(HWND hwnd, POINT *out) {
     return true;
 }
 
-/* Index (into dt->windows) of the nearest window in `dir` from `from`, or -1. */
 static int neighbor_in_dir(Desktop *dt, int from, Direction dir) {
     POINT fc;
     if (from < 0 || from >= dt->count || !center_of(dt->windows[from], &fc))
@@ -740,14 +509,12 @@ static int neighbor_in_dir(Desktop *dt, int from, Direction dir) {
         }
         if (!ok) continue;
 
-        long score = dx * dx + dy * dy;   /* squared distance */
+        long score = dx * dx + dy * dy;
         if (best < 0 || score < best_score) { best = i; best_score = score; }
     }
     return best;
 }
 
-/* Resolve a directional target, cycling as a fallback. `cycle_prev` decides
- * which way the fallback goes. Returns an index into dt->windows. */
 static int resolve_target(Desktop *dt, int from, Action action, bool cycle_prev) {
     int target = -1;
     if (dt->layout != LAYOUT_MONOCLE)
@@ -758,17 +525,6 @@ static int resolve_target(Desktop *dt, int from, Action action, bool cycle_prev)
     return target;
 }
 
-/* ===========================================================================
- * Multi-monitor helpers
- * =========================================================================== */
-
-/* Move the focus to the next/previous display.
- *
- * Each display shows its own desktop now, so this is no longer a search for a
- * window of the current desktop that happens to sit on another monitor —
- * there are none. It is a change of WHICH DESKTOP you are driving: the focused
- * monitor moves, current_desktop_id follows it, and the window you were last
- * on over there gets the keyboard back. */
 void focus_monitor_at(int mon) {
     if (mon < 0 || mon >= g.monitor_count) return;
 
@@ -799,9 +555,6 @@ static void focus_monitor(int delta) {
     focus_monitor_at(m);
 }
 
-/* `unknown` is filled in with the desktop name when the command named one that
- * is not alive — the one failure the caller can describe usefully, and the one
- * a bare "expected a monitor index" was misreporting. */
 static bool parse_desktop_monitor(const wchar_t *command, int arg,
                                   int *slot, int *mon,
                                   wchar_t *unknown, size_t unknown_cap) {
@@ -842,15 +595,6 @@ static bool parse_desktop_monitor(const wchar_t *command, int arg,
     return true;
 }
 
-/* Send the focused window to the next/prev display.
- *
- * A window belongs to a desktop and a desktop belongs to a display, so putting
- * a window on the other screen means putting it on the DESKTOP that screen is
- * showing — reassigning its monitor alone would leave it owned by a desktop
- * that lives somewhere else, and the next tiling pass would drag it back.
- *
- * A display showing nothing has no desktop to move it to, and this says so
- * rather than half-moving the window. */
 static void move_focused_to_monitor(int delta) {
     if (g.monitor_count < 2) return;
 
@@ -872,19 +616,7 @@ static void move_focused_to_monitor(int delta) {
     desktop_move_window(focus, dst->name);
 }
 
-/* ---------------------------------------------------------------------------
- * Move or resize a FLOATING window by one step.
- *
- * The step is a design-pixel constant scaled to the window's own monitor, so
- * one press covers the same visible distance on a 100% and a 200% display.
- * Resizing pulls the edge the direction names: resize_left narrows, resize_
- * right widens, which reads the same way the tiled inc/dec_master pair does.
- *
- * Geometry is written through window_set_pos (the helper-aware wrapper) and
- * recorded in applied_rect, so the drift detector recognises the move as ours
- * and does not treat it as the window escaping.
- * --------------------------------------------------------------------------- */
-#define FLOAT_STEP 40   /* design px at 96 DPI */
+#define FLOAT_STEP 40
 
 static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     RECT r;
@@ -906,7 +638,6 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     if (resize) {
         w += dx;
         h += dy;
-        /* Never let a window be resized into something unclickable. */
         if (w < g.min_win_w) w = g.min_win_w;
         if (h < g.min_win_h) h = g.min_win_h;
     } else {
@@ -920,21 +651,10 @@ static void float_nudge(ManagedWindow *mw, Action action, bool resize) {
     border_refresh();
 }
 
-/* ---------------------------------------------------------------------------
- * Which actions a repeat count applies to.
- *
- * A whitelist rather than a blacklist, deliberately: the failure mode of
- * guessing wrong is "3q quit three times" or "3<Return> launched three
- * terminals", so a new action has to opt in rather than inherit repetition it
- * was never considered for. Everything here is motion, ordering or sizing —
- * idempotent-ish, visibly reversible, and meaningless to do once when you asked
- * for five.
- * --------------------------------------------------------------------------- */
 bool action_is_repeatable(Action action) {
     return api_action_repeatable(action);
 }
 
-/* Grow/shrink the focused window within its stack (cfact). */
 static void adjust_cfact(HWND focus, float delta) {
     ManagedWindow *mw = window_find(focus);
     if (!mw) return;
@@ -943,18 +663,6 @@ static void adjust_cfact(HWND focus, float delta) {
     tile_current();
 }
 
-/* ===========================================================================
- * Action dispatch
- * =========================================================================== */
-/* ===========================================================================
- * The one place mshell launches a program.
- *
- * ShellExecuteW rather than CreateProcessW on purpose: it resolves PATH (so a
- * bare "firefox.exe" works) and it can start a .lnk shortcut, which several
- * apps require because their real binary sits in a versioned folder and moves
- * between updates. Arguments must therefore be a separate string — that is the
- * shape of the API — which is exactly why they could not be expressed before.
- * =========================================================================== */
 bool spawn_command(const wchar_t *cmd, const wchar_t *args,
                    const wchar_t *cwd, const wchar_t *ctx) {
     if (!cmd || !cmd[0]) {
@@ -963,13 +671,11 @@ bool spawn_command(const wchar_t *cmd, const wchar_t *args,
     }
 
     const wchar_t *params = (args && args[0]) ? args : NULL;
-    /* NULL means "inherit ours", which for a Winlogon-launched shell is
-     * C:\Windows\system32 — rarely what you want, but never surprising. */
     const wchar_t *dir    = (cwd && cwd[0]) ? cwd : NULL;
 
     INT_PTR code = (INT_PTR)ShellExecuteW(NULL, L"open", cmd, params,
                                           dir, SW_SHOWNORMAL);
-    if (code <= 32) {   /* the documented failure range */
+    if (code <= 32) {
         log_err(L"%ls: FAILED to launch '%ls'%ls%ls (code %lld) — not on PATH "
                 L"or not installed? Try a full path.",
                 ctx ? ctx : L"spawn", cmd,
@@ -1009,26 +715,18 @@ void execute_action_on(Action action, HWND target, int arg,
 
     switch (action) {
 
-    /* -- spawn a program ----------------------------------------------- */
-    /* -- run a Lua function from the config ----------------------------
-     * `arg` is a registry ref. It was checked against the config generation
-     * before we got here (kb_take_pending), so the VM it belongs to is the
-     * live one. */
     case ACTION_LUA_CALL:
         lua_run_ref(arg);
         break;
 
     case ACTION_SPAWN:
         if (command && command[0]) {
-            /* Launch detached; the WinEvent hook picks the new window up and
-             * tiles it when it appears. */
             spawn_command(command, args, cwd, L"keybind");
         } else {
             log_w(L"spawn: no command set on binding");
         }
         break;
 
-    /* -- focus movement (directional, vim keys) ------------------------ */
     case ACTION_FOCUS_LEFT:
     case ACTION_FOCUS_DOWN:
     case ACTION_FOCUS_UP:
@@ -1040,12 +738,10 @@ void execute_action_on(Action action, HWND target, int arg,
         bool prev = (action == ACTION_FOCUS_LEFT || action == ACTION_FOCUS_UP);
         dt->focused = resolve_target(dt, fi, action, prev);
         window_focus(dt->windows[dt->focused]);
-        /* Monocle only shows the focused window — re-tile to reveal it. */
         if (dt->layout == LAYOUT_MONOCLE) tile_current();
         break;
     }
 
-    /* -- focus cycling (next/prev, layout-independent) ----------------- */
     case ACTION_FOCUS_NEXT:
     case ACTION_FOCUS_PREV: {
         if (dt->count < 2) break;
@@ -1057,11 +753,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- window swap (shift + vim), or a literal move when floating -----
-     * A tiled window has no position of its own — the layout owns it — so
-     * "move" there means swapping places with the neighbour in that direction.
-     * A floating window does have one, and the same keys should move it, which
-     * is what they now do. */
     case ACTION_MOVE_LEFT:
     case ACTION_MOVE_DOWN:
     case ACTION_MOVE_UP:
@@ -1081,10 +772,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- resize a floating window --------------------------------------
-     * Tiled geometry belongs to the layout (inc_master / cfact are its knobs),
-     * so this is deliberately a no-op on a tiled window rather than quietly
-     * doing something else. */
     case ACTION_RESIZE_LEFT:
     case ACTION_RESIZE_DOWN:
     case ACTION_RESIZE_UP:
@@ -1094,9 +781,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- always on top --------------------------------------------------
-     * The z-order pass owns the actual promotion, so this only flips the
-     * intent and asks for a pass. */
     case ACTION_TOGGLE_ALWAYS_ON_TOP: {
         ManagedWindow *mw = focus ? window_find(focus) : NULL;
         if (mw) {
@@ -1108,10 +792,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- back to the previously focused window --------------------------
-     * The window-level counterpart of last_desktop, and a toggle for the same
-     * reason: focusing the old window pushes the current one to the front of
-     * the history, so pressing it twice returns you. */
     case ACTION_LAST_WINDOW: {
         HWND prev = desktop_last_window();
         if (prev) {
@@ -1122,9 +802,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- desktop switching ---------------------------------------------
-     * The target is a NAME (in `command`), and it does not have to exist:
-     * switching to a name nothing is using creates that desktop. */
     case ACTION_SWITCH_DESKTOP:
         if (command && command[0]) desktop_switch(command);
         break;
@@ -1133,17 +810,13 @@ void execute_action_on(Action action, HWND target, int arg,
         if (command && command[0] && focus) desktop_move_window(focus, command);
         break;
 
-    /* Back to the desktop we came from; press twice to end up where you were. */
     case ACTION_LAST_DESKTOP:
         desktop_switch_last();
         break;
 
-    /* Step through the desktops that exist right now — how you reach one you
-     * created on the fly and never bound a key to. */
     case ACTION_NEXT_DESKTOP: desktop_cycle(+1); break;
     case ACTION_PREV_DESKTOP: desktop_cycle(-1); break;
 
-    /* -- monitors ------------------------------------------------------ */
     case ACTION_FOCUS_MONITOR_NEXT:   focus_monitor(+1); break;
     case ACTION_FOCUS_MONITOR_PREV:   focus_monitor(-1); break;
     case ACTION_MOVE_TO_MONITOR_NEXT: move_focused_to_monitor(+1); break;
@@ -1178,7 +851,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- window lifetime ----------------------------------------------- */
     case ACTION_CLOSE:
         if (focus) window_close(focus);
         break;
@@ -1190,10 +862,6 @@ void execute_action_on(Action action, HWND target, int arg,
     case ACTION_MINIMIZE:
         if (focus && dt->count > 0) {
             ShowWindow(focus, SW_MINIMIZE);
-            /* dt->focused still names the window we just minimized. Hand the
-             * keyboard to the next sibling that is actually on screen —
-             * otherwise focus sits on something invisible and every
-             * directional keybind computes from the wrong place. */
             for (int i = 1; i <= dt->count; i++) {
                 int  j = (fi + i) % dt->count;
                 HWND h = dt->windows[j];
@@ -1207,9 +875,6 @@ void execute_action_on(Action action, HWND target, int arg,
         }
         break;
 
-    /* There is no taskbar under mshell, so a minimized window has nothing to
-     * click and this is the only way back. Takes the first one in the
-     * desktop's window order, so repeating it walks through them. */
     case ACTION_RESTORE:
         for (int i = 0; i < dt->count; i++) {
             HWND h = dt->windows[i];
@@ -1223,7 +888,6 @@ void execute_action_on(Action action, HWND target, int arg,
         }
         break;
 
-    /* -- sticky: follow me to every desktop ---------------------------- */
     case ACTION_TOGGLE_STICKY: {
         ManagedWindow *mw = window_find(focus);
         if (!mw) break;
@@ -1234,29 +898,15 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- scratchpad ----------------------------------------------------
-     * A single window you summon anywhere and dismiss again — a terminal, a
-     * notes app. There is no spawn-and-track magic: you mark a window you
-     * already have, which is predictable and needs no guessing about which
-     * window a launch produced. */
     case ACTION_MARK_SCRATCHPAD: {
         ManagedWindow *mw = window_find(focus);
         if (!mw) break;
-        /* Only one at a time — a second mark moves the role.
-         *
-         * Give the outgoing scratchpad its visibility back on the way out. It
-         * may be STOWED, and user_hidden is honoured by the desktop-switch show
-         * loop precisely so that nothing reveals it by accident — so a window
-         * that loses the role while stowed would have nothing left that could
-         * ever show it: toggle_scratchpad now points at a different window. */
         for (int i = 0; i < g.managed_count; i++) {
             ManagedWindow *old = &g.managed[i];
             if (!old->scratchpad) continue;
             old->scratchpad = false;
             if (!old->user_hidden) continue;
             old->user_hidden = false;
-            /* Only if you would be able to see it: on another desktop the flag
-             * is enough, and that desktop's next switch-in does the rest. */
             if (desktop_is_visible(old->desktop_id)) {
                 events_suppress_begin();
                 window_show(old);
@@ -1264,7 +914,7 @@ void execute_action_on(Action action, HWND target, int arg,
             }
         }
         mw->scratchpad  = true;
-        mw->is_floating = true;   /* it overlays, it does not join the grid */
+        mw->is_floating = true;
         window_set_floating(focus, true);
         log_err(L"scratchpad: %p is now the scratchpad window", (void *)focus);
         tile_current();
@@ -1287,20 +937,7 @@ void execute_action_on(Action action, HWND target, int arg,
         bool showing = here && window_on_screen(sp);
 
         if (!showing) {
-            /* Summon it onto the desktop you are looking at, rather than
-             * making you go to where it happens to live.
-             *
-             * Through desktop_move_window, not by assigning desktop_id: that
-             * is the half of the move that unlinks the window from the desktop
-             * it was on. Setting the id alone left it in the old desktop's
-             * windows[] for good — closing it there never unlinked it, so that
-             * desktop kept a dead handle, never emptied and never went away.
-             *
-             * A no-op when the scratchpad already lives here, and it refuses
-             * (leaving the window where it is) if this desktop is full. */
             desktop_move_window(sp->hwnd, desktop_current()->name);
-            /* Nothing in that call touches g.managed[], but re-resolve anyway:
-             * `sp` outlives a function that rearranges desktops. */
             sp = window_find(sp->hwnd);
             if (!sp) break;
         }
@@ -1308,8 +945,6 @@ void execute_action_on(Action action, HWND target, int arg,
         events_suppress_begin();
         if (showing) {
             window_hide(sp);
-            /* Stowed by the USER, so the desktop-switch show loop must leave
-             * it stowed — see user_hidden in mshell.h. */
             sp->user_hidden = true;
         } else {
             sp->user_hidden = false;
@@ -1327,10 +962,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- zoom: dwm's swap-with-master ----------------------------------
-     * Unlike promote_master, this is a TOGGLE. From the stack it swaps you into
-     * the master slot; pressed again from master it swaps you back out to where
-     * the old master went, so the pair alternates. */
     case ACTION_ZOOM:
         if (dt->count > 1 && focus) {
             int other = (fi == 0) ? 1 : 0;
@@ -1341,26 +972,19 @@ void execute_action_on(Action action, HWND target, int arg,
         }
         break;
 
-    /* -- float --------------------------------------------------------- */
     case ACTION_TOGGLE_FLOAT: {
         ManagedWindow *mw = window_find(focus);
         if (!mw) break;
         if (mw->tracked_only) {
-            /* A tracked window is floating by construction, so the toggle's
-             * first job is promotion into full management — which lands it in
-             * the grid unless a rule or the desktop floats it. Not gated on
-             * FLOAT_NEVER: promoting is not floating. */
             window_promote(focus);
             tile_current();
         } else if (g.float_policy != FLOAT_NEVER) {
-            /* FLOAT_NEVER means every window stays tiled — ignore the toggle. */
             window_set_floating(focus, !mw->is_floating);
             tile_current();
         }
         break;
     }
 
-    /* -- fullscreen ---------------------------------------------------- */
     case ACTION_FULLSCREEN:
         if (focus) window_set_fullscreen(focus, FS_WINDOW);
         break;
@@ -1373,7 +997,6 @@ void execute_action_on(Action action, HWND target, int arg,
         if (focus) window_set_fullscreen(focus, FS_BOTH);
         break;
 
-    /* -- layout -------------------------------------------------------- */
     case ACTION_LAYOUT_TILING:   dt->layout = LAYOUT_TILING;   tile_current(); break;
     case ACTION_LAYOUT_MONOCLE:  dt->layout = LAYOUT_MONOCLE;  tile_current(); break;
     case ACTION_LAYOUT_GRID:     dt->layout = LAYOUT_GRID;     tile_current(); break;
@@ -1383,18 +1006,6 @@ void execute_action_on(Action action, HWND target, int arg,
     case ACTION_LAYOUT_COLUMNS:  dt->layout = LAYOUT_COLUMNS;  tile_current(); break;
 
     case ACTION_CYCLE_LAYOUT: {
-        /* The cycle covers the DYNAMIC layouts — the seven that are a pure
-         * function of the window list, where cycling past one you did not want
-         * costs nothing. BSP is not one of them: its structure is the record of
-         * where you were each time a window opened, so arriving in it by
-         * pressing Space one time too many drops you into a tree you did not
-         * build, and pressing Space again abandons it. It has its own binding
-         * (`layout_bsp`, and the `b` submap) for the same reason.
-         *
-         * Wrapping on LAYOUT_BSP rather than LAYOUT_COUNT is what excludes it,
-         * and it is why the enum keeps BSP last before LAYOUT_COUNT. A desktop
-         * already in BSP still cycles OUT — into tiling, the first of the
-         * dynamic ones — so the key is never a dead end. */
         Layout next = (Layout)(dt->layout + 1);
         if (next >= LAYOUT_BSP) next = LAYOUT_TILING;
         dt->layout = next;
@@ -1402,7 +1013,6 @@ void execute_action_on(Action action, HWND target, int arg,
         break;
     }
 
-    /* -- number of master windows -------------------------------------- */
     case ACTION_INC_NMASTER:
         dt->n_master = clamp_i(dt->n_master + 1, 1, dt->count > 0 ? dt->count : 1);
         tile_current();
@@ -1413,7 +1023,6 @@ void execute_action_on(Action action, HWND target, int arg,
         tile_current();
         break;
 
-    /* -- per-window size within the stack (cfact) ---------------------- */
     case ACTION_INC_CFACT:  adjust_cfact(focus, +0.10f); break;
     case ACTION_DEC_CFACT:  adjust_cfact(focus, -0.10f); break;
     case ACTION_RESET_CFACT: {
@@ -1424,7 +1033,6 @@ void execute_action_on(Action action, HWND target, int arg,
 
     case ACTION_PROMOTE_MASTER:
         if (focus && fi > 0 && dt->count > 1) {
-            /* move focused window to index 0 (master) */
             HWND f = dt->windows[fi];
             memmove(&dt->windows[1], &dt->windows[0],
                     (size_t)fi * sizeof(HWND));
@@ -1444,21 +1052,13 @@ void execute_action_on(Action action, HWND target, int arg,
         tile_current();
         break;
 
-    /* ACTION_ENTER_SUBMAP is deliberately absent: entering a submap is decided
-     * and applied by the hook itself (all three of its paths assign
-     * g.current_map directly), so it is never dispatched here. The case that
-     * used to sit here was unreachable — and wrote g.current_map from THIS
-     * thread with no kb_lock, racing the hook that owns it. */
-
-    /* -- meta ---------------------------------------------------------- */
     case ACTION_RELOAD:
-        config_reload();   /* clears panic mode, wherever the reload came from */
+        config_reload();
         tile_current();
-        whichkey_hide();   /* colors/enabled may have changed; drop any stale hint */
+        whichkey_hide();
         log_w(L"Config reloaded");
         break;
 
-    /* -- session / power ------------------------------------------------ */
     case ACTION_LOCK:      system_lock();      break;
     case ACTION_LOGOFF:    system_logoff();    break;
     case ACTION_REBOOT:    system_reboot();    break;
@@ -1466,7 +1066,6 @@ void execute_action_on(Action action, HWND target, int arg,
     case ACTION_SLEEP:     system_sleep();     break;
     case ACTION_HIBERNATE: system_hibernate(); break;
 
-    /* -- media ----------------------------------------------------------- */
     case ACTION_VOLUME_UP:   case ACTION_VOLUME_DOWN:
     case ACTION_VOLUME_MUTE: case ACTION_MEDIA_PLAY:
     case ACTION_MEDIA_NEXT:  case ACTION_MEDIA_PREV:
@@ -1474,7 +1073,6 @@ void execute_action_on(Action action, HWND target, int arg,
         system_media_key(action);
         break;
 
-    /* -- screenshots ----------------------------------------------------- */
     case ACTION_SCREENSHOT:        screenshot_screen(); break;
     case ACTION_SCREENSHOT_WINDOW: screenshot_window(); break;
 
@@ -1482,8 +1080,6 @@ void execute_action_on(Action action, HWND target, int arg,
         if (command && command[0]) notify_show(command, NOTIFY_INFO, 4000);
         break;
 
-    /* Go to whatever asked for attention, wherever it is — including a desktop
-     * you are not on, which is the case the flag exists for. */
     case ACTION_LAUNCHER:
         if (!launcher_spawn_mrun()) launcher_open();
         break;
@@ -1495,8 +1091,6 @@ void execute_action_on(Action action, HWND target, int arg,
     case ACTION_BAR_TOP:      bar_set_mode(BAR_MODE_TOP_BAR);  break;
     case ACTION_BAR_FLOATING: bar_set_mode(BAR_MODE_FLOATING); break;
 
-    /* The focused monitor, not the primary: on a two-monitor desk the display
-     * you want HDR on is the one you are looking at. */
     case ACTION_TOGGLE_HDR:
         display_toggle_hdr(g.focused_monitor);
         break;
@@ -1513,7 +1107,6 @@ void execute_action_on(Action action, HWND target, int arg,
         display_toggle_portrait(g.focused_monitor);
         break;
 
-    /* -- manual (BSP) tiling ------------------------------------------- */
     case ACTION_SPLIT_H: layout_tree_set_split(SPLIT_H); break;
     case ACTION_SPLIT_V: layout_tree_set_split(SPLIT_V); break;
     case ACTION_ROTATE_SPLIT:   layout_tree_rotate();    break;
@@ -1546,42 +1139,23 @@ void execute_action_on(Action action, HWND target, int arg,
         PostQuitMessage(0);
         break;
 
-    /* Returns at once: the fetch and the install run on their own thread and
-     * report by notification, because this one must not block the thread that
-     * services keybinds for the length of a download. */
     case ACTION_UPDATE:
         update_install_async();
         break;
 
-    /* Same reasoning as update: schtasks has to be waited on twice with a
-     * settle in between, which is far too long to hold the thread that
-     * services keybinds. */
     case ACTION_RESTART_HELPER:
         helper_restart_async();
         break;
 
-    /* -- panic --------------------------------------------------------
-     * The escape hatch that does not require Task Manager. Explorer comes up
-     * alongside us (it coexists fine — that is exactly what --test mode is),
-     * every window we hid is given back, and the keyboard hook stops swallowing
-     * anything, so Win, Alt+Tab and the Start menu all work again.
-     *
-     * It deliberately does NOT quit: as the shell, exiting ends the session,
-     * which is the outcome someone reaching for a panic key is trying to avoid.
-     * mshell stays running and can be restored with reload, or quit
-     * deliberately once you have a desktop to land on. */
     case ACTION_PANIC:
-        /* No keybinding can undo this — the hook stops matching, which is the
-         * point — so the way back is a reload from outside: `mshell.exe --msg
-         * reload`, or just saving init.lua if auto-reload is on. */
         log_err(L"PANIC: starting explorer.exe and releasing the keyboard. "
                 L"mshell is still running but no longer binding any key. "
                 L"To undo: run `mshell.exe --msg reload`, or save your "
                 L"init.lua if auto-reload is enabled.");
         window_restore_all_visibility();
-        launcher_close();               /* never leave the keyboard captured */
-        g.panicked = true;              /* checked by the hook, first thing */
-        kb_reset_state();               /* drop any half-held modifier */
+        launcher_close();
+        g.panicked = true;
+        kb_reset_state();
         whichkey_hide();
         spawn_command(L"explorer.exe", NULL, NULL, L"panic");
         break;
@@ -1591,41 +1165,20 @@ void execute_action_on(Action action, HWND target, int arg,
     }
 }
 
-/* ===========================================================================
- * Init / shutdown — the hook lives on its own thread
- *
- * A WH_KEYBOARD_LL hook fires on the thread that installed it, serviced by that
- * thread's message pump. We give it a thread that does nothing else, so it is
- * never starved by focus/tiling work on the main thread (which is what let a
- * held-Win autorepeat leak and stick — see the file header).
- * =========================================================================== */
-/* ---------------------------------------------------------------------------
- * WH_MOUSE_LL — only while Mod+drag is enabled.
- *
- * It shares the keyboard hook's thread, so it is on the same LowLevelHooksTimeout
- * budget: the first thing it does for a non-modifier-held event is return. That
- * matters because this fires on every pixel of every mouse movement, and the
- * thread it runs on is the one that has to answer keystrokes.
- * --------------------------------------------------------------------------- */
 static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode != HC_ACTION)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
-    /* Cheapest possible early-out: unless a drag is in flight, nothing here is
-     * interesting without the modifier. mod_lwin is the hook thread's own
-     * state, already tracked for the keyboard. */
     if (!g.mod_drag_hwnd && !mod_lwin)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     MSLLHOOKSTRUCT *ms = (MSLLHOOKSTRUCT *)lParam;
     if (mouse_mod_drag_event(wParam, ms->pt, mod_lwin))
-        return 1;                       /* swallow: the app must not see it */
+        return 1;
 
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
-/* Install or remove the mouse hook to match the setting. Must run ON the hook
- * thread, so it is driven by a posted message rather than called directly. */
 static void mouse_sync_hook_here(void) {
     if (g.mouse_mod_drag && !g.mouse_hook) {
         g.mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_hook_proc,
@@ -1641,7 +1194,6 @@ static void mouse_sync_hook_here(void) {
     }
 }
 
-/* Ask the hook thread to reconcile its mouse hook with the config. */
 void mouse_sync_hook(void) {
     if (g_kb_thread_id) PostThreadMessageW(g_kb_thread_id, WM_MSHELL_MOUSE, 0, 0);
 }
@@ -1649,25 +1201,10 @@ void mouse_sync_hook(void) {
 static DWORD WINAPI kb_thread_proc(LPVOID param) {
     (void)param;
 
-    /* Run this pump at the top scheduling priority. A WH_KEYBOARD_LL event is
-     * silently dropped by the OS — passed straight to the next hook / the app,
-     * with our return value ignored — if the thread that installed it is not
-     * scheduled to service it within LowLevelHooksTimeout (default 300 ms). A
-     * fullscreen game commonly runs its own threads at an elevated priority and
-     * saturates the CPU/GPU, which starves a NORMAL-priority thread for far
-     * longer than that. The result is every keybind dying for as long as the
-     * game is running: the hook is never uninstalled (so it comes back the
-     * instant the game closes, with no restart), it is just repeatedly timed
-     * out. A dedicated thread only escapes starvation by *mshell's own* work,
-     * not by a higher-priority game — so lift it above that game. This thread
-     * does nothing but a fast keymap lookup, so TIME_CRITICAL here costs no real
-     * CPU while guaranteeing it wakes ahead of the game to swallow each key. */
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
-    /* Install the hook FROM this thread so its callbacks run here. */
     g.kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, kb_hook_proc, g.hinst, 0);
 
-    /* Let kb_init() know whether the install succeeded before it returns. */
     if (g_kb_ready_evt) SetEvent(g_kb_ready_evt);
 
     if (!g.kb_hook) {
@@ -1675,13 +1212,8 @@ static DWORD WINAPI kb_thread_proc(LPVOID param) {
         return 1;
     }
 
-    /* Dedicated pump: nothing here but servicing the hook. kb_shutdown() posts
-     * WM_QUIT to break out. */
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        /* A thread message (hwnd == NULL) is ours: the only one is the request
-         * to reconcile the mouse hook, which has to happen on this thread
-         * because that is where its callbacks must run. */
         if (!msg.hwnd && msg.message == WM_MSHELL_MOUSE) {
             mouse_sync_hook_here();
             continue;
@@ -1702,9 +1234,9 @@ static DWORD WINAPI kb_thread_proc(LPVOID param) {
 }
 
 bool kb_init(void) {
-    kb_locks_init();   /* idempotent — also called from WinMain before config */
+    kb_locks_init();
 
-    g_kb_ready_evt = CreateEventW(NULL, TRUE, FALSE, NULL);   /* manual reset */
+    g_kb_ready_evt = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     g_kb_thread = CreateThread(NULL, 0, kb_thread_proc, NULL, 0, &g_kb_thread_id);
     if (!g_kb_thread) {
@@ -1712,8 +1244,6 @@ bool kb_init(void) {
         return false;
     }
 
-    /* Wait until the thread has attempted the hook install, so we can report
-     * success/failure synchronously like before. */
     if (g_kb_ready_evt)
         WaitForSingleObject(g_kb_ready_evt, 5000);
 
@@ -1727,7 +1257,6 @@ void kb_shutdown(void) {
         CloseHandle(g_kb_thread);
         g_kb_thread = NULL;
     }
-    /* The hook is normally unhooked inside the thread; make sure. */
     if (g.kb_hook) {
         UnhookWindowsHookEx(g.kb_hook);
         g.kb_hook = NULL;

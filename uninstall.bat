@@ -1,24 +1,6 @@
 @echo off
-REM ============================================================
-REM  mshell uninstaller — restores Windows Explorer as the shell.
-REM
-REM  Deleting the per-user Shell value makes Windows fall back to
-REM  the system default (explorer.exe). Files in C:\mshell are
-REM  left in place; delete that folder by hand if you want them gone.
-REM  Your config (%APPDATA%\mshell\init.lua) is never touched, so
-REM  reinstalling later picks your keybindings straight back up.
-REM
-REM  The privileged helper's logon task (mshelld) IS removed, since
-REM  leaving it would keep starting an elevated binary from a folder
-REM  you have just been told to delete. That part needs an
-REM  administrator prompt.
-REM ============================================================
 echo.
 echo  Restoring Explorer as the shell for this user ...
-REM  Remove the per-user override first. If /machine was used, that key is in
-REM  HKLM instead — passed the same way, and needing the same elevated prompt.
-REM  Scanned like install.bat's flags rather than checked as %~1, so the two
-REM  scripts accept the argument the same way whatever else is on the line.
 set "HIVE=HKCU"
 set "MACHINEWIDE="
 for %%a in (%*) do (
@@ -40,14 +22,6 @@ if %errorlevel%==0 (
     echo  No per-user Shell override was set ^(already on Explorer^).
 )
 
-REM  --- the privileged helper's logon task ---
-REM  Removed rather than left behind: it starts an ELEVATED binary out of
-REM  C:\mshell at every sign-in, and the header above tells you to delete that
-REM  folder by hand. An uninstall that leaves the task registered leaves a
-REM  privileged autostart pointing into a directory that is about to become
-REM  user-writable, which is a worse thing to forget than a stray exe.
-REM  Deleting it needs administrator rights — that is what /rl highest cost to
-REM  create — so this reports rather than fails when run unelevated.
 schtasks /query /tn "mshelld" >nul 2>&1 || goto :notask
 echo  Removing the mshelld logon task ...
 schtasks /end    /tn "mshelld"    >nul 2>&1
@@ -60,24 +34,9 @@ if %errorlevel%==0 (
 )
 :notask
 
-REM  A helper started by hand rather than by the task is still running, and
-REM  still elevated. Stop that too, so "uninstalled" means nothing of mshell's
-REM  is left running as administrator. Silent when there is nothing to stop or
-REM  we do not have the rights; mshell copes with the helper vanishing.
 taskkill /F /IM mshelld.exe >nul 2>&1
 
 echo  Reverting OS-shortcut hardening ...
-REM  The binary's own revert whenever there is something to revert TO, and the
-REM  .reg file otherwise.
-REM
-REM  install.bat applies these a value at a time and records what each one was
-REM  BEFORE it changed it, so `--tweaks revert` puts back exactly that —
-REM  including "this value did not exist", which harden-undo.reg cannot express:
-REM  it carries Microsoft's documented defaults, so importing it overwrites any
-REM  of these you had deliberately set yourself. The backup key is what says
-REM  which of the two we are in: an install from before that change (or one done
-REM  by double-clicking harden.reg) has none, and for those the undo file is
-REM  still the only thing that knows anything at all.
 set "HAVEBACKUP="
 reg query "HKCU\Software\mshell\TweakBackup" >nul 2>&1 && set "HAVEBACKUP=1"
 if defined HAVEBACKUP if exist "C:\mshell\mshell.exe" (

@@ -1,19 +1,3 @@
---[[
-    check_config.lua — load a config against a mock of the real API.
-
-    `luac -p` only proves a config parses. What actually breaks a config is
-    naming something mshell does not have, and that is a runtime error inside
-    a file the window manager runs once, on a machine this repository cannot
-    build for. So: read src/api_spec.c, which is the single table the binary
-    itself dispatches through, build a table with exactly that shape, and run
-    the config against it.
-
-    A wrong name, a key bound to something unbindable, or a submap entered
-    before it is defined fails here rather than on a Windows box.
-
-        lua check_config.lua src/api_spec.c config/init.lua [more.lua ...]
---]]
-
 local spec_path = assert(arg[1], "usage: check_config.lua <api_spec.c> <config.lua>...")
 
 local function read(path)
@@ -23,9 +7,6 @@ local function read(path)
     return s
 end
 
-----------------------------------------------------------------------
--- Read the spec
-----------------------------------------------------------------------
 local source = read(spec_path)
 local rows_src = source:match("const ApiEntry api_spec%[%] = (.-)\n};")
     or error("no api_spec table in " .. spec_path)
@@ -52,16 +33,8 @@ for old, new in removed_src:gmatch('{%s*"([^"]+)",%s*"([^"]+)"%s*}') do
     removed[old] = new
 end
 
-----------------------------------------------------------------------
--- Build a table with the same shape
-----------------------------------------------------------------------
-local ACTION = {}   -- marker: this value is a native action
+local ACTION = {}
 
--- Queries return real data at runtime, and configs iterate it and read fields
--- off it. One value answers every shape of that and keeps a config running far
--- enough to check the calls it makes afterwards: named fields are itself, so
--- w.process and w:close() both resolve, while numeric keys are nil, so ipairs
--- stops at once rather than walking for ever.
 local ANY
 ANY = setmetatable({}, {
     __index    = function(_, k)
@@ -99,9 +72,6 @@ local function has_children(path)
     return false
 end
 
--- Build the shape first. The guards that report a wrong name go on afterwards,
--- because an __index that fires while the tree is still being built would
--- answer the builder's own lookups.
 local nodes = {}
 for _, row in ipairs(rows) do
     local parent, leaf = container(row.path)
@@ -137,9 +107,6 @@ setmetatable(mshell, {
     end,
 })
 
-----------------------------------------------------------------------
--- The parts of the binding layer worth reproducing
-----------------------------------------------------------------------
 local function check_bound(value, where)
     local mt = type(value) == "table" and getmetatable(value)
     if mt and mt.marker == ACTION then
@@ -159,9 +126,6 @@ local function check_bound(value, where)
         return
     end
     if type(value) == "table" and value[1] ~= nil then
-        -- {action, {desc = ...}} is the shape the old payload form had, and it
-        -- fails silently: bind reads desc as a field, so a nested table just
-        -- loses the label rather than erroring.
         if type(value[2]) == "table" and value[2].desc ~= nil then
             fail("%s: desc goes beside the action, not in a table of its own "
                  .. "— write { f, desc = %q }", where, tostring(value[2].desc))
@@ -204,9 +168,6 @@ mshell.keys.leader = function(name)
     end
 end
 
-----------------------------------------------------------------------
--- Run the configs
-----------------------------------------------------------------------
 local failed = false
 local function chunks_of(path)
     local text = read(path)

@@ -1,24 +1,7 @@
-/*
- * config.c — Lua-based configuration.
- *
- * The config file (%APPDATA%\mshell\init.lua — see resolve_config_path() in
- * main.c) is loaded at startup and on reload. It calls into the C API
- * (lua_api.c) to populate keybindings, rules, and appearance settings.
- * Between loads, Lua is idle.
- *
- * Reload is ATOMIC: the current configuration is snapshotted before the new
- * one is built, and on any failure the snapshot is restored — so a typo in
- * init.lua can never strand you with an empty keymap. If the very first load
- * fails, a minimal built-in keymap keeps the shell usable.
- */
-
 #include "mshell.h"
 
 #include <errno.h>
 
-/* ===========================================================================
- * Apply built-in appearance / policy defaults (before Lua repopulates them)
- * =========================================================================== */
 static void config_apply_defaults(void) {
     g.inner_gap        = DEFAULT_INNER_GAP;
     g.outer_gap        = DEFAULT_OUTER_GAP;
@@ -28,15 +11,12 @@ static void config_apply_defaults(void) {
     g.border_color     = DEFAULT_BORDER_COLOR;
     g.border_color_float  = DEFAULT_BORDER_COLOR;
     g.border_color_urgent = DEFAULT_BORDER_COLOR;
-    g.corner_pref      = 1;   /* DWMWCP_DONOTROUND */
+    g.corner_pref      = 1;
     g.background_color = DEFAULT_BACKGROUND_COLOR;
     g.mouse_enabled    = true;
     g.mouse_follow     = false;
     g.mouse_warp       = false;
     g.mouse_mod_drag   = false;
-    /* Not booleans: these three are Windows' settings, and "the config does not
-     * mention it" has to mean LEAVE THE MACHINE ALONE rather than "set it to
-     * whatever mshell thinks the default is". */
     g.mouse_speed      = 0;
     g.mouse_accel      = -1;
     g.mouse_swap       = -1;
@@ -49,15 +29,15 @@ static void config_apply_defaults(void) {
     g.bar_fg           = DEFAULT_BAR_FG;
     g.bar_accent       = DEFAULT_BAR_ACCENT;
     g.bar_dim          = DEFAULT_BAR_DIM;
-    g.anim_ms          = 0;       /* instant; motion is opt-in */
+    g.anim_ms          = 0;
     g.dim_enabled      = false;
     g.dim_color        = RGB(0x00, 0x00, 0x00);
-    g.dim_alpha        = 90;      /* a suggestion, not a blackout */
-    g.update_check     = false;   /* opt-in: it is a network request */
-    g.minimize_never   = false;   /* 0.8.0 added minimize FOR a reason */
-    g.urgency_enabled  = false;   /* costs a system-wide STATECHANGE hook */
+    g.dim_alpha        = 90;
+    g.update_check     = false;
+    g.minimize_never   = false;
+    g.urgency_enabled  = false;
     g.notify_enabled   = true;
-    g.notify_desktop   = false;   /* the bar already lists the desktops */
+    g.notify_desktop   = false;
     g.whichkey_enabled = true;
     g.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
     g.whichkey_bg      = DEFAULT_WHICHKEY_BG;
@@ -66,7 +46,7 @@ static void config_apply_defaults(void) {
     g.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
     g.whichkey_pos     = WK_POS_BOTTOM;
     g.whichkey_margin  = DEFAULT_WHICHKEY_MARGIN;
-    g.whichkey_max_w   = 0.0f;   /* the monitor is the only limit */
+    g.whichkey_max_w   = 0.0f;
     g.whichkey_max_h   = 0.0f;
     g.whichkey_max_rows = DEFAULT_WHICHKEY_MAX_ROWS;
     g.whichkey_padding = DEFAULT_WHICHKEY_PADDING;
@@ -83,13 +63,12 @@ static void config_apply_defaults(void) {
     g.auto_reload      = true;
 
     g.float_policy     = FLOAT_RULES;
-    g.hide_policy      = HIDE_CLOAK;    /* cloak, not SW_HIDE — see HidePolicy */
-    g.fullscreen_policy = FS_CONTENT;   /* app fullscreen stays in its tile */
-    g.float_placement  = FLOAT_PLACE_CENTER;  /* a float is the window you are
-                                               * looking at — put it in front  */
+    g.hide_policy      = HIDE_CLOAK;
+    g.fullscreen_policy = FS_CONTENT;
+    g.float_placement  = FLOAT_PLACE_CENTER;
     g.attach_policy    = ATTACH_END;
     g.manage_owned     = false;
-    g.float_on_top     = true;   /* a float is an overlay, not a peer */
+    g.float_on_top     = true;
     g.min_win_w        = DEFAULT_MIN_WIN_W;
     g.min_win_h        = DEFAULT_MIN_WIN_H;
 
@@ -98,10 +77,6 @@ static void config_apply_defaults(void) {
     g.default_nmaster      = DEFAULT_NMASTER;
 }
 
-/* ===========================================================================
- * Free config-owned heap allocations held in the given arrays.
- * Operates on either the live globals or a saved snapshot.
- * =========================================================================== */
 static void config_free_owned(KeyMap *keymaps, int keymap_count,
                               StartupCommand *startup, int startup_count) {
     for (int i = 0; i < keymap_count; i++) {
@@ -121,16 +96,10 @@ static void config_free_owned(KeyMap *keymaps, int keymap_count,
     }
 }
 
-/* ===========================================================================
- * Snapshot of all config-owned state, used to roll back a failed reload.
- * The keymap/rule/startup arrays are copied shallowly: pointer ownership moves
- * into the snapshot, so the globals can be rebuilt from scratch without freeing
- * anything the old config still needs.
- * =========================================================================== */
 typedef struct {
     KeyMap    keymaps[MAX_KEYMAPS];
     int       keymap_count;
-    KeyMap   *leader_map;      /* Win-tap target; a pointer into keymaps[]     */
+    KeyMap   *leader_map;
     WindowRule rules[MAX_RULES];
     int       rule_count;
     StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
@@ -139,8 +108,6 @@ typedef struct {
     int       desktop_rule_count;
     MonitorRule monitor_rules[MAX_MONITOR_RULES];
     int       monitor_rule_count;
-    /* mshell.on() handlers. The refs belong to the old lua_State, which a
-     * failed load leaves open — so restoring them restores working handlers. */
     LuaHook   lua_hooks[MAX_LUA_HOOKS];
     int       lua_hook_count;
     wchar_t   start_desktop[DESKTOP_NAME_MAX];
@@ -273,23 +240,15 @@ static void config_snapshot_save(ConfigSnapshot *s) {
     s->default_nmaster      = g.default_nmaster;
 }
 
-/* Detach the globals from the snapshot's now-owned allocations and reset to a
- * clean slate so the new config can be built fresh. */
 static void config_detach(void) {
-    /* Zero the pointer-bearing slots so no freed allocation can linger in an
-     * unused slot after a config that shrinks the keymap/startup set. The
-     * snapshot holds the only surviving references to the old allocations. */
     memset(g.keymaps, 0, sizeof(g.keymaps));
     memset(g.startup_commands, 0, sizeof(g.startup_commands));
     g.keymap_count  = 0;
     g.rule_count    = 0;
     g.startup_count = 0;
-    /* Desktop rules hold no heap of their own, so resetting the count is the
-     * whole teardown — the live desktops they describe are runtime state and
-     * deliberately survive a reload (desktop_reapply re-resolves them). */
     g.desktop_rule_count = 0;
     g.monitor_rule_count = 0;
-    g.lua_hook_count     = 0;   /* refs die with the lua_State */
+    g.lua_hook_count     = 0;
     g.start_desktop[0]   = L'\0';
     g.root_map      = NULL;
     g.current_map   = NULL;
@@ -297,15 +256,13 @@ static void config_detach(void) {
     config_apply_defaults();
 }
 
-/* Free whatever partial new config was built into the globals, then restore
- * the snapshot verbatim. */
 static void config_snapshot_restore(ConfigSnapshot *s) {
     config_free_owned(g.keymaps, g.keymap_count,
                       g.startup_commands, g.startup_count);
 
     memcpy(g.keymaps, s->keymaps, sizeof(g.keymaps));
     g.keymap_count = s->keymap_count;
-    g.leader_map   = s->leader_map;   /* keymaps[] addresses are stable */
+    g.leader_map   = s->leader_map;
     memcpy(g.rules, s->rules, sizeof(g.rules));
     g.rule_count = s->rule_count;
     memcpy(g.startup_commands, s->startup_commands, sizeof(g.startup_commands));
@@ -389,39 +346,17 @@ static void config_snapshot_restore(ConfigSnapshot *s) {
     g.current_map = g.root_map;
 }
 
-/* Free a snapshot's owned allocations (the previous config, on success). */
 static void config_snapshot_free(ConfigSnapshot *s) {
     config_free_owned(s->keymaps, s->keymap_count,
                       s->startup_commands, s->startup_count);
 }
 
-/* ===========================================================================
- * Load a Lua chunk from a wide (Unicode) path.
- *
- * We read the bytes ourselves via _wfopen rather than luaL_loadfile, because
- * luaL_loadfile funnels through the CRT's ANSI fopen and can't open paths with
- * non-ASCII characters. Reading bytes + luaL_loadbuffer also keeps the source
- * UTF-8 clean (string literals reach our API as UTF-8, which lua_api converts
- * with CP_UTF8).
- * =========================================================================== */
-/* ===========================================================================
- * Point package.path at the config's own folder.
- *
- * Lua's default search path covers directories relative to the EXECUTABLE and
- * the current working directory — never %APPDATA%\mshell\. And a shell launched
- * by Winlogon has a working directory of C:\Windows\system32, so `require` from
- * init.lua resolved against a folder the user has never heard of and failed.
- * Splitting a config across files is the obvious thing to reach for once it
- * grows, so make it work: the config's folder goes to the FRONT of the path,
- * ahead of the defaults.
- * =========================================================================== */
 static bool config_dir_of(const wchar_t *path, wchar_t *out, size_t out_len);
 
 static void config_set_package_path(lua_State *L, const wchar_t *config_path) {
     wchar_t dir[MAX_PATH];
     if (!config_dir_of(config_path, dir, MAX_PATH)) return;
 
-    /* Wide -> UTF-8 for Lua. */
     char u8[MAX_PATH * 3];
     if (WideCharToMultiByte(CP_UTF8, 0, dir, -1, u8, (int)sizeof u8,
                             NULL, NULL) <= 0)
@@ -437,7 +372,7 @@ static void config_set_package_path(lua_State *L, const wchar_t *config_path) {
                     u8, u8, existing ? existing : "");
     lua_setfield(L, -3, "path");
 
-    lua_pop(L, 2);   /* old path string + package table */
+    lua_pop(L, 2);
 }
 
 static int load_config_bytes(lua_State *L, const wchar_t *wpath) {
@@ -468,7 +403,6 @@ static int load_config_bytes(lua_State *L, const wchar_t *wpath) {
     fclose(f);
     buf[rd] = '\0';
 
-    /* Skip a UTF-8 BOM if present — Lua 5.4 does not tolerate one. */
     const char *src = buf;
     size_t      len = rd;
     if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
@@ -483,9 +417,6 @@ static int load_config_bytes(lua_State *L, const wchar_t *wpath) {
     return status;
 }
 
-/* ===========================================================================
- * Load (or reload) the config file — atomically.
- * =========================================================================== */
 bool config_load(const wchar_t *path) {
     lua_State *L = luaL_newstate();
     if (!L) {
@@ -494,18 +425,10 @@ bool config_load(const wchar_t *path) {
     }
     luaL_openlibs(L);
 
-    /* Let init.lua require() modules kept beside it. Must come after
-     * luaL_openlibs, which is what creates the package table. */
     config_set_package_path(L, (path && path[0]) ? path : L"config\\init.lua");
 
-    /* The keyboard hook runs on its own thread and reads the keymaps; lock
-     * while we tear them down and rebuild so a keystroke mid-reload can never
-     * touch half-freed bindings. Held across the (fast) Lua run — a reload is
-     * rare and user-initiated, so briefly serialising the hook is fine. */
     kb_lock();
 
-    /* Snapshot the current config, then start the new one from a clean slate.
-     * The snapshot owns the old allocations until we commit or roll back. */
     ConfigSnapshot snap;
     config_snapshot_save(&snap);
     config_detach();
@@ -515,7 +438,6 @@ bool config_load(const wchar_t *path) {
 
     lua_register_api(L);
 
-    /* Root keymap is always keymaps[0]. */
     g.root_map    = keymap_new(L"root", false);
     g.current_map = g.root_map;
 
@@ -525,25 +447,17 @@ bool config_load(const wchar_t *path) {
     }
 
     if (status != LUA_OK) {
-        /* Keep the message: --check prints it to the console, where the person
-         * who just ran it is actually looking. */
         {
             const char *err = lua_tostring(L, -1);
             snprintf(g.config_error, sizeof g.config_error, "%s",
                      err ? err : "unknown error");
         }
 
-        /* log_err, not log_w: this is the one message that explains why none of
-         * the user's keybinds exist, and it has to survive a non-verbose run. */
         log_err(L"config: LOAD FAILED: %hs", lua_tostring(L, -1));
         log_err(L"config: the ENTIRE file was rejected — an error anywhere in "
                 L"init.lua discards every binding and startup program in it, "
                 L"not just the failing line.");
 
-        /* Say it on screen too. The rollback below is exactly what makes this
-         * necessary: keeping the previous config running is the right
-         * behaviour and also completely silent, so a broken edit is otherwise
-         * indistinguishable from one that worked. */
         {
             wchar_t msg[NOTIFY_TEXT_CAP];
             _snwprintf(msg, NOTIFY_TEXT_CAP - 1,
@@ -552,7 +466,6 @@ bool config_load(const wchar_t *path) {
             msg[NOTIFY_TEXT_CAP - 1] = L'\0';
             notify_show(msg, NOTIFY_ERROR, 12000);
         }
-        /* Roll back: discard the partial new config, restore the snapshot. */
         config_snapshot_restore(&snap);
         lua_close(L);
         g.L = old_L;
@@ -560,14 +473,6 @@ bool config_load(const wchar_t *path) {
         return false;
     }
 
-    /* Success: the new config is live (mshell.set_leader, if the config called
-     * it, already pointed g.leader_map into the new keymaps). Free the old
-     * config and its Lua VM.
-     *
-     * The generation bump has to happen while the lock is still held and before
-     * the old VM is closed: any Lua binding queued under the old config is
-     * identified by its generation, and closing the state invalidates every
-     * registry ref that referred to it. */
     g.config_error[0] = '\0';
     g.config_gen++;
     config_snapshot_free(&snap);
@@ -576,10 +481,6 @@ bool config_load(const wchar_t *path) {
     return true;
 }
 
-/* ===========================================================================
- * Built-in fallback keymap — used when the user's config can't be loaded, so
- * a broken init.lua never leaves you without a working shell.
- * =========================================================================== */
 void config_load_builtin(void) {
     config_free_owned(g.keymaps, g.keymap_count,
                       g.startup_commands, g.startup_count);
@@ -589,7 +490,6 @@ void config_load_builtin(void) {
     g.current_map = g.root_map;
     if (!g.root_map) return;
 
-    /* Bare essentials: open a terminal, reload, quit, cycle focus, close. */
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, VK_RETURN,
                        ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, NULL, NULL, true);
     keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'R',
@@ -605,20 +505,8 @@ void config_load_builtin(void) {
 
 }
 
-/* ===========================================================================
- * Auto-reload — watch the config's folder and reload when it is saved.
- *
- * We watch the DIRECTORY, not the file. Most editors save by writing a temp
- * file and renaming it over the target, which leaves any file-handle-based
- * watch pointing at a file that no longer exists. Watching the directory also
- * picks up extra Lua modules kept beside init.lua and require()d from it — the
- * whole folder is mshell's config.
- *
- * The wait lives on its own thread and only ever PostMessages: the reload has
- * to run on the main thread (config_load takes kb_lock and re-tiles).
- * =========================================================================== */
-#define CONFIG_DEBOUNCE_MS   250    /* quiet period before acting on a burst  */
-#define CONFIG_DEBOUNCE_MAX  2000   /* ...but never stall longer than this    */
+#define CONFIG_DEBOUNCE_MS   250
+#define CONFIG_DEBOUNCE_MAX  2000
 #define CONFIG_SETTLE_MS     100
 #define CONFIG_SETTLE_MAX    2000
 
@@ -630,20 +518,17 @@ typedef struct {
 
 static HANDLE   g_watch_thread;
 static HANDLE   g_watch_stop_evt;
-static wchar_t  g_watch_dir[MAX_PATH];  /* what the live thread is watching   */
-static unsigned g_watch_generation;     /* main thread only; bumped per start */
+static wchar_t  g_watch_dir[MAX_PATH];
+static unsigned g_watch_generation;
 
-/* What one batch of directory changes adds up to. */
 typedef enum {
-    BATCH_STOP,       /* stop requested, or the read broke — exit the thread */
-    BATCH_NONE,       /* debounce tick elapsed with nothing arriving         */
-    BATCH_RELEVANT    /* something changed — a config edit                   */
+    BATCH_STOP,
+    BATCH_NONE,
+    BATCH_RELEVANT
 } BatchResult;
 
-#define WATCH_BUF_SIZE 4096   /* one batch; a config folder is never busy   */
+#define WATCH_BUF_SIZE 4096
 
-/* Arm one ReadDirectoryChangesW and wait for it, the stop event, or `ms`
- * (INFINITE for the idle wait, CONFIG_DEBOUNCE_MS inside a burst). */
 static BatchResult watch_next_batch(HANDLE dir, OVERLAPPED *ov, BYTE *buf,
                                     DWORD ms) {
     ResetEvent(ov->hEvent);
@@ -658,9 +543,6 @@ static BatchResult watch_next_batch(HANDLE dir, OVERLAPPED *ov, BYTE *buf,
     DWORD r = WaitForMultipleObjects(2, waits, FALSE, ms);
     if (r == WAIT_TIMEOUT) return BATCH_NONE;
     if (r != WAIT_OBJECT_0 + 1) {
-        /* Stop (or a broken wait) with the read still pending: cancel it and
-         * wait for the cancellation to land, because `ov` and `buf` live on
-         * this thread's stack and the kernel writes to both. */
         CancelIoEx(dir, ov);
         DWORD bytes;
         GetOverlappedResult(dir, ov, &bytes, TRUE);
@@ -669,25 +551,19 @@ static BatchResult watch_next_batch(HANDLE dir, OVERLAPPED *ov, BYTE *buf,
 
     DWORD bytes = 0;
     if (!GetOverlappedResult(dir, ov, &bytes, FALSE)) {
-        /* ERROR_NOTIFY_ENUM_DIR: the buffer overflowed and changes were
-         * dropped. Treat it as a relevant change — a spurious reload costs a
-         * blink, a missed edit costs a mystery. */
         return GetLastError() == ERROR_NOTIFY_ENUM_DIR ? BATCH_RELEVANT
                                                        : BATCH_STOP;
     }
     return BATCH_RELEVANT;
 }
 
-/* Wait out a write burst. True → reload; false → the thread should stop. */
 static bool config_watch_debounce(HANDLE dir, OVERLAPPED *ov, BYTE *buf) {
     for (unsigned waited = 0; waited < CONFIG_DEBOUNCE_MAX;
          waited += CONFIG_DEBOUNCE_MS) {
         BatchResult b = watch_next_batch(dir, ov, buf, CONFIG_DEBOUNCE_MS);
         if (b == BATCH_STOP) return false;
-        if (b == BATCH_NONE) return true;   /* quiet */
-        /* another change — keep waiting */
+        if (b == BATCH_NONE) return true;
     }
-    /* Something is writing continuously; reload rather than starve. */
     return true;
 }
 
@@ -745,8 +621,6 @@ static DWORD WINAPI config_watch_proc(LPVOID param) {
                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
                              NULL);
     if (dir == INVALID_HANDLE_VALUE) {
-        /* Usually the folder doesn't exist yet. Not fatal — Win+Shift+R still
-         * reloads, and it re-syncs the watcher once the folder is there. */
         log_w(L"config: cannot watch %ls (err %lu) — auto-reload inactive until "
               L"the next manual reload", wa->dir, GetLastError());
         free(wa);
@@ -754,7 +628,7 @@ static DWORD WINAPI config_watch_proc(LPVOID param) {
     }
 
     OVERLAPPED ov = {0};
-    ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);   /* manual reset */
+    ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!ov.hEvent) {
         CloseHandle(dir);
         free(wa);
@@ -778,7 +652,6 @@ static DWORD WINAPI config_watch_proc(LPVOID param) {
     return 0;
 }
 
-/* Directory part of `path`, without the trailing separator. */
 static bool config_dir_of(const wchar_t *path, wchar_t *out, size_t out_len) {
     const wchar_t *slash = wcsrchr(path, L'\\');
     if (!slash || slash == path) return false;
@@ -799,8 +672,6 @@ void config_watch_stop(void) {
         CloseHandle(g_watch_thread);
         CloseHandle(g_watch_stop_evt);
     } else {
-        /* Shouldn't happen — the longest wait inside is one debounce tick.
-         * Leak both handles rather than close them under a live thread. */
         log_w(L"config: watcher did not exit (%lu) — leaking its handles", r);
     }
     g_watch_thread   = NULL;
@@ -808,25 +679,13 @@ void config_watch_stop(void) {
     g_watch_dir[0]   = L'\0';
 }
 
-/* Start / stop / retarget the watcher to match the current config. Cheap to
- * call after every load: when nothing relevant changed it returns immediately
- * instead of cycling the thread. */
 void config_watch_sync(void) {
     wchar_t dir[MAX_PATH];
 
-    /* Never watch while elevated. The config directory is writable by the
-     * unelevated user and the config is executed with the full Lua standard
-     * library, so auto-reload in an elevated mshell is a silent path from
-     * "anything running as this user can write a file" to "code runs with
-     * administrator rights", with no user action and a ~250 ms delay.
-     * Win+Shift+R still works, which keeps a deliberate keypress in the loop. */
     bool want = g.auto_reload && g.message_window && !g.elevated &&
                 config_dir_of(g.config_path, dir, MAX_PATH);
 
     if (g_watch_thread) {
-        /* "Alive" matters: a watcher whose CreateFileW on the folder failed
-         * (folder not created yet) has already exited, and must be restarted
-         * rather than counted as watching. */
         bool alive = WaitForSingleObject(g_watch_thread, 0) == WAIT_TIMEOUT;
         if (alive && want && _wcsicmp(dir, g_watch_dir) == 0) return;
         config_watch_stop();
@@ -840,7 +699,7 @@ void config_watch_sync(void) {
     wa->file[MAX_PATH - 1] = L'\0';
     wa->generation = ++g_watch_generation;
 
-    g_watch_stop_evt = CreateEventW(NULL, TRUE, FALSE, NULL);   /* manual reset */
+    g_watch_stop_evt = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!g_watch_stop_evt) { free(wa); return; }
 
     g_watch_thread = CreateThread(NULL, 0, config_watch_proc, wa, 0, NULL);
@@ -856,82 +715,44 @@ void config_watch_sync(void) {
     log_w(L"config: auto-reload watching %ls", g_watch_dir);
 }
 
-/* WM_MSHELL_CONFIG_CHANGED handler — main thread. */
 void config_on_file_changed(unsigned generation) {
-    /* A watcher we have since replaced may have posted just before it stopped;
-     * its generation no longer matches the live one, so drop it. */
     if (generation != g_watch_generation || !g.auto_reload) return;
 
     log_w(L"config: file changed on disk — reloading");
     config_reload();
 }
 
-/* ===========================================================================
- * Reload config (bound to a key, and by the watcher above). On failure the old
- * config is kept intact.
- * =========================================================================== */
 void config_reload(void) {
-    /* A reload is the way out of panic mode, and it is cleared HERE rather than
-     * in the reload action because panic mode is precisely the state in which
-     * no keybinding fires — the hook is passing everything through. What still
-     * reaches us is `mshell.exe --msg reload` and saving init.lua, and both
-     * arrive through this function. Cleared before the load so that a config
-     * with an error still gets you your keys back. */
     if (g.panicked) {
         g.panicked = false;
         log_err(L"panic mode cleared — mshell is handling keys again");
     }
 
-    /* Re-resolve first: if the user has just created %APPDATA%\mshell\init.lua
-     * on a session that started from the exe-dir fallback (or from no config at
-     * all), Win+Shift+R should pick it up rather than needing a sign-out. */
     resolve_config_path(g.config_path, MAX_PATH);
     log_w(L"Reloading config from %ls", g.config_path);
     bool ok = config_load(g.config_path);
 
-    /* Re-sync the watcher either way: the path may have moved (a config just
-     * created in AppData), and after a failed load it is the rolled-back
-     * config's auto_reload setting that should be in force. */
     config_watch_sync();
 
     if (!ok) {
         log_w(L"Config reload FAILED — previous config kept");
         return;
     }
-    /* The physical displays first: a reload is the config saying so, so every
-     * display is re-asserted rather than only newly attached ones — and a
-     * resolution it changes moves every monitor rect that everything below is
-     * about to measure itself against. */
     displays_apply_rules(true);
 
-    /* Re-assert visibility/layout for the (preserved) windows and repaint the
-     * backdrop in case colors changed. */
     background_update();
-    /* The bar's height, position and colours may all have changed, and its
-     * strip comes out of the work area the tiler is about to use — so
-     * re-measure the work areas first, then rebuild it, then re-tile. */
     update_work_area();
     bar_reconfigure();
-    monitors_apply_rules();  /* the config's per-display overrides changed */
-    mouse_sync_hook();       /* Mod+drag may have been turned on or off */
-    mouse_sync_pointer();    /* and speed/accel/swap may have changed — or
-                              * been dropped, which hands them back now */
-    events_sync_urgency();   /* the setting may have flipped either way */
+    monitors_apply_rules();
+    mouse_sync_hook();
+    mouse_sync_pointer();
+    events_sync_urgency();
     desktop_reapply();
 }
 
-/* ===========================================================================
- * One-time config init at startup. Falls back to a built-in keymap rather than
- * failing to launch, so a bad config can be fixed from inside a running shell.
- * =========================================================================== */
 bool config_init(void) {
     g.L = NULL;
 
-    /* Safe mode: we restarted several times in quick succession, which means
-     * something here is killing us before anyone can type. The config is by far
-     * the likeliest culprit — it is arbitrary Lua that runs at startup — and as
-     * the shell there is no other surface to fix it from, so skip it entirely
-     * this once and hand over the built-in keymap. */
     if (g.safe_mode) {
         log_err(L"SAFE MODE: %ls was NOT loaded because mshell restarted "
                 L"repeatedly in quick succession. The built-in keymap is in "
@@ -954,13 +775,10 @@ bool config_init(void) {
                 g.config_path);
         config_load_builtin();
     }
-    config_watch_sync();   /* honors g.auto_reload, whichever config won */
+    config_watch_sync();
     return true;
 }
 
-/* ===========================================================================
- * Shutdown
- * =========================================================================== */
 void config_shutdown(void) {
     config_watch_stop();
     if (g.L) {
