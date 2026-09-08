@@ -1,0 +1,22 @@
+# Triaged false positives. Every entry here was traced by hand; anything that
+# is not provably a cppcheck limitation belongs in the source, not in this file.
+# Entries are scoped by check id and file, not by line, so they survive code
+# moving around inside the file.
+
+# desktop_sort_in() takes the slot as a parameter, so cppcheck analyses it with
+# `slot` unconstrained and concludes it can reach MAX_DESKTOPS. Its only caller,
+# desktop_create(), returns early on `g.desktop_count >= MAX_DESKTOPS` before
+# taking the slot, so `slot` is at most MAX_DESKTOPS - 1 on entry.
+arrayIndexOutOfBoundsCond:src/desktop.c
+
+# The free(desc_w) sites in bind_value() are each followed by luaL_error(),
+# which longjmps out and never returns. cppcheck 2.13 does not honour a library
+# <noreturn> definition in its doubleFree check, so it walks straight through
+# the call into the next free.
+doubleFree:src/lua_api.c
+
+# tile_monitor()'s compaction loop only ever does `cs[keep++] = cs[i]` with
+# 0 <= keep <= i, so the index cannot go negative. cppcheck reaches -1 by
+# reasoning backwards from the later `if (n == 0)` to a pre-increment value of
+# -1, instead of concluding the loop body simply never ran.
+negativeIndex:src/tiling.c
