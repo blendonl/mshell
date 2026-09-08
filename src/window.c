@@ -424,6 +424,20 @@ static void window_restore_flat(HWND hwnd) {
 /* ===========================================================================
  * Strip window decorations
  * =========================================================================== */
+static bool window_app_draws_own_frame(HWND hwnd) {
+    if (IsIconic(hwnd)) return false;
+
+    RECT  window_rect, client_rect;
+    POINT client_origin = { 0, 0 };
+    if (!GetWindowRect(hwnd, &window_rect)) return false;
+    if (!GetClientRect(hwnd, &client_rect)) return false;
+    if (client_rect.right <= client_rect.left ||
+        client_rect.bottom <= client_rect.top) return false;
+    if (!ClientToScreen(hwnd, &client_origin)) return false;
+
+    return client_origin.y - window_rect.top <= 1;
+}
+
 void window_strip_decorations(HWND hwnd) {
     ManagedWindow *mw = window_find(hwnd);
     if (!mw) return;
@@ -447,9 +461,9 @@ void window_strip_decorations(HWND hwnd) {
         mw->orig_exstyle = exstyle;
     }
 
-    /* Remove caption, system menu, thick frame, min/max boxes */
-    style &= ~(WS_CAPTION | WS_SYSMENU | WS_THICKFRAME |
-               WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    LONG_PTR strip = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+    if (!window_app_draws_own_frame(hwnd)) strip |= WS_THICKFRAME;
+    style &= ~strip;
 
     /* Remove the thin border too — gaps and the focus ring handle visual
      * separation. Leaving WS_BORDER causes DWM to draw a dark grey line in
