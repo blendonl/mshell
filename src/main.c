@@ -672,28 +672,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
         log_w(L"SetPriorityClass(ABOVE_NORMAL) failed: %lu", GetLastError());
 
-    g.cfg.inner_gap        = DEFAULT_INNER_GAP;
-    g.cfg.outer_gap        = DEFAULT_OUTER_GAP;
-    g.cfg.smart_gaps       = false;
-    g.cfg.smart_borders    = false;
-    g.cfg.border_width     = DEFAULT_BORDER_WIDTH;
-    g.cfg.border_color     = DEFAULT_BORDER_COLOR;
-    g.cfg.background_color = DEFAULT_BACKGROUND_COLOR;
-    g.cfg.float_policy     = FLOAT_RULES;
-    g.cfg.fullscreen_policy = FS_CONTENT;
-    g.cfg.float_placement  = FLOAT_PLACE_CENTER;
-    g.cfg.attach_policy    = ATTACH_END;
-    g.cfg.manage_owned     = false;
-    g.cfg.float_on_top     = true;
-    g.cfg.min_win_w        = DEFAULT_MIN_WIN_W;
-    g.cfg.min_win_h        = DEFAULT_MIN_WIN_H;
-    g.cfg.block_system_keys = true;
-    g.cfg.whichkey_enabled = true;
-    g.cfg.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
-    g.cfg.whichkey_bg      = DEFAULT_WHICHKEY_BG;
-    g.cfg.whichkey_fg      = DEFAULT_WHICHKEY_FG;
-    g.cfg.whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
-    g.cfg.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
+    config_apply_defaults(&g.cfg);
     g.current_map  = NULL;
     g.root_map     = NULL;
 
