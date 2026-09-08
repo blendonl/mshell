@@ -1,4 +1,5 @@
 #include "mshell.h"
+#include "desktop_place.h"
 
 static void desktop_focus_hist_push(Desktop *dt, HWND hwnd);
 static void desktop_unlink_at(Desktop *dt, int i);
@@ -403,12 +404,21 @@ void desktop_switch(const wchar_t *name) {
 
     int target_id = g.desktops[slot].id;
 
-    int shown   = desktop_monitor_showing(target_id);
-    int mon     = (shown >= 0) ? shown
-                               : desktop_target_monitor(&g.desktops[slot]);
-    int prev_id = desktop_on_monitor(mon);
+    int span = desktop_monitor_span();
+    int md[MAX_MONITORS];
+    for (int m = 0; m < span; m++) md[m] = desktop_on_monitor(m);
 
-    if (prev_id == target_id) {
+    int shown     = desktop_visible_on(md, span, target_id);
+    int preferred = (shown >= 0) ? shown
+                                 : desktop_target_monitor(&g.desktops[slot]);
+
+    DesktopSwitchPlan plan =
+        desktop_switch_plan(md, span, target_id, preferred);
+
+    int mon     = plan.mon;
+    int prev_id = plan.prev_id;
+
+    if (plan.kind == DESKTOP_SWITCH_ALREADY_HERE) {
         g.focused_monitor = mon;
         desktop_sync_current();
         HWND f = desktop_get_focused();
@@ -453,11 +463,10 @@ void desktop_switch(const wchar_t *name) {
                 L"could not follow you and stay on '%ls'", new_dt->name,
                 MAX_WINDOWS_PER_DESKTOP, stuck, from);
 
-    int other = desktop_monitor_showing(target_id);
-    if (other >= 0) {
-        desktop_place_on_monitor(prev_id, other);
+    if (plan.kind == DESKTOP_SWITCH_SWAP) {
+        desktop_place_on_monitor(prev_id, plan.other);
         desktop_place_on_monitor(target_id, mon);
-        if (!prev_id) desktop_fill_monitors();
+        if (plan.needs_fill) desktop_fill_monitors();
     } else {
         if (prev_dt) {
             for (int i = 0; i < prev_dt->count; i++)
