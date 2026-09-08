@@ -34,6 +34,7 @@ Thumbs.db
 /test/test_api_spec
 /test/lua
 /tools/gen_lua_meta
+/tools/*.exe
 /mshelld.exe
 
 # Claude Code session state and worktrees — never part of the project.

@@ -174,7 +174,7 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
             $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
 
 # --- Rules ---
-.PHONY: all clean check-lua dist test regs msi print-version meta check-config
+.PHONY: all clean check-lua dist test regs msi print-version probe meta check-config
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -365,6 +365,26 @@ meta: $(GEN_META)
 	@echo "  META   meta/mshell.lua"
 	@./$(GEN_META) meta/mshell.lua
 
+PROBE = tools/probe_shellcloak.exe tools/probe_dpiband.exe \
+       tools/probe_frame.exe
+
+probe: $(PROBE)
+
+tools/probe_shellcloak.exe: tools/probe_shellcloak.c
+	@echo "  CC     $@"
+	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
+	      -o $@ $< -lole32 -ldwmapi -luser32
+
+tools/probe_dpiband.exe: tools/probe_dpiband.c
+	@echo "  CC     $@"
+	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
+	      -o $@ $< -ldwmapi -luser32 -lgdi32
+
+tools/probe_frame.exe: tools/probe_frame.c
+	@echo "  CC     $@"
+	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
+	      -o $@ $< -ldwmapi -luser32 -lgdi32
+
 # The shipped configs and the README's examples, loaded against a mock of the
 # real API built from api_spec.c. Catches a name that no longer exists, a key
 # bound to something unbindable, and documentation that has drifted from the
@@ -388,7 +408,7 @@ test: $(TEST_BINS) check-config
 	 echo "  all tests passed"
 
 clean:
-	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(GEN_META) $(HOST_LUA)
+	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(PROBE) $(GEN_META) $(HOST_LUA)
 	rm -f .version-*
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
