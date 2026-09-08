@@ -10,6 +10,8 @@
 #include <dwmapi.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
+#include <wchar.h>
 
 #include "proto.h"
 #include "log.h"
@@ -19,13 +21,128 @@
 #define DWMWA_CLOAK 13
 #endif
 
-#define logf_w(...) log_msg(LOG_INFO, __VA_ARGS__)
+#define MSHELLD_CLIENT_EXE     L"mshell.exe"
+#define MSHELLD_HANDSHAKE_MS   5000
+#define MSHELLD_WRITE_MS       5000
+
+#define logf_w(...)    log_msg(LOG_INFO, __VA_ARGS__)
+#define logf_warn(...) log_msg(LOG_WARN, __VA_ARGS__)
+
+static HANDLE  g_io_event;
+static wchar_t g_client_path[MAX_PATH];
 
 static void pipe_name(wchar_t *out, size_t cap) {
     DWORD sid = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &sid);
     _snwprintf(out, cap, L"%ls%lu", MSHELLD_PIPE_PREFIX, (unsigned long)sid);
     out[cap - 1] = L'\0';
+}
+
+static void canonical_path(const wchar_t *in, wchar_t *out, DWORD cap) {
+    DWORD n = GetLongPathNameW(in, out, cap);
+    if (n == 0 || n >= cap) {
+        wcsncpy(out, in, cap - 1);
+        out[cap - 1] = L'\0';
+    }
+}
+
+static bool resolve_client_path(wchar_t *out, size_t cap) {
+    wchar_t self[MAX_PATH];
+    DWORD   n = GetModuleFileNameW(NULL, self, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return false;
+
+    wchar_t *slash = wcsrchr(self, L'\\');
+    if (!slash) return false;
+    slash[1] = L'\0';
+
+    wchar_t joined[MAX_PATH];
+    int     written = _snwprintf(joined, MAX_PATH, L"%ls%ls", self,
+                                 MSHELLD_CLIENT_EXE);
+    if (written < 0 || written >= MAX_PATH) return false;
+    joined[written] = L'\0';
+
+    canonical_path(joined, out, (DWORD)cap);
+    return true;
+}
+
+static bool client_is_mshell(HANDLE pipe) {
+    ULONG pid = 0;
+    if (!GetNamedPipeClientProcessId(pipe, &pid)) {
+        logf_warn(L"refusing client: GetNamedPipeClientProcessId failed: %lu",
+                  GetLastError());
+        return false;
+    }
+
+    HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!proc) {
+        logf_warn(L"refusing client pid %lu: OpenProcess failed: %lu",
+                  (unsigned long)pid, GetLastError());
+        return false;
+    }
+
+    wchar_t image[MAX_PATH];
+    DWORD   len = MAX_PATH;
+    BOOL    ok  = QueryFullProcessImageNameW(proc, 0, image, &len);
+    DWORD   err = GetLastError();
+    CloseHandle(proc);
+
+    if (!ok) {
+        logf_warn(L"refusing client pid %lu: QueryFullProcessImageName "
+                  L"failed: %lu", (unsigned long)pid, err);
+        return false;
+    }
+
+    wchar_t resolved[MAX_PATH];
+    canonical_path(image, resolved, MAX_PATH);
+
+    if (_wcsicmp(resolved, g_client_path) != 0) {
+        logf_warn(L"refusing client pid %lu: it is %ls, and only %ls may "
+                  L"drive this helper", (unsigned long)pid, resolved,
+                  g_client_path);
+        return false;
+    }
+
+    return true;
+}
+
+static bool connect_client(HANDLE pipe) {
+    OVERLAPPED ov = {0};
+    ov.hEvent = g_io_event;
+    ResetEvent(g_io_event);
+
+    if (ConnectNamedPipe(pipe, &ov)) return true;
+
+    DWORD err = GetLastError();
+    if (err == ERROR_PIPE_CONNECTED) return true;
+    if (err != ERROR_IO_PENDING) {
+        logf_warn(L"ConnectNamedPipe failed: %lu", err);
+        return false;
+    }
+
+    if (WaitForSingleObject(g_io_event, INFINITE) != WAIT_OBJECT_0) return false;
+
+    DWORD n = 0;
+    return GetOverlappedResult(pipe, &ov, &n, FALSE) != 0;
+}
+
+static int pipe_io(HANDLE pipe, void *buf, DWORD len, bool write, DWORD wait_ms) {
+    OVERLAPPED ov = {0};
+    ov.hEvent = g_io_event;
+    ResetEvent(g_io_event);
+
+    BOOL ok = write ? WriteFile(pipe, buf, len, NULL, &ov)
+                    : ReadFile(pipe, buf, len, NULL, &ov);
+    if (!ok && GetLastError() != ERROR_IO_PENDING) return 0;
+
+    DWORD n = 0;
+    if (WaitForSingleObject(g_io_event, wait_ms) != WAIT_OBJECT_0) {
+        CancelIoEx(pipe, &ov);
+        GetOverlappedResult(pipe, &ov, &n, TRUE);
+        return -1;
+    }
+
+    if (!GetOverlappedResult(pipe, &ov, &n, FALSE)) return 0;
+    return (n == len) ? 1 : 0;
 }
 
 static bool do_setpos(const ProtoMsg *m) {
@@ -67,11 +184,16 @@ static void serve(HANDLE pipe) {
     bool greeted = false;
 
     for (;;) {
-        ProtoMsg in  = {0};
-        DWORD    read = 0;
+        ProtoMsg in = {0};
 
-        if (!ReadFile(pipe, &in, sizeof in, &read, NULL) || read != sizeof in)
+        int r = pipe_io(pipe, &in, sizeof in, false,
+                        greeted ? INFINITE : MSHELLD_HANDSHAKE_MS);
+        if (r < 0) {
+            logf_warn(L"dropping client: it connected but sent no handshake "
+                      L"within %u ms", (unsigned)MSHELLD_HANDSHAKE_MS);
             return;
+        }
+        if (r != 1) return;
 
         if (in.version != MSHELLD_PROTO_VERSION) {
             logf_w(L"rejecting client: protocol %u, expected %u — mshell.exe "
@@ -113,8 +235,7 @@ static void serve(HANDLE pipe) {
             break;
         }
 
-        DWORD written = 0;
-        if (!WriteFile(pipe, &out, sizeof out, &written, NULL)) return;
+        if (pipe_io(pipe, &out, sizeof out, true, MSHELLD_WRITE_MS) != 1) return;
     }
 }
 
@@ -129,6 +250,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
         logf_w(L"another mshelld is already running — exiting");
         return 0;
     }
+
+    g_io_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!g_io_event) {
+        logf_w(L"FATAL: CreateEvent failed: %lu — without a way to time client "
+               L"I/O out, one silent client would wedge the helper",
+               GetLastError());
+        return 1;
+    }
+
+    if (!resolve_client_path(g_client_path, MAX_PATH)) {
+        logf_w(L"FATAL: could not work out the path of the mshell.exe beside "
+               L"this helper — refusing to serve clients it cannot identify");
+        return 1;
+    }
+    logf_w(L"only %ls may connect", g_client_path);
 
     wchar_t sid[256];
     PSECURITY_DESCRIPTOR sd = pipe_sd_for_current_user(sid, 256);
@@ -147,7 +283,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
 
     for (;;) {
         HANDLE pipe = CreateNamedPipeW(
-            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE |
+                  FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
             PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
@@ -158,11 +295,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
             break;
         }
 
-        if (ConnectNamedPipe(pipe, NULL) ||
-            GetLastError() == ERROR_PIPE_CONNECTED)
+        if (connect_client(pipe) && client_is_mshell(pipe))
             serve(pipe);
 
-        FlushFileBuffers(pipe);
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
     }
