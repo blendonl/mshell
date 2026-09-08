@@ -1,24 +1,12 @@
 #include "mshell.h"
-#include "layout_math.h"
+#include "tree_algebra.h"
 
-#define TREE_MAX_NODES (MAX_WINDOWS_PER_DESKTOP * 2)
-
-typedef struct TreeNode {
-    HWND             hwnd;
-    struct TreeNode *a, *b;
-    struct TreeNode *parent;
-    SplitMode        mode;
-    SplitMode        split;
-    float            ratio;
-    int              active;
-    bool             used;
-} TreeNode;
-
-typedef struct {
-    TreeNode  pool[TREE_MAX_NODES];
-    TreeNode *root;
-    int       in_use;
-} Tree;
+_Static_assert(TREE_MAX_NODES >= MAX_WINDOWS_PER_DESKTOP * 2,
+               "the node pool must hold an internal node per window");
+_Static_assert((int)TREE_SPLIT_V == (int)SPLIT_V, "SplitMode must map onto TreeSplit");
+_Static_assert((int)TREE_SPLIT_H == (int)SPLIT_H, "SplitMode must map onto TreeSplit");
+_Static_assert((int)TREE_SPLIT_TABBED == (int)SPLIT_TABBED, "SplitMode must map onto TreeSplit");
+_Static_assert((int)TREE_SPLIT_STACKED == (int)SPLIT_STACKED, "SplitMode must map onto TreeSplit");
 
 typedef struct {
     int desktop_id;
@@ -54,7 +42,7 @@ static Tree *tree_for(int desktop_id, int monitor, bool create) {
                      (g.monitor_count > 0 && o->monitor >= g.monitor_count);
         if (!stale) continue;
 
-        memset(&s_trees[i], 0, sizeof(s_trees[i]));
+        tree_reset(&s_trees[i]);
         o->desktop_id = desktop_id;
         o->monitor    = monitor;
         return &s_trees[i];
@@ -72,114 +60,21 @@ static Tree *tree_for(int desktop_id, int monitor, bool create) {
     return NULL;
 }
 
-static TreeNode *node_alloc(Tree *t) {
-    for (int i = 0; i < TREE_MAX_NODES; i++) {
-        if (t->pool[i].used) continue;
-        TreeNode *n = &t->pool[i];
-        memset(n, 0, sizeof(*n));
-        n->used  = true;
-        n->ratio = 0.5f;
-        t->in_use++;
-        return n;
-    }
-    return NULL;
-}
-
-static void node_set_mode(TreeNode *n, SplitMode mode) {
-    if (mode == SPLIT_V || mode == SPLIT_H) n->split = mode;
-    n->mode = mode;
-}
-
-static void node_free(Tree *t, TreeNode *n) {
-    if (!n || !n->used) return;
-    n->used = false;
-    t->in_use--;
-}
-
-static TreeNode *tree_find(TreeNode *n, HWND hwnd) {
-    if (!n) return NULL;
-    if (n->hwnd == hwnd) return n;
-    TreeNode *r = tree_find(n->a, hwnd);
-    return r ? r : tree_find(n->b, hwnd);
-}
-
-static TreeNode *tree_first_leaf(TreeNode *n) {
-    if (!n) return NULL;
-    if (n->hwnd) return n;
-    TreeNode *r = tree_first_leaf(n->a);
-    return r ? r : tree_first_leaf(n->b);
-}
-
-static void tree_insert(Tree *t, TreeNode *at, HWND hwnd, SplitMode mode) {
-    if (!t->root) {
-        TreeNode *n = node_alloc(t);
-        if (!n) return;
-        n->hwnd = hwnd;
-        t->root = n;
-        return;
-    }
-    if (!at) at = tree_first_leaf(t->root);
-    if (!at) return;
-
-    TreeNode *moved = node_alloc(t);
-    TreeNode *fresh = node_alloc(t);
-    if (!moved || !fresh) { node_free(t, moved); node_free(t, fresh); return; }
-
-    moved->hwnd   = at->hwnd;
-    moved->parent = at;
-    fresh->hwnd   = hwnd;
-    fresh->parent = at;
-
-    at->hwnd   = NULL;
-    at->a      = moved;
-    at->b      = fresh;
-    at->ratio  = 0.5f;
-    at->active = 1;
-    node_set_mode(at, mode);
-}
-
-static void tree_remove(Tree *t, HWND hwnd) {
-    TreeNode *n = tree_find(t->root, hwnd);
-    if (!n) return;
-
-    TreeNode *p = n->parent;
-    if (!p) {
-        node_free(t, n);
-        t->root = NULL;
-        return;
-    }
-
-    TreeNode *sib = (p->a == n) ? p->b : p->a;
-
-    p->hwnd   = sib->hwnd;
-    p->mode   = sib->mode;
-    p->split  = sib->split;
-    p->ratio  = sib->ratio;
-    p->active = sib->active;
-    p->a      = sib->a;
-    p->b      = sib->b;
-    if (p->a) p->a->parent = p;
-    if (p->b) p->b->parent = p;
-
-    node_free(t, sib);
-    node_free(t, n);
-}
-
 static void tree_sync(Tree *t, Desktop *dt, int mon) {
     HWND stale[TREE_MAX_NODES];
     int  stale_n = 0;
 
     for (int i = 0; i < TREE_MAX_NODES; i++) {
         TreeNode *n = &t->pool[i];
-        if (!n->used || !n->hwnd) continue;
+        if (!n->used || !n->window) continue;
 
         bool present = false;
         for (int j = 0; j < dt->count; j++) {
-            if (dt->windows[j] != n->hwnd) continue;
+            if (dt->windows[j] != (HWND)n->window) continue;
             present = tree_owns_window(dt->windows[j], mon);
             break;
         }
-        if (!present) stale[stale_n++] = n->hwnd;
+        if (!present) stale[stale_n++] = (HWND)n->window;
     }
 
     for (int i = 0; i < stale_n; i++) tree_remove(t, stale[i]);
@@ -188,51 +83,28 @@ static void tree_sync(Tree *t, Desktop *dt, int mon) {
     for (int i = 0; i < dt->count; i++) {
         HWND h = dt->windows[i];
         if (!tree_owns_window(h, mon)) continue;
-        if (tree_find(t->root, h)) continue;
+        if (tree_find(t, h)) continue;
 
-        TreeNode *at = (focus && focus != h) ? tree_find(t->root, focus) : NULL;
-        tree_insert(t, at, h, g.next_split);
+        TreeNode *at = (focus && focus != h) ? tree_find(t, focus) : NULL;
+        tree_insert(t, at, h, (TreeSplit)g.next_split);
     }
 }
 
-static void tree_hide_all(TreeNode *n) {
-    if (!n) return;
-    if (n->hwnd) {
-        ManagedWindow *mw = window_find(n->hwnd);
-        if (mw) mw->layout_hidden = true;
-        return;
-    }
-    tree_hide_all(n->a);
-    tree_hide_all(n->b);
+typedef struct {
+    TreeEmitFn emit;
+    void      *ctx;
+} EmitCtx;
+
+static void tree_emit_place(void *window, TreeRect area, void *ctx) {
+    EmitCtx *e = (EmitCtx *)ctx;
+    RECT     r = { area.left, area.top, area.right, area.bottom };
+    e->emit((HWND)window, r, e->ctx);
 }
 
-static void tree_place(TreeNode *n, RECT area, TreeEmitFn emit, void *ctx) {
-    if (!n) return;
-
-    if (n->hwnd) { emit(n->hwnd, area, ctx); return; }
-
-    if (n->mode == SPLIT_TABBED || n->mode == SPLIT_STACKED) {
-        TreeNode *show = n->active ? n->b : n->a;
-        TreeNode *hide = n->active ? n->a : n->b;
-        tree_place(show, area, emit, ctx);
-        tree_hide_all(hide);
-        return;
-    }
-
-    float r = clamp_f(n->ratio, 0.1f, 0.9f);
-    RECT  x = area, y = area;
-
-    if (n->mode == SPLIT_V) {
-        int w = (int)((float)(area.right - area.left) * r);
-        x.right = area.left + w;
-        y.left  = area.left + w;
-    } else {
-        int h = (int)((float)(area.bottom - area.top) * r);
-        x.bottom = area.top + h;
-        y.top    = area.top + h;
-    }
-    tree_place(n->a, x, emit, ctx);
-    tree_place(n->b, y, emit, ctx);
+static void tree_emit_hide(void *window, void *ctx) {
+    (void)ctx;
+    ManagedWindow *mw = window_find((HWND)window);
+    if (mw) mw->layout_hidden = true;
 }
 
 bool layout_tree_run(Desktop *dt, int monitor, RECT area, TreeEmitFn emit,
@@ -249,7 +121,9 @@ bool layout_tree_run(Desktop *dt, int monitor, RECT area, TreeEmitFn emit,
         if (mw) mw->layout_hidden = false;
     }
 
-    tree_place(t->root, area, emit, ctx);
+    EmitCtx  e = { emit, ctx };
+    TreeRect r = { area.left, area.top, area.right, area.bottom };
+    tree_place(t, r, tree_emit_place, tree_emit_hide, &e);
     return true;
 }
 
@@ -275,12 +149,7 @@ void layout_tree_rotate(void) {
     Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
-    TreeNode *n = tree_find(t->root, f);
-    if (!n || !n->parent) return;
-
-    TreeNode *p = n->parent;
-    node_set_mode(p, (p->mode == SPLIT_V) ? SPLIT_H : SPLIT_V);
-    tile_current();
+    if (tree_rotate(t, f)) tile_current();
 }
 
 void layout_tree_set_container(SplitMode mode) {
@@ -288,13 +157,7 @@ void layout_tree_set_container(SplitMode mode) {
     Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
-    TreeNode *n = tree_find(t->root, f);
-    if (!n || !n->parent) return;
-
-    TreeNode *p = n->parent;
-    node_set_mode(p, (p->mode == mode) ? p->split : mode);
-    p->active = (p->b == n) ? 1 : 0;
-    tile_current();
+    if (tree_set_container(t, f, (TreeSplit)mode)) tile_current();
 }
 
 void layout_tree_cycle_container(int delta) {
@@ -302,21 +165,13 @@ void layout_tree_cycle_container(int delta) {
     Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
-    TreeNode *n = tree_find(t->root, f);
-    while (n && n->parent &&
-           n->parent->mode != SPLIT_TABBED && n->parent->mode != SPLIT_STACKED)
-        n = n->parent;
-    if (!n || !n->parent) return;
+    void *next = NULL;
+    if (!tree_cycle_container(t, f, delta, &next)) return;
 
-    TreeNode *p = n->parent;
-    p->active = (p->active + delta) & 1;
-
-    TreeNode *now = p->active ? p->b : p->a;
-    TreeNode *leaf = tree_first_leaf(now);
-    if (leaf && leaf->hwnd) {
-        desktop_focus_update(leaf->hwnd);
+    if (next) {
+        desktop_focus_update((HWND)next);
         tile_current();
-        window_focus(leaf->hwnd);
+        window_focus((HWND)next);
     } else {
         tile_current();
     }
@@ -327,18 +182,13 @@ void layout_tree_resize(float delta) {
     Tree *t = tree_of_focus(&f);
     if (!t || !f) return;
 
-    TreeNode *n = tree_find(t->root, f);
-    if (!n || !n->parent) return;
-
-    TreeNode *p = n->parent;
-    p->ratio = clamp_f(p->ratio + (p->a == n ? delta : -delta), 0.1f, 0.9f);
-    tile_current();
+    if (tree_resize(t, f, delta)) tile_current();
 }
 
 void layout_tree_forget(int desktop_id) {
     for (int i = 0; i < MAX_DESKTOPS; i++)
         if (s_tree_owner[i].desktop_id == desktop_id) {
-            memset(&s_trees[i], 0, sizeof(s_trees[i]));
+            tree_reset(&s_trees[i]);
             s_tree_owner[i].desktop_id = 0;
             s_tree_owner[i].monitor    = 0;
         }
