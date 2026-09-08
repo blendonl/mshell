@@ -444,12 +444,12 @@ LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_MSHELL_UPDATE: {
-        wchar_t *msg = (wchar_t *)lp;
-        if (msg) {
+        wchar_t *text = (wchar_t *)lp;
+        if (text) {
             NotifyKind kind = (NotifyKind)LOWORD(wp);
             int        ms   = (int)HIWORD(wp);
-            notify_show(msg, kind, ms > 0 ? ms : 15000);
-            free(msg);
+            notify_show(text, kind, ms > 0 ? ms : 15000);
+            free(text);
         }
         return 0;
     }
