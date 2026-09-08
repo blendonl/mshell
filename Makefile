@@ -16,6 +16,8 @@ CFLAGS   = -O2 -s -flto -mwindows \
 
 CFLAGS_EXTRA ?=
 
+STRICT_WARNINGS = -Wshadow -Wformat=2 -Wvla
+
 RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
            -DVER_PATCH=$(VER_PATCH)
@@ -151,19 +153,19 @@ $(HELPER): $(HELPER_OBJS)
 
 $(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h $(SRC_DIR)/log.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/log.o: $(SRC_DIR)/log.c $(SRC_DIR)/log.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/pipe_sd.o: $(SRC_DIR)/pipe_sd.c $(SRC_DIR)/pipe_sd.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
 $(RES_OBJ): $(SRC_DIR)/mshell.rc $(SRC_DIR)/mshell.exe.manifest
 	@echo "  RC    $<"
