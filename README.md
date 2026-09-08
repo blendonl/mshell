@@ -13,6 +13,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **Seven tiling layouts:** master-stack, monocle (true single-window), grid,
   spiral (fibonacci), centered-master, bottom-stack, and columns — with
   configurable **`nmaster`** (master count) and per-window **`cfact`** sizing.
+  `cfact` sizes a window *within its stack*, so it applies to master-stack,
+  bottom-stack, columns and centered-master. Grid and spiral tile on a fixed
+  geometry and ignore it; `bsp` has its own per-split ratio
+  (`layout.split.grow` / `layout.split.shrink`) instead.
 - **Fullscreen in three flavours**, because the *window* and the app's own
   *content* fullscreen (YouTube's button, `F11`) are different things:
   `window.fullscreen.window` gives the window the whole monitor,
