@@ -73,6 +73,88 @@ out:
     return ok;
 }
 
+typedef struct {
+    HBITMAP        dib;
+    const BYTE    *pixels;
+    UINT           w, h, stride;
+    const wchar_t *what;
+    wchar_t        path[MAX_PATH];
+} EncodeJob;
+
+static void screenshot_notify(NotifyKind kind, int ms, const wchar_t *fmt, ...) {
+    wchar_t msg[NOTIFY_TEXT_CAP];
+    va_list ap;
+
+    va_start(ap, fmt);
+    _vsnwprintf(msg, NOTIFY_TEXT_CAP - 1, fmt, ap);
+    va_end(ap);
+    msg[NOTIFY_TEXT_CAP - 1] = L'\0';
+
+    log_msg(kind == NOTIFY_ERROR ? LOG_ERROR : LOG_INFO,
+            L"screenshot: %ls", msg);
+
+    if (g.message_window)
+        PostMessageW(g.message_window, WM_MSHELL_UPDATE,
+                     MAKEWPARAM((WORD)kind, (WORD)ms), (LPARAM)_wcsdup(msg));
+}
+
+static DWORD WINAPI encode_thread(LPVOID param) {
+    EncodeJob *job = (EncodeJob *)param;
+
+    if (write_png(job->path, job->pixels, job->w, job->h, job->stride))
+        screenshot_notify(NOTIFY_INFO, 4000, L"%ls saved to %ls",
+                          job->what, job->path);
+    else
+        screenshot_notify(NOTIFY_ERROR, 12000,
+                          L"Captured the %ls but could not write the PNG "
+                          L"(it is still on the clipboard).", job->what);
+
+    DeleteObject(job->dib);
+    free(job);
+    return 0;
+}
+
+static bool encode_async(HBITMAP dib, const void *bits, int w, int h,
+                         const wchar_t *what) {
+    EncodeJob *job = (EncodeJob *)calloc(1, sizeof *job);
+    if (!job) return false;
+
+    if (!screenshot_path(job->path, ARRAYSIZE(job->path))) {
+        free(job);
+        return false;
+    }
+
+    job->dib    = dib;
+    job->pixels = (const BYTE *)bits;
+    job->w      = (UINT)w;
+    job->h      = (UINT)h;
+    job->stride = (UINT)(w * 4);
+    job->what   = what;
+
+    HANDLE t = CreateThread(NULL, 0, encode_thread, job, 0, NULL);
+    if (!t) {
+        free(job);
+        return false;
+    }
+
+    CloseHandle(t);
+    return true;
+}
+
+static void copy_to_clipboard(HBITMAP dib) {
+    HBITMAP clip = (HBITMAP)CopyImage(dib, IMAGE_BITMAP, 0, 0,
+                                      LR_CREATEDIBSECTION);
+    if (!clip) return;
+
+    if (OpenClipboard(NULL)) {
+        EmptyClipboard();
+        if (!SetClipboardData(CF_BITMAP, clip)) DeleteObject(clip);
+        CloseClipboard();
+    } else {
+        DeleteObject(clip);
+    }
+}
+
 static void capture_rect(RECT src, const wchar_t *what) {
     int w = src.right - src.left, h = src.bottom - src.top;
     if (w <= 0 || h <= 0) {
@@ -107,28 +189,19 @@ static void capture_rect(RECT src, const wchar_t *what) {
         log_msg(LOG_WARN, L"screenshot: BitBlt failed: %lu", GetLastError());
 
     SelectObject(mem, old);
+    GdiFlush();
 
-    HBITMAP clip = (HBITMAP)CopyImage(dib, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
-    if (clip && OpenClipboard(NULL)) {
-        EmptyClipboard();
-        if (!SetClipboardData(CF_BITMAP, clip)) DeleteObject(clip);
-        CloseClipboard();
-    } else if (clip) {
-        DeleteObject(clip);
-    }
-
-    wchar_t path[MAX_PATH];
-    if (screenshot_path(path, MAX_PATH) &&
-        write_png(path, (const BYTE *)bits, (UINT)w, (UINT)h, (UINT)(w * 4))) {
-        log_msg(LOG_INFO, L"screenshot: %ls -> %ls", what, path);
-    } else {
-        log_err(L"screenshot: captured %ls but could not write the PNG "
-                L"(it is still on the clipboard)", what);
-    }
-
-    DeleteObject(dib);
     DeleteDC(mem);
     ReleaseDC(NULL, screen);
+
+    copy_to_clipboard(dib);
+
+    if (!encode_async(dib, bits, w, h, what)) {
+        DeleteObject(dib);
+        screenshot_notify(NOTIFY_ERROR, 12000,
+                          L"Captured the %ls but could not queue the PNG for "
+                          L"writing (it is still on the clipboard).", what);
+    }
 }
 
 void screenshot_screen(void) {
