@@ -927,6 +927,20 @@ static inline bool window_is_alive(HWND hwnd) {
     return IsWindow(hwnd) != 0;
 }
 
+static inline bool window_title(HWND hwnd, wchar_t *out, size_t cap) {
+    if (!out || cap == 0) return false;
+    out[0] = L'\0';
+    if (!hwnd || !IsWindow(hwnd)) return false;
+
+    DWORD_PTR res = 0;
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, (WPARAM)cap, (LPARAM)out,
+                             SMTO_ABORTIFHUNG | SMTO_BLOCK, 100, &res))
+        return false;
+
+    out[cap - 1] = L'\0';
+    return true;
+}
+
 static inline bool window_is_screen_fullscreen(const ManagedWindow *mw) {
     return mw && (mw->fs_mode == FS_WINDOW || mw->fs_mode == FS_BOTH ||
                   mw->app_fullscreen);

@@ -119,11 +119,8 @@ static bool rebuild_content(void) {
     if (g.bar_modules & BAR_MOD_LAYOUT)
         _snwprintf(layout, 32, L"%ls", layout_label(cur->layout));
 
-    if (g.bar_modules & BAR_MOD_TITLE) {
-        HWND f = desktop_get_focused();
-        if (f && IsWindow(f)) GetWindowTextW(f, title, 256);
-        title[255] = L'\0';
-    }
+    if (g.bar_modules & BAR_MOD_TITLE)
+        window_title(desktop_get_focused(), title, ARRAYSIZE(title));
 
     if (g.bar_modules & BAR_MOD_CLOCK) {
         SYSTEMTIME st;
