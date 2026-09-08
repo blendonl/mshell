@@ -2,353 +2,124 @@
 
 #include <errno.h>
 
-static void config_apply_defaults(void) {
-    g.inner_gap        = DEFAULT_INNER_GAP;
-    g.outer_gap        = DEFAULT_OUTER_GAP;
-    g.smart_gaps       = false;
-    g.smart_borders    = false;
-    g.border_width     = DEFAULT_BORDER_WIDTH;
-    g.border_color     = DEFAULT_BORDER_COLOR;
-    g.border_color_float  = DEFAULT_BORDER_COLOR;
-    g.border_color_urgent = DEFAULT_BORDER_COLOR;
-    g.corner_pref      = 1;
-    g.background_color = DEFAULT_BACKGROUND_COLOR;
-    g.mouse_enabled    = true;
-    g.mouse_follow     = false;
-    g.mouse_warp       = false;
-    g.mouse_mod_drag   = false;
-    g.mouse_speed      = 0;
-    g.mouse_accel      = -1;
-    g.mouse_swap       = -1;
-    g.bar_enabled      = true;
-    g.bar_mode         = DEFAULT_BAR_MODE;
-    g.bar_bottom       = false;
-    g.bar_height       = DEFAULT_BAR_HEIGHT;
-    g.bar_modules      = BAR_MOD_DEFAULT;
-    g.bar_bg           = DEFAULT_BAR_BG;
-    g.bar_fg           = DEFAULT_BAR_FG;
-    g.bar_accent       = DEFAULT_BAR_ACCENT;
-    g.bar_dim          = DEFAULT_BAR_DIM;
-    g.anim_ms          = 0;
-    g.dim_enabled      = false;
-    g.dim_color        = RGB(0x00, 0x00, 0x00);
-    g.dim_alpha        = 90;
-    g.update_check     = false;
-    g.minimize_never   = false;
-    g.urgency_enabled  = false;
-    g.notify_enabled   = true;
-    g.notify_desktop   = false;
-    g.whichkey_enabled = true;
-    g.whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
-    g.whichkey_bg      = DEFAULT_WHICHKEY_BG;
-    g.whichkey_fg      = DEFAULT_WHICHKEY_FG;
-    g.whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
-    g.whichkey_border  = DEFAULT_WHICHKEY_BORDER;
-    g.whichkey_pos     = WK_POS_BOTTOM;
-    g.whichkey_margin  = DEFAULT_WHICHKEY_MARGIN;
-    g.whichkey_max_w   = 0.0f;
-    g.whichkey_max_h   = 0.0f;
-    g.whichkey_max_rows = DEFAULT_WHICHKEY_MAX_ROWS;
-    g.whichkey_padding = DEFAULT_WHICHKEY_PADDING;
-    g.whichkey_row_gap = DEFAULT_WHICHKEY_ROW_GAP;
-    g.whichkey_col_gap = DEFAULT_WHICHKEY_COL_GAP;
-    g.whichkey_key_gap = DEFAULT_WHICHKEY_KEY_GAP;
-    g.whichkey_hdr_gap = DEFAULT_WHICHKEY_HDR_GAP;
-    wcscpy(g.whichkey_font, DEFAULT_WHICHKEY_FONT);
-    g.whichkey_font_size = DEFAULT_WHICHKEY_FONT_SIZE;
-    g.whichkey_border_w  = DEFAULT_WHICHKEY_BORDER_W;
-    g.whichkey_opacity   = DEFAULT_WHICHKEY_OPACITY;
-    g.whichkey_rounded   = true;
-    g.block_system_keys = true;
-    g.auto_reload      = true;
+static void config_apply_defaults(MShellConfig *c, Keymaps *keys) {
+    memset(c, 0, sizeof *c);
+    memset(keys, 0, sizeof *keys);
+    c->keymaps = keys;
+    keys->block_system_keys = true;
 
-    g.float_policy     = FLOAT_RULES;
-    g.hide_policy      = HIDE_CLOAK;
-    g.fullscreen_policy = FS_CONTENT;
-    g.float_placement  = FLOAT_PLACE_CENTER;
-    g.attach_policy    = ATTACH_END;
-    g.manage_owned     = false;
-    g.float_on_top     = true;
-    g.min_win_w        = DEFAULT_MIN_WIN_W;
-    g.min_win_h        = DEFAULT_MIN_WIN_H;
+    c->inner_gap        = DEFAULT_INNER_GAP;
+    c->outer_gap        = DEFAULT_OUTER_GAP;
+    c->smart_gaps       = false;
+    c->smart_borders    = false;
+    c->border_width     = DEFAULT_BORDER_WIDTH;
+    c->border_color     = DEFAULT_BORDER_COLOR;
+    c->border_color_float  = DEFAULT_BORDER_COLOR;
+    c->border_color_urgent = DEFAULT_BORDER_COLOR;
+    c->corner_pref      = 1;
+    c->background_color = DEFAULT_BACKGROUND_COLOR;
+    c->mouse_enabled    = true;
+    c->mouse_follow     = false;
+    c->mouse_warp       = false;
+    c->mouse_mod_drag   = false;
+    c->mouse_speed      = 0;
+    c->mouse_accel      = -1;
+    c->mouse_swap       = -1;
+    c->bar_enabled      = true;
+    c->bar_mode         = DEFAULT_BAR_MODE;
+    c->bar_bottom       = false;
+    c->bar_height       = DEFAULT_BAR_HEIGHT;
+    c->bar_modules      = BAR_MOD_DEFAULT;
+    c->bar_bg           = DEFAULT_BAR_BG;
+    c->bar_fg           = DEFAULT_BAR_FG;
+    c->bar_accent       = DEFAULT_BAR_ACCENT;
+    c->bar_dim          = DEFAULT_BAR_DIM;
+    c->anim_ms          = 0;
+    c->dim_enabled      = false;
+    c->dim_color        = RGB(0x00, 0x00, 0x00);
+    c->dim_alpha        = 90;
+    c->update_check     = false;
+    c->minimize_never   = false;
+    c->urgency_enabled  = false;
+    c->notify_enabled   = true;
+    c->notify_desktop   = false;
+    c->whichkey_enabled = true;
+    c->whichkey_delay   = DEFAULT_WHICHKEY_DELAY;
+    c->whichkey_bg      = DEFAULT_WHICHKEY_BG;
+    c->whichkey_fg      = DEFAULT_WHICHKEY_FG;
+    c->whichkey_key_fg  = DEFAULT_WHICHKEY_KEY_FG;
+    c->whichkey_border  = DEFAULT_WHICHKEY_BORDER;
+    c->whichkey_pos     = WK_POS_BOTTOM;
+    c->whichkey_margin  = DEFAULT_WHICHKEY_MARGIN;
+    c->whichkey_max_w   = 0.0f;
+    c->whichkey_max_h   = 0.0f;
+    c->whichkey_max_rows = DEFAULT_WHICHKEY_MAX_ROWS;
+    c->whichkey_padding = DEFAULT_WHICHKEY_PADDING;
+    c->whichkey_row_gap = DEFAULT_WHICHKEY_ROW_GAP;
+    c->whichkey_col_gap = DEFAULT_WHICHKEY_COL_GAP;
+    c->whichkey_key_gap = DEFAULT_WHICHKEY_KEY_GAP;
+    c->whichkey_hdr_gap = DEFAULT_WHICHKEY_HDR_GAP;
+    wcscpy(c->whichkey_font, DEFAULT_WHICHKEY_FONT);
+    c->whichkey_font_size = DEFAULT_WHICHKEY_FONT_SIZE;
+    c->whichkey_border_w  = DEFAULT_WHICHKEY_BORDER_W;
+    c->whichkey_opacity   = DEFAULT_WHICHKEY_OPACITY;
+    c->whichkey_rounded   = true;
+    c->auto_reload      = true;
 
-    g.default_layout       = LAYOUT_TILING;
-    g.default_master_ratio = DEFAULT_MASTER_RATIO;
-    g.default_nmaster      = DEFAULT_NMASTER;
+    c->float_policy     = FLOAT_RULES;
+    c->hide_policy      = HIDE_CLOAK;
+    c->fullscreen_policy = FS_CONTENT;
+    c->float_placement  = FLOAT_PLACE_CENTER;
+    c->attach_policy    = ATTACH_END;
+    c->manage_owned     = false;
+    c->float_on_top     = true;
+    c->min_win_w        = DEFAULT_MIN_WIN_W;
+    c->min_win_h        = DEFAULT_MIN_WIN_H;
+
+    c->default_layout       = LAYOUT_TILING;
+    c->default_master_ratio = DEFAULT_MASTER_RATIO;
+    c->default_nmaster      = DEFAULT_NMASTER;
 }
 
-static void config_free_owned(KeyMap *keymaps, int keymap_count,
-                              StartupCommand *startup, int startup_count) {
-    for (int i = 0; i < keymap_count; i++) {
-        for (int j = 0; j < keymaps[i].count; j++) {
-            free(keymaps[i].bindings[j].command);
-            free(keymaps[i].bindings[j].args);
-            free(keymaps[i].bindings[j].cwd);
-            free(keymaps[i].bindings[j].desc);
+static void keymaps_free(const Keymaps *keys) {
+    if (!keys) return;
+    for (int i = 0; i < keys->count; i++) {
+        const KeyMap *km = &keys->maps[i];
+        for (int j = 0; j < km->count; j++) {
+            free(km->bindings[j].command);
+            free(km->bindings[j].args);
+            free(km->bindings[j].cwd);
+            free(km->bindings[j].desc);
         }
-        free(keymaps[i].name);
-        free(keymaps[i].bindings);
-    }
-    for (int i = 0; i < startup_count; i++) {
-        free(startup[i].cmd);
-        free(startup[i].args);
-        free(startup[i].cwd);
+        free(km->name);
+        free(km->bindings);
     }
 }
 
-typedef struct {
-    KeyMap    keymaps[MAX_KEYMAPS];
-    int       keymap_count;
-    KeyMap   *leader_map;
-    WindowRule rules[MAX_RULES];
-    int       rule_count;
-    StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
-    int       startup_count;
-    DesktopRule desktop_rules[MAX_DESKTOP_RULES];
-    int       desktop_rule_count;
-    MonitorRule monitor_rules[MAX_MONITOR_RULES];
-    int       monitor_rule_count;
-    LuaHook   lua_hooks[MAX_LUA_HOOKS];
-    int       lua_hook_count;
-    wchar_t   start_desktop[DESKTOP_NAME_MAX];
-    int       inner_gap, outer_gap, border_width;
-    bool      smart_gaps, smart_borders;
-    COLORREF  border_color, border_color_float, border_color_urgent;
-    int       corner_pref;
-    COLORREF  background_color;
-    bool      block_system_keys;
-    bool      auto_reload;
-    bool      mouse_enabled, mouse_follow, mouse_warp, mouse_mod_drag;
-    bool      bar_enabled, bar_bottom;
-    BarMode   bar_mode;
-    int       bar_height;
-    unsigned  bar_modules;
-    COLORREF  bar_bg, bar_fg, bar_accent, bar_dim;
-    int       anim_ms;
-    bool      dim_enabled;
-    COLORREF  dim_color;
-    BYTE      dim_alpha;
-    bool      update_check;
-    bool      minimize_never;
-    bool      urgency_enabled;
-    bool      notify_enabled, notify_desktop;
-    bool      whichkey_enabled;
-    int       whichkey_delay;
-    COLORREF  whichkey_bg, whichkey_fg, whichkey_key_fg, whichkey_border;
-    WhichKeyPos whichkey_pos;
-    int       whichkey_margin, whichkey_max_rows;
-    float     whichkey_max_w, whichkey_max_h;
-    int       whichkey_padding, whichkey_row_gap, whichkey_col_gap;
-    int       whichkey_key_gap, whichkey_hdr_gap;
-    wchar_t   whichkey_font[LF_FACESIZE];
-    int       whichkey_font_size, whichkey_border_w;
-    BYTE      whichkey_opacity;
-    bool      whichkey_rounded;
-    FloatPolicy  float_policy;
-    HidePolicy   hide_policy;
-    FullscreenMode fullscreen_policy;
-    FloatPlacement float_placement;
-    AttachPolicy attach_policy;
-    bool      manage_owned, float_on_top;
-    int       min_win_w, min_win_h;
-    Layout    default_layout;
-    float     default_master_ratio;
-    int       default_nmaster;
-} ConfigSnapshot;
-
-static void config_snapshot_save(ConfigSnapshot *s) {
-    memcpy(s->keymaps, g.keymaps, sizeof(g.keymaps));
-    s->keymap_count = g.keymap_count;
-    s->leader_map   = g.leader_map;
-    memcpy(s->rules, g.rules, sizeof(g.rules));
-    s->rule_count = g.rule_count;
-    memcpy(s->startup_commands, g.startup_commands, sizeof(g.startup_commands));
-    s->startup_count = g.startup_count;
-    memcpy(s->desktop_rules, g.desktop_rules, sizeof(g.desktop_rules));
-    s->desktop_rule_count = g.desktop_rule_count;
-    memcpy(s->monitor_rules, g.monitor_rules, sizeof(g.monitor_rules));
-    s->monitor_rule_count = g.monitor_rule_count;
-    memcpy(s->lua_hooks, g.lua_hooks, sizeof(g.lua_hooks));
-    s->lua_hook_count = g.lua_hook_count;
-    wcscpy(s->start_desktop, g.start_desktop);
-    s->inner_gap         = g.inner_gap;
-    s->outer_gap         = g.outer_gap;
-    s->smart_gaps        = g.smart_gaps;
-    s->smart_borders     = g.smart_borders;
-    s->border_width      = g.border_width;
-    s->border_color      = g.border_color;
-    s->border_color_float  = g.border_color_float;
-    s->border_color_urgent = g.border_color_urgent;
-    s->corner_pref       = g.corner_pref;
-    s->background_color  = g.background_color;
-    s->block_system_keys = g.block_system_keys;
-    s->auto_reload       = g.auto_reload;
-    s->mouse_enabled     = g.mouse_enabled;
-    s->mouse_follow      = g.mouse_follow;
-    s->mouse_warp        = g.mouse_warp;
-    s->mouse_mod_drag    = g.mouse_mod_drag;
-    s->bar_enabled       = g.bar_enabled;
-    s->bar_mode          = g.bar_mode;
-    s->bar_bottom        = g.bar_bottom;
-    s->bar_height        = g.bar_height;
-    s->bar_modules       = g.bar_modules;
-    s->bar_bg            = g.bar_bg;
-    s->bar_fg            = g.bar_fg;
-    s->bar_accent        = g.bar_accent;
-    s->bar_dim           = g.bar_dim;
-    s->anim_ms           = g.anim_ms;
-    s->dim_enabled       = g.dim_enabled;
-    s->dim_color         = g.dim_color;
-    s->dim_alpha         = g.dim_alpha;
-    s->update_check      = g.update_check;
-    s->minimize_never    = g.minimize_never;
-    s->urgency_enabled   = g.urgency_enabled;
-    s->notify_enabled    = g.notify_enabled;
-    s->notify_desktop    = g.notify_desktop;
-    s->whichkey_enabled  = g.whichkey_enabled;
-    s->whichkey_delay    = g.whichkey_delay;
-    s->whichkey_bg       = g.whichkey_bg;
-    s->whichkey_fg       = g.whichkey_fg;
-    s->whichkey_key_fg   = g.whichkey_key_fg;
-    s->whichkey_border   = g.whichkey_border;
-    s->whichkey_pos      = g.whichkey_pos;
-    s->whichkey_margin   = g.whichkey_margin;
-    s->whichkey_max_w    = g.whichkey_max_w;
-    s->whichkey_max_h    = g.whichkey_max_h;
-    s->whichkey_max_rows = g.whichkey_max_rows;
-    s->whichkey_padding  = g.whichkey_padding;
-    s->whichkey_row_gap  = g.whichkey_row_gap;
-    s->whichkey_col_gap  = g.whichkey_col_gap;
-    s->whichkey_key_gap  = g.whichkey_key_gap;
-    s->whichkey_hdr_gap  = g.whichkey_hdr_gap;
-    wcscpy(s->whichkey_font, g.whichkey_font);
-    s->whichkey_font_size = g.whichkey_font_size;
-    s->whichkey_border_w  = g.whichkey_border_w;
-    s->whichkey_opacity   = g.whichkey_opacity;
-    s->whichkey_rounded   = g.whichkey_rounded;
-    s->float_policy      = g.float_policy;
-    s->hide_policy       = g.hide_policy;
-    s->fullscreen_policy = g.fullscreen_policy;
-    s->float_placement   = g.float_placement;
-    s->attach_policy     = g.attach_policy;
-    s->manage_owned      = g.manage_owned;
-    s->float_on_top      = g.float_on_top;
-    s->min_win_w         = g.min_win_w;
-    s->min_win_h         = g.min_win_h;
-    s->default_layout       = g.default_layout;
-    s->default_master_ratio = g.default_master_ratio;
-    s->default_nmaster      = g.default_nmaster;
+static void config_free_owned(const MShellConfig *c) {
+    keymaps_free(c->keymaps);
+    for (int i = 0; i < c->startup_count; i++) {
+        free(c->startup_commands[i].cmd);
+        free(c->startup_commands[i].args);
+        free(c->startup_commands[i].cwd);
+    }
 }
 
-static void config_detach(void) {
-    memset(g.keymaps, 0, sizeof(g.keymaps));
-    memset(g.startup_commands, 0, sizeof(g.startup_commands));
-    g.keymap_count  = 0;
-    g.rule_count    = 0;
-    g.startup_count = 0;
-    g.desktop_rule_count = 0;
-    g.monitor_rule_count = 0;
-    g.lua_hook_count     = 0;
-    g.start_desktop[0]   = L'\0';
-    g.root_map      = NULL;
-    g.current_map   = NULL;
-    g.leader_map    = NULL;
-    config_apply_defaults();
+static Keymaps s_keymap_pool[2];
+
+void config_reset(void) {
+    Keymaps *spare = (g.cfg.keymaps == &s_keymap_pool[0]) ? &s_keymap_pool[1]
+                                                          : &s_keymap_pool[0];
+    config_apply_defaults(&g.cfg, spare);
+    if (!g.active_keymaps) g.active_keymaps = spare;
 }
 
-static void config_snapshot_restore(ConfigSnapshot *s) {
-    config_free_owned(g.keymaps, g.keymap_count,
-                      g.startup_commands, g.startup_count);
-
-    memcpy(g.keymaps, s->keymaps, sizeof(g.keymaps));
-    g.keymap_count = s->keymap_count;
-    g.leader_map   = s->leader_map;
-    memcpy(g.rules, s->rules, sizeof(g.rules));
-    g.rule_count = s->rule_count;
-    memcpy(g.startup_commands, s->startup_commands, sizeof(g.startup_commands));
-    g.startup_count = s->startup_count;
-    memcpy(g.desktop_rules, s->desktop_rules, sizeof(g.desktop_rules));
-    g.desktop_rule_count = s->desktop_rule_count;
-    memcpy(g.monitor_rules, s->monitor_rules, sizeof(g.monitor_rules));
-    g.monitor_rule_count = s->monitor_rule_count;
-    memcpy(g.lua_hooks, s->lua_hooks, sizeof(g.lua_hooks));
-    g.lua_hook_count = s->lua_hook_count;
-    wcscpy(g.start_desktop, s->start_desktop);
-    g.inner_gap         = s->inner_gap;
-    g.outer_gap         = s->outer_gap;
-    g.smart_gaps        = s->smart_gaps;
-    g.smart_borders     = s->smart_borders;
-    g.border_width      = s->border_width;
-    g.border_color      = s->border_color;
-    g.border_color_float  = s->border_color_float;
-    g.border_color_urgent = s->border_color_urgent;
-    g.corner_pref       = s->corner_pref;
-    g.background_color  = s->background_color;
-    g.block_system_keys = s->block_system_keys;
-    g.auto_reload       = s->auto_reload;
-    g.mouse_enabled     = s->mouse_enabled;
-    g.mouse_follow      = s->mouse_follow;
-    g.mouse_warp        = s->mouse_warp;
-    g.mouse_mod_drag    = s->mouse_mod_drag;
-    g.bar_enabled       = s->bar_enabled;
-    g.bar_mode          = s->bar_mode;
-    g.bar_bottom        = s->bar_bottom;
-    g.bar_height        = s->bar_height;
-    g.bar_modules       = s->bar_modules;
-    g.bar_bg            = s->bar_bg;
-    g.bar_fg            = s->bar_fg;
-    g.bar_accent        = s->bar_accent;
-    g.bar_dim           = s->bar_dim;
-    g.anim_ms           = s->anim_ms;
-    g.dim_enabled       = s->dim_enabled;
-    g.dim_color         = s->dim_color;
-    g.dim_alpha         = s->dim_alpha;
-    g.update_check      = s->update_check;
-    g.minimize_never    = s->minimize_never;
-    g.urgency_enabled   = s->urgency_enabled;
-    g.notify_enabled    = s->notify_enabled;
-    g.notify_desktop    = s->notify_desktop;
-    g.whichkey_enabled  = s->whichkey_enabled;
-    g.whichkey_delay    = s->whichkey_delay;
-    g.whichkey_bg       = s->whichkey_bg;
-    g.whichkey_fg       = s->whichkey_fg;
-    g.whichkey_key_fg   = s->whichkey_key_fg;
-    g.whichkey_border   = s->whichkey_border;
-    g.whichkey_pos      = s->whichkey_pos;
-    g.whichkey_margin   = s->whichkey_margin;
-    g.whichkey_max_w    = s->whichkey_max_w;
-    g.whichkey_max_h    = s->whichkey_max_h;
-    g.whichkey_max_rows = s->whichkey_max_rows;
-    g.whichkey_padding  = s->whichkey_padding;
-    g.whichkey_row_gap  = s->whichkey_row_gap;
-    g.whichkey_col_gap  = s->whichkey_col_gap;
-    g.whichkey_key_gap  = s->whichkey_key_gap;
-    g.whichkey_hdr_gap  = s->whichkey_hdr_gap;
-    wcscpy(g.whichkey_font, s->whichkey_font);
-    g.whichkey_font_size = s->whichkey_font_size;
-    g.whichkey_border_w  = s->whichkey_border_w;
-    g.whichkey_opacity   = s->whichkey_opacity;
-    g.whichkey_rounded   = s->whichkey_rounded;
-    g.float_policy      = s->float_policy;
-    g.hide_policy       = s->hide_policy;
-    g.fullscreen_policy = s->fullscreen_policy;
-    g.float_placement   = s->float_placement;
-    g.attach_policy     = s->attach_policy;
-    g.manage_owned      = s->manage_owned;
-    g.float_on_top      = s->float_on_top;
-    g.min_win_w         = s->min_win_w;
-    g.min_win_h         = s->min_win_h;
-    g.default_layout       = s->default_layout;
-    g.default_master_ratio = s->default_master_ratio;
-    g.default_nmaster      = s->default_nmaster;
-
-    g.root_map    = g.keymap_count > 0 ? &g.keymaps[0] : NULL;
-    g.current_map = g.root_map;
-}
-
-static void config_snapshot_free(ConfigSnapshot *s) {
-    config_free_owned(s->keymaps, s->keymap_count,
-                      s->startup_commands, s->startup_count);
+static void config_publish(void) {
+    kb_lock();
+    g.active_keymaps = g.cfg.keymaps;
+    g.current_map    = g.cfg.keymaps->root;
+    g.config_gen++;
+    kb_unlock();
 }
 
 static bool config_dir_of(const wchar_t *path, wchar_t *out, size_t out_len);
@@ -427,19 +198,15 @@ bool config_load(const wchar_t *path) {
 
     config_set_package_path(L, (path && path[0]) ? path : L"config\\init.lua");
 
-    kb_lock();
-
-    ConfigSnapshot snap;
-    config_snapshot_save(&snap);
-    config_detach();
+    MShellConfig snap = g.cfg;
+    config_reset();
 
     lua_State *old_L = g.L;
     g.L = L;
 
     lua_register_api(L);
 
-    g.root_map    = keymap_new(L"root", false);
-    g.current_map = g.root_map;
+    g.cfg.keymaps->root = keymap_new(L"root", false);
 
     int status = load_config_bytes(L, (path && path[0]) ? path : L"config\\init.lua");
     if (status == LUA_OK) {
@@ -466,43 +233,42 @@ bool config_load(const wchar_t *path) {
             msg[NOTIFY_TEXT_CAP - 1] = L'\0';
             notify_show(msg, NOTIFY_ERROR, 12000);
         }
-        config_snapshot_restore(&snap);
+        config_free_owned(&g.cfg);
+        g.cfg = snap;
         lua_close(L);
         g.L = old_L;
-        kb_unlock();
         return false;
     }
 
     g.config_error[0] = '\0';
-    g.config_gen++;
-    config_snapshot_free(&snap);
+    config_publish();
+    config_free_owned(&snap);
     if (old_L) lua_close(old_L);
-    kb_unlock();
     return true;
 }
 
 void config_load_builtin(void) {
-    config_free_owned(g.keymaps, g.keymap_count,
-                      g.startup_commands, g.startup_count);
-    config_detach();
+    MShellConfig snap = g.cfg;
+    config_reset();
 
-    g.root_map    = keymap_new(L"root", false);
-    g.current_map = g.root_map;
-    if (!g.root_map) return;
+    KeyMap *root = keymap_new(L"root", false);
+    g.cfg.keymaps->root = root;
 
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, VK_RETURN,
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, VK_RETURN,
                        ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'R',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'R',
                        ACTION_RELOAD, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'Q',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'Q',
                        ACTION_QUIT, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN, 'J',
+    keymap_add_binding(root, MOD_LWIN, 'J',
                        ACTION_FOCUS_NEXT, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN, 'K',
+    keymap_add_binding(root, MOD_LWIN, 'K',
                        ACTION_FOCUS_PREV, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'C',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'C',
                        ACTION_CLOSE, 0, NULL, NULL, NULL, NULL, NULL, true);
 
+    config_publish();
+    config_free_owned(&snap);
 }
 
 #define CONFIG_DEBOUNCE_MS   250
@@ -682,7 +448,7 @@ void config_watch_stop(void) {
 void config_watch_sync(void) {
     wchar_t dir[MAX_PATH];
 
-    bool want = g.auto_reload && g.message_window && !g.elevated &&
+    bool want = g.cfg.auto_reload && g.message_window && !g.elevated &&
                 config_dir_of(g.config_path, dir, MAX_PATH);
 
     if (g_watch_thread) {
@@ -716,7 +482,7 @@ void config_watch_sync(void) {
 }
 
 void config_on_file_changed(unsigned generation) {
-    if (generation != g_watch_generation || !g.auto_reload) return;
+    if (generation != g_watch_generation || !g.cfg.auto_reload) return;
 
     log_w(L"config: file changed on disk — reloading");
     config_reload();
@@ -785,7 +551,8 @@ void config_shutdown(void) {
         lua_close(g.L);
         g.L = NULL;
     }
-    config_free_owned(g.keymaps, g.keymap_count,
-                      g.startup_commands, g.startup_count);
-    config_detach();
+    config_free_owned(&g.cfg);
+    config_reset();
+    g.active_keymaps = g.cfg.keymaps;
+    g.current_map    = NULL;
 }

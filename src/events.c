@@ -114,7 +114,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_SYSTEM_MINIMIZESTART:
-        if (g.minimize_never) {
+        if (g.cfg.minimize_never) {
             ManagedWindow *mw = window_find(hwnd);
             if (mw && !mw->app_hidden) {
                 static HWND      last;
@@ -149,7 +149,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_OBJECT_STATECHANGE: {
-        if (!g.urgency_enabled) break;
+        if (!g.cfg.urgency_enabled) break;
         ManagedWindow *mw = window_find(hwnd);
         if (!mw || mw->urgent) break;
         if (hwnd == GetForegroundWindow()) break;
@@ -210,8 +210,8 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             }
             if (mw->fs_mode == FS_BOTH) break;
 
-            if (g.fullscreen_policy == FS_BOTH || mw->app_fullscreen) {
-                bool covers = (g.fullscreen_policy == FS_BOTH) &&
+            if (g.cfg.fullscreen_policy == FS_BOTH || mw->app_fullscreen) {
+                bool covers = (g.cfg.fullscreen_policy == FS_BOTH) &&
                               mw->fs_mode == FS_OFF &&
                               window_covers_monitor(hwnd);
                 if (covers != mw->app_fullscreen) {
@@ -281,7 +281,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
 }
 
 void mouse_drag_begin(HWND hwnd) {
-    if (!g.mouse_enabled) return;
+    if (!g.cfg.mouse_enabled) return;
 
     ManagedWindow *mw = window_find(hwnd);
     if (!mw || mw->is_floating) return;
@@ -291,7 +291,7 @@ void mouse_drag_begin(HWND hwnd) {
 }
 
 void mouse_drag_end(HWND hwnd) {
-    if (!g.mouse_enabled || g.drag_hwnd != hwnd) { g.drag_hwnd = NULL; return; }
+    if (!g.cfg.mouse_enabled || g.drag_hwnd != hwnd) { g.drag_hwnd = NULL; return; }
     g.drag_hwnd = NULL;
 
     POINT drop;
@@ -393,7 +393,7 @@ bool events_init(void) {
 }
 
 void events_sync_urgency(void) {
-    if (g.urgency_enabled && !g.statechange_hook) {
+    if (g.cfg.urgency_enabled && !g.statechange_hook) {
         g.statechange_hook = SetWinEventHook(
             EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_STATECHANGE,
             NULL, events_win_event_proc, 0, 0, WINEVENT_OUTOFCONTEXT);
@@ -402,7 +402,7 @@ void events_sync_urgency(void) {
         else
             log_msg(LOG_WARN, L"SetWinEventHook(STATECHANGE) failed: %lu — "
                               L"urgency will not be noticed", GetLastError());
-    } else if (!g.urgency_enabled && g.statechange_hook) {
+    } else if (!g.cfg.urgency_enabled && g.statechange_hook) {
         UnhookWinEvent(g.statechange_hook);
         g.statechange_hook = NULL;
         log_msg(LOG_INFO, L"urgency tracking off");
