@@ -859,11 +859,6 @@ const char *api_removed_replacement(const char *name) {
     return NULL;
 }
 
-/* Where a call's payload sits, once the optional leading window is accounted
- * for. An action may take both — window.move.to_desktop(w, "web") — so the
- * window slot is claimed only when the caller actually passed one, never
- * merely because the row allows it. Getting that backwards makes
- * window.move.to_desktop("web") read its desktop name as a window. */
 int api_payload_index(const ApiEntry *e, bool first_arg_is_window) {
     if (!e) return 1;
     if ((e->flags & API_TAKES_WINDOW) && first_arg_is_window) return 2;

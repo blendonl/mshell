@@ -1,29 +1,9 @@
-/* ===========================================================================
- * log.c — leveled, timestamped, rotating log.
- *
- * Three things this fixes over the previous inline logger:
- *
- *  - The file was opened "w", so every start truncated it. A crash left no
- *    evidence at all, which matters now that there is a crash handler whose
- *    job is to be diagnosable. It is opened "a" here and rotated by size.
- *  - It lived in %TEMP%, which cleaners empty. It moves to %LOCALAPPDATA%.
- *  - Writes were unsynchronised. The IPC server already logs from its own
- *    thread, so two threads could interleave mid-line; a CRITICAL_SECTION now
- *    covers the format-and-write.
- *
- * Kept from the old logger, deliberately: every line is flushed. As the shell
- * there is no console and no tray, so an unflushed tail lost to a hard kill is
- * exactly the evidence that was worth having.
- * =========================================================================== */
 #include "log.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
 
-/* Rotate at 5 MB, keeping two older generations. A debug-level session is the
- * only thing that comes close to this; at the default level the file stays a
- * few lines long. */
 #define LOG_MAX_BYTES  (5 * 1024 * 1024)
 #define LOG_KEEP        2
 
@@ -78,9 +58,6 @@ void log_set_level(LogLevel level) {
 
 LogLevel log_get_level(void) { return s_level; }
 
-/* Build "<dir>\mshell\<basename>.log", creating the directory. Prefers
- * %LOCALAPPDATA%; falls back to %TEMP% so a session with neither still logs
- * somewhere rather than silently not at all. */
 static bool log_resolve_path(const wchar_t *basename, wchar_t *out, size_t cap) {
     wchar_t dir[MAX_PATH];
 
@@ -88,7 +65,6 @@ static bool log_resolve_path(const wchar_t *basename, wchar_t *out, size_t cap) 
         !GetTempPathW(MAX_PATH, dir))
         return false;
 
-    /* GetTempPathW leaves a trailing separator, the env var does not. */
     size_t n = wcslen(dir);
     if (n && dir[n - 1] != L'\\' && dir[n - 1] != L'/') {
         if (n + 1 >= MAX_PATH) return false;
@@ -98,15 +74,13 @@ static bool log_resolve_path(const wchar_t *basename, wchar_t *out, size_t cap) 
 
     if (_snwprintf(out, cap, L"%lsmshell", dir) < 0) return false;
     out[cap - 1] = L'\0';
-    CreateDirectoryW(out, NULL);   /* ERROR_ALREADY_EXISTS is the normal case */
+    CreateDirectoryW(out, NULL);
 
     if (_snwprintf(out, cap, L"%lsmshell\\%ls.log", dir, basename) < 0) return false;
     out[cap - 1] = L'\0';
     return true;
 }
 
-/* Shift .log -> .log.1 -> .log.2 and drop what falls off the end. Called with
- * the lock held and the stream already closed. */
 static void log_rotate_locked(void) {
     wchar_t from[MAX_PATH + 8], to[MAX_PATH + 8];
 
@@ -133,9 +107,6 @@ void log_init(const wchar_t *basename, LogLevel level) {
     log_set_level(level);
 
     if (log_resolve_path(basename, s_path, MAX_PATH)) {
-        /* Rotate up front rather than mid-run: the size only matters at the
-         * boundary, and doing it here means a fresh run always starts against
-         * a file it is allowed to fill. */
         WIN32_FILE_ATTRIBUTE_DATA fad;
         if (GetFileAttributesExW(s_path, GetFileExInfoStandard, &fad)) {
             ULONGLONG sz = ((ULONGLONG)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
@@ -172,8 +143,6 @@ void log_vmsg(LogLevel level, const wchar_t *fmt, va_list ap) {
                t.wMilliseconds, level_tag(level), body);
     line[1151] = L'\0';
 
-    /* The debugger channel carries the bare message: DebugView stamps its own
-     * time, so a second timestamp is just noise there. */
     OutputDebugStringW(body);
     OutputDebugStringW(L"\n");
 
@@ -195,7 +164,7 @@ void log_vmsg(LogLevel level, const wchar_t *fmt, va_list ap) {
 }
 
 void log_msg(LogLevel level, const wchar_t *fmt, ...) {
-    if (level > s_level) return;   /* cheap gate before touching varargs */
+    if (level > s_level) return;
     va_list ap;
     va_start(ap, fmt);
     log_vmsg(level, fmt, ap);

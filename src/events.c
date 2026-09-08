@@ -1,10 +1,3 @@
-/*
- * events.c — WinEvent hooks for window tracking.
- *
- * We use out-of-context hooks so everything fires in our message-pump
- * thread — no DLL injection, no threading headaches.
- */
-
 #include "mshell.h"
 
 #define FG_BOUNCE_WINDOW_MS   2000
@@ -54,9 +47,6 @@ static bool foreground_bounce_allowed(HWND hwnd) {
     return false;
 }
 
-/* ===========================================================================
- * WinEvent callback
- * =========================================================================== */
 void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
                                      DWORD idEventThread, DWORD dwmsEventTime) {
@@ -64,52 +54,35 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     (void)idEventThread;
     (void)dwmsEventTime;
 
-    /* Bail out if we're in the middle of a tiling pass or desktop switch —
-     * otherwise SetWindowPos / ShowWindow calls would re-enter endlessly. */
     if (events_suppressed()) return;
 
-    /* Only interested in top-level windows, not child controls */
     if (idObject != OBJID_WINDOW) return;
     if (idChild  != CHILDID_SELF) return;
 
     switch (event) {
 
     case EVENT_OBJECT_CREATE:
-        /* A new window was created. Try to manage it.
-         * We defer slightly — the window may not be fully initialised yet.
-         * A quick IsWindowVisible check filters out windows still being set up. */
         if (IsWindow(hwnd) && IsWindowVisible(hwnd)) {
             window_manage(hwnd);
         }
         break;
 
     case EVENT_OBJECT_DESTROY:
-        /* Window being destroyed; clean up */
         window_unmanage(hwnd);
         break;
 
     case EVENT_OBJECT_SHOW:
-        /* Window was hidden and is now shown. Either something we already
-         * manage came back, or it's a window we've never seen. */
         if (IsWindow(hwnd)) {
             ManagedWindow *mw = window_find(hwnd);
             if (!mw) {
                 window_manage(hwnd);
             } else if (mw->app_hidden) {
-                /* The app put it back (tray icon clicked). It rejoins the
-                 * layout. */
                 mw->app_hidden  = false;
                 mw->has_applied = false;
                 events_suppress_begin();
                 if (desktop_is_visible(mw->desktop_id)) {
-                    /* Clear anything WE were also doing to keep it off the
-                     * screen. A window can be both app-hidden and cloaked: the
-                     * app trayed it while it sat on a desktop we had hidden,
-                     * and the switch back skipped it for being app_hidden. */
                     window_show(mw);
                 } else {
-                    /* It came back on a desktop you are not looking at. Left
-                     * alone it would appear over the desktop you ARE on. */
                     window_hide(mw);
                 }
                 events_suppress_end();
@@ -119,50 +92,9 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_OBJECT_HIDE:
-        /* A managed window was hidden. The question this handler answers is
-         * WHO hid it: the app minimising itself to the tray (Discord, Slack,
-         * Telegram, Steam) or mshell taking it off the screen for a desktop
-         * switch, monocle, or a stowed scratchpad.
-         *
-         * The suppression counter cannot answer it. The hooks are
-         * WINEVENT_OUTOFCONTEXT, so the system QUEUES events across the process
-         * boundary and delivers them the next time this thread pumps — which is
-         * after the tiling pass that hid the window has already run
-         * events_suppress_end(). Our own hide therefore arrives here looking
-         * exactly like the app's, sometimes several keystrokes later. The
-         * LOCATIONCHANGE case below has the same problem and solves it the same
-         * way: compare state, don't trust the counter.
-         *
-         * window_hidden_by_showwindow() is that state (see mshell.h). wm_hidden
-         * alone is not enough, because window_hide() has four mechanisms and
-         * only ShowWindow(SW_HIDE) clears WS_VISIBLE — so only SW_HIDE can
-         * produce this event for a window WE took off the screen. Sinking,
-         * which has been the first choice since hiding stopped breaking
-         * Chromium, leaves the visible bit alone; so do cloaking and stashing.
-         * Testing wm_hidden against `cloaked` alone was therefore right only
-         * while cloaking was the only silent mechanism: once sinking arrived,
-         * every tray-hide on a background desktop read as mshell's own, was
-         * never recorded, and the next switch back un-trayed the app.
-         *
-         * Getting it wrong loses the window for good. app_hidden means "not
-         * ours to reveal", so window_show() refuses it, the desktop-switch show
-         * loop skips it, and collect_clients leaves it out of the layout: a
-         * window mshell hid one moment and disowned the next is off the screen
-         * with nothing left that will ever bring it back — no taskbar under
-         * mshell, and a hidden window has no Alt+Tab entry either. Monocle was
-         * the reliable way to hit it: one hide, at the end of the pass, with no
-         * later blocking call to give the queued event a chance to arrive while
-         * suppression was still up. Win+Space and the other window was gone.
-         *
-         * A real tray-hide has to be recorded, not just re-tiled around. The
-         * window stays managed (it is still the app's window, on this desktop,
-         * and will come back), but it leaves the layout — otherwise
-         * collect_clients keeps handing it a tile and flush_placements, which
-         * shows anything in the placement list that isn't visible, drags it
-         * straight back onto the screen. */
         {
             ManagedWindow *mw = window_find(hwnd);
-            if (window_hidden_by_showwindow(mw)) break;   /* our own hide */
+            if (window_hidden_by_showwindow(mw)) break;
             if (mw && !mw->app_hidden) {
                 mw->app_hidden  = true;
                 mw->has_applied = false;
@@ -182,16 +114,6 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
 
     case EVENT_SYSTEM_MINIMIZESTART:
-        /* set_minimize_policy("never"): put it straight back.
-         *
-         * Gated on app_hidden so a minimise-to-tray still works — an app hiding
-         * itself is its own window management, not a minimize, and fighting it
-         * would re-break closing Discord or Steam to the tray.
-         *
-         * The restore is suppressed so our own SW_RESTORE does not read as the
-         * app moving the window, and an app that re-minimizes in a loop is
-         * caught by the repeat guard rather than spinning: after three attempts
-         * inside a second we let it win and say so. */
         if (g.minimize_never) {
             ManagedWindow *mw = window_find(hwnd);
             if (mw && !mw->app_hidden) {
@@ -214,16 +136,8 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                 }
             }
         }
-        /* FALLTHROUGH: either way the layout has to reflect what happened */
         __attribute__((fallthrough));
     case EVENT_SYSTEM_MINIMIZEEND:
-        /* A window minimized or came back. Minimizing does NOT clear WS_VISIBLE
-         * — it is not a hide — so nothing above notices it, and without this a
-         * minimized window keeps its tile: SetWindowPos on an iconic window only
-         * edits the rect it will restore to, so the cell just sits empty.
-         *
-         * collect_clients skips iconic windows, so both directions are simply a
-         * re-tile. Floating windows are not in the layout either way. */
         {
             ManagedWindow *mw = window_find(hwnd);
             if (mw && !mw->is_floating &&
@@ -234,14 +148,6 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         }
         break;
 
-    /* A window's state changed. We only subscribe to this at all when urgency
-     * tracking is on (see events_sync_urgency), because it fires for every
-     * control on the system.
-     *
-     * Flashing for attention is a state change on a window that is NOT the
-     * foreground one — which is exactly the condition worth surfacing, and it
-     * needs no access to the flash flag itself (there is no cross-process way
-     * to read it). A window you are already looking at is never urgent. */
     case EVENT_OBJECT_STATECHANGE: {
         if (!g.urgency_enabled) break;
         ManagedWindow *mw = window_find(hwnd);
@@ -256,27 +162,10 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     case EVENT_SYSTEM_FOREGROUND:
         window_resink();
 
-        /* A window we have never seen just took the foreground. Both events
-         * that would have adopted it — CREATE and SHOW — are dropped while a
-         * pass is suppressed, and nothing else ever looks again: an unadopted
-         * window belongs to no desktop, so it is never hidden with one and
-         * stares back from every desktop until its app closes it. Activation
-         * is the second chance, and costs the adoption test only for a window
-         * that is not managed yet. */
         if (IsWindow(hwnd) && window_index_of(hwnd) < 0) window_manage(hwnd);
 
-        /* Focus changed behind our back — the user clicked a window, or an app
-         * activated itself on startup. Re-sync our idea of who is focused:
-         * every focus keybind computes its target *relative to* that index, so
-         * a stale one makes Win+h/j/k/l walk from the wrong window — usually
-         * landing on the window that already has focus, which looks exactly
-         * like the keybind doing nothing. */
         if (IsWindow(hwnd) && window_index_of(hwnd) >= 0) {
             ManagedWindow *mw = window_find(hwnd);
-            /* Off-screen desktops only. A window on a desktop that IS up —
-             * on the other display — is a perfectly good thing to activate,
-             * and bouncing the focus off it would make the second monitor
-             * unclickable. */
             if (mw && !desktop_is_visible(mw->desktop_id)) {
                 if (foreground_bounce_allowed(hwnd)) {
                     HWND back = desktop_get_focused();
@@ -288,71 +177,30 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             desktop_focus_update(hwnd);
             int mon = desktop_monitor_of_window(mw);
             if (mon >= 0 && mon < g.monitor_count) {
-                /* Focus crossed to another display, so the desktop you are
-                 * driving is that display's, not the one you left. */
                 g.focused_monitor = mon;
                 desktop_sync_current();
             }
-            /* Whoever was activated is now on top of its band. Clicking a tiled
-             * window therefore buries the floats, and this is the only place
-             * that hears about it — window_focus() never ran. */
             window_raise_floats();
-            border_refresh();   /* ring follows mouse/app focus too */
+            border_refresh();
         }
         break;
 
     case EVENT_OBJECT_LOCATIONCHANGE:
-        /* A tiled window was moved or resized. Snap it back — but only if it
-         * genuinely drifted from where we last put it, so our own placements
-         * (delivered here asynchronously by the out-of-context hook, after the
-         * suppression counter has already been released) don't cause a re-tile
-         * storm. Floating windows are exempt — bar the rule re-assert below. */
         {
             ManagedWindow *mw = window_find(hwnd);
             if (!mw || !desktop_is_visible(mw->desktop_id)) break;
 
-            /* Sunk or stashed: WE took this one off the screen without hiding
-             * it (window.c). A stashed window's rect is deliberately nowhere
-             * near the tile it owns, and a sunk one can be moved by its app
-             * while it sits under the backdrop — either way every check below
-             * would read it as a window that escaped and haul it back in front
-             * of you. Monocle and the scratchpad do this to windows on the
-             * desktop you are looking at, so the desktop_id test above does not
-             * cover it. */
             if (mw->stashed || mw->sunk) break;
 
-            /* Floating means "you keep whatever geometry you like" — with one
-             * exception. A window whose rule asked to be borderless or
-             * fullscreen (a game) rebuilds itself once its graphics device is
-             * up, re-adding the frame we stripped and resizing away from the
-             * monitor we parked it on. Re-assert; it no-ops when nothing moved
-             * and when the frame is already bare. */
             if (mw->is_floating) {
-                /* Which display it is on, decided here because this is where
-                 * every move a float makes is observed — a title-bar drag,
-                 * mod+drag, or the app moving itself. An ordinary float takes
-                 * its record with it; one parked over a whole display by a rule
-                 * is sent back to its desktop's display instead. The reasoning
-                 * for both, and the guard that stops mshell fighting an app
-                 * that insists, are in window_float_moved. */
                 window_float_moved(mw);
 
                 if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
 
-                /* A native move/resize of the focused float fires here and
-                 * nowhere else — keep the ring hugging it. */
                 if (hwnd == desktop_get_focused()) border_refresh();
                 break;
             }
 
-            /* ---- fullscreen: who owns this window's geometry? ----
-             * FS_WINDOW  mshell does — put it back over the monitor if the app
-             *            moved it.
-             * FS_BOTH    the app does — that is the whole point of the mode, so
-             *            never snap it back.
-             * FS_CONTENT mshell does, at the window's tile: falling through to
-             *            the ordinary snap-back below is exactly the pinning
-             *            that keeps an app's fullscreen inside the window. */
             if (mw->fs_mode == FS_WINDOW) {
                 if (!window_covers_monitor(hwnd)) {
                     mw->has_applied = false;
@@ -362,11 +210,6 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             }
             if (mw->fs_mode == FS_BOTH) break;
 
-            /* An app that fullscreened itself — a video going fullscreen, F11
-             * in a browser — resizes to cover the display. With the "monitor"
-             * policy it may keep it: drop it out of the layout while it lasts,
-             * and put it back the moment it returns to a smaller rect. Windows
-             * with an explicit mode are excluded: that mode already decided. */
             if (g.fullscreen_policy == FS_BOTH || mw->app_fullscreen) {
                 bool covers = (g.fullscreen_policy == FS_BOTH) &&
                               mw->fs_mode == FS_OFF &&
@@ -379,10 +222,9 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                     tile_current();
                     break;
                 }
-                if (covers) break;      /* hands off while the app is fullscreen */
+                if (covers) break;
             }
 
-            /* A tiled app that maximized itself has escaped the grid. */
             if (IsZoomed(hwnd)) {
                 events_suppress_begin();
                 ShowWindow(hwnd, SW_RESTORE);
@@ -392,54 +234,25 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                 break;
             }
 
-            /* ---- our own animation is moving it ----
-             * Every frame of an animated move lands here: anim_tick holds the
-             * suppression counter across its pass, but the hooks are
-             * out-of-context, so the events it produces are delivered later,
-             * with the counter long released. A window in flight is by
-             * definition NOT at applied_rect — that is where it is going — so
-             * reading the gap as drift makes the tiler fight the animation
-             * frame for frame: a full tiling pass every 16ms, for every
-             * animated window, for as long as the motion lasts. That is what a
-             * layout change with animation on turned into. */
             if (anim_is_animating(hwnd)) break;
 
             if (mw->has_applied) {
                 RECT cur;
                 RECT a = mw->applied_rect;
                 if (window_frame_rect(hwnd, &cur)) {
-                    const int EPS = 4;   /* tolerate sub-pixel/rounding noise */
+                    const int EPS = 4;
                     int dx = abs((int)(cur.left - a.left));
                     int dy = abs((int)(cur.top  - a.top));
                     int dw = abs((int)((cur.right - cur.left) - (a.right - a.left)));
                     int dh = abs((int)((cur.bottom - cur.top) - (a.bottom - a.top)));
                     if (dx <= EPS && dy <= EPS && dw <= EPS && dh <= EPS) {
-                        mw->snap_tries = 0;  /* it arrived: the burst is over */
-                        break;               /* within tolerance — that was us */
+                        mw->snap_tries = 0;
+                        break;
                     }
                 }
-                mw->has_applied = false; /* real drift: force reposition */
+                mw->has_applied = false;
             }
 
-            /* ---- snap it back, but not forever ----
-             * The snap-back is a SetWindowPos, which produces another
-             * LOCATIONCHANGE, which lands right back here. That is harmless
-             * while the window ends up where it was put: the tolerance check
-             * above sees no drift and stops. It does NOT stop for a window
-             * that cannot take the rect — an app with a minimum size in a cell
-             * smaller than it, one that re-centres itself, one whose frame
-             * does not round-trip across monitors of different DPI. Then every
-             * pass produces the event that triggers the next one, each pass
-             * moving every window on the desktop, and the message pump never
-             * gets to anything else: the whole shell, and every app waiting on
-             * it, stops answering.
-             *
-             * Changing layout is where this bites, because it is the one
-             * action that resizes everything at once into cells nobody agreed
-             * to. So: three attempts inside a second, then leave the window
-             * where it insists on being until it moves again. Same shape as
-             * the minimize repeat guard above, and the same reasoning — we
-             * cannot win, so stop paying to lose. */
             {
                 ULONGLONG now = GetTickCount64();
                 if (now - mw->snap_first_at > 1000) {
@@ -467,27 +280,11 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     }
 }
 
-/* ===========================================================================
- * Mouse drags on tiled windows.
- *
- * A tiled window cannot be "moved" in the ordinary sense — the layout owns its
- * geometry, and the existing LOCATIONCHANGE handler exists precisely to snap it
- * back. Rather than fight that, a drag is INTERPRETED:
- *
- *   - dropped over another tiled window  -> the two swap places
- *   - dropped anywhere else              -> it snaps back, as before
- *
- * That makes dragging mean the one thing it can usefully mean in a tiling
- * layout, and it needs no new geometry state: the swap is the same operation
- * Win+Shift+h/j/k/l already performs.
- *
- * Floating windows are untouched — they are dragged the normal way.
- * =========================================================================== */
 void mouse_drag_begin(HWND hwnd) {
     if (!g.mouse_enabled) return;
 
     ManagedWindow *mw = window_find(hwnd);
-    if (!mw || mw->is_floating) return;   /* floating drags are real drags */
+    if (!mw || mw->is_floating) return;
 
     g.drag_hwnd = hwnd;
     GetCursorPos(&g.drag_start);
@@ -502,9 +299,6 @@ void mouse_drag_end(HWND hwnd) {
 
     Desktop *dt = desktop_current();
 
-    /* Which tile did it land on? WindowFromPoint would return the dragged
-     * window itself (it is under the cursor), so the desktop's own list is
-     * searched against the rects the tiler assigned. */
     int from = -1, to = -1;
     for (int i = 0; i < dt->count; i++) {
         ManagedWindow *mw = window_find(dt->windows[i]);
@@ -524,33 +318,17 @@ void mouse_drag_end(HWND hwnd) {
         log_w(L"mouse: swapped tiles %d <-> %d", from, to);
     }
 
-    /* Either way the window is currently wherever the mouse left it, so re-tile
-     * — that both applies a swap and snaps back a drag that meant nothing. */
     tile_current();
 }
 
-/* ===========================================================================
- * Set up WinEvent hooks
- * =========================================================================== */
 bool events_init(void) {
-    /* Window lifetime: create / destroy / show / hide (0x8000..0x8003).
-     *
-     * The range is deliberately tight. It used to run to
-     * EVENT_OBJECT_LOCATIONCHANGE (0x800B) in one hook, which silently included
-     * six event classes nothing here handles — REORDER, OBJECT_FOCUS, the four
-     * SELECTION events and STATECHANGE — for every process on the system. Those
-     * are not rare: OBJECT_FOCUS and SELECTION fire on every control focus and
-     * every text-selection change in every application, and each one still cost
-     * a cross-process marshal and a dispatch onto THIS thread, which is the
-     * thread that also runs every keybind action. Typing in an editor was
-     * generating WinEvent traffic mshell paid for and threw away. */
     g.win_event_hook = SetWinEventHook(
         EVENT_OBJECT_CREATE,
         EVENT_OBJECT_HIDE,
-        NULL,                              /* our own module           */
-        events_win_event_proc,             /* callback                 */
-        0, 0,                              /* all processes, all threads */
-        WINEVENT_OUTOFCONTEXT              /* fire in our thread       */
+        NULL,
+        events_win_event_proc,
+        0, 0,
+        WINEVENT_OUTOFCONTEXT
     );
 
     if (!g.win_event_hook) {
@@ -558,8 +336,6 @@ bool events_init(void) {
         return false;
     }
 
-    /* Geometry drift: LOCATIONCHANGE only (0x800B), as its own hook so the gap
-     * between it and the lifetime range above is not subscribed to. */
     g.location_hook = SetWinEventHook(
         EVENT_OBJECT_LOCATIONCHANGE,
         EVENT_OBJECT_LOCATIONCHANGE,
@@ -574,16 +350,6 @@ bool events_init(void) {
               L"dragged out of place won't snap back", GetLastError());
     }
 
-    /* Focus changes need a SECOND hook. EVENT_SYSTEM_FOREGROUND is 0x0003 —
-     * it lives in the system-event id range, far below EVENT_OBJECT_CREATE
-     * (0x8000), so the object-event range above never delivers it no matter
-     * what the callback does with it. Hooking the whole 0x0003..0x800B span
-     * instead is not an option: it would firehose us with NAMECHANGE /
-     * VALUECHANGE / STATECHANGE traffic from every window on the system.
-     *
-     * Not fatal if it fails: without it the WM still tiles and its own focus
-     * moves still work, we just stop noticing focus the user gives with the
-     * mouse. Refusing to start would strand the machine with no shell. */
     g.foreground_hook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND,
         EVENT_SYSTEM_FOREGROUND,
@@ -597,13 +363,6 @@ bool events_init(void) {
         log_w(L"SetWinEventHook(FOREGROUND) failed: %lu — focus tracking is "
               L"degraded (mouse-driven focus won't be seen)", GetLastError());
 
-    /* Minimize/restore need a THIRD hook, for the same reason the foreground
-     * one is separate: EVENT_SYSTEM_MINIMIZESTART/END are 0x0016/0x0017, in the
-     * system-event range, nowhere near the object range above. They are
-     * adjacent to each other, so one hook covers both.
-     *
-     * Also not fatal: without it a minimized window keeps an empty tile, which
-     * is untidy rather than broken. */
     g.minimize_hook = SetWinEventHook(
         EVENT_SYSTEM_MINIMIZESTART,
         EVENT_SYSTEM_MINIMIZEEND,
@@ -617,9 +376,6 @@ bool events_init(void) {
         log_w(L"SetWinEventHook(MINIMIZE) failed: %lu — minimized windows will "
               L"keep an empty tile", GetLastError());
 
-    /* Mouse drags: MOVESIZESTART/END are 0x000A/0x000B, adjacent, and again in
-     * the system range. Not fatal — without it a dragged tile just snaps back,
-     * which is the pre-0.11 behaviour. */
     g.movesize_hook = SetWinEventHook(
         EVENT_SYSTEM_MOVESIZESTART,
         EVENT_SYSTEM_MOVESIZEEND,
@@ -636,15 +392,6 @@ bool events_init(void) {
     return true;
 }
 
-/* ===========================================================================
- * Urgency tracking is opt-in, so its hook comes and goes with the setting.
- * Called after every config load, since a reload can flip it either way.
- *
- * It is separate from every other hook here because EVENT_OBJECT_STATECHANGE
- * (0x800A) fires for every control on the system — a checkbox toggling in a
- * background app reaches us. 0.8.0 narrowed the object range specifically to
- * stop that traffic, so this stays off unless asked for.
- * =========================================================================== */
 void events_sync_urgency(void) {
     if (g.urgency_enabled && !g.statechange_hook) {
         g.statechange_hook = SetWinEventHook(
@@ -660,15 +407,10 @@ void events_sync_urgency(void) {
         g.statechange_hook = NULL;
         log_msg(LOG_INFO, L"urgency tracking off");
 
-        /* Nothing will clear these now, and a ring stuck on the urgent colour
-         * is worse than no urgency at all. */
         for (int i = 0; i < g.managed_count; i++) g.managed[i].urgent = false;
     }
 }
 
-/* ===========================================================================
- * Tear down WinEvent hooks
- * =========================================================================== */
 void events_shutdown(void) {
     if (g.statechange_hook) {
         UnhookWinEvent(g.statechange_hook);

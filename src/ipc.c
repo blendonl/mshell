@@ -1,43 +1,13 @@
-/*
- * ipc.c — control a running mshell from the command line.
- *
- *     mshell.exe --msg "switch_desktop web"
- *     mshell.exe --msg "layout_monocle"
- *     mshell.exe --query                     (prints JSON state)
- *
- * Two halves in one binary: a SERVER thread inside the running shell, and a
- * CLIENT path taken when mshell.exe is invoked with --msg/--query, which
- * connects to the already-running instance and exits.
- *
- * THREADING follows the pattern config.c's watcher established: the pipe thread
- * does no window-manager work of its own. It hands the command to the main
- * thread by PostMessage and waits for it to finish, because everything the
- * command can touch — keymaps, desktops, tiling — is main-thread state, and the
- * WinEvent suppression counter is not thread-safe.
- *
- * SECURITY is deliberate rather than incidental, because Phase 3 puts a
- * privilege boundary here: the plan is to split the elevated work (the keyboard
- * hook, UIPI-privileged SetWindowPos) into a small helper with no config and no
- * scripting, talking over this same channel. So the pipe is created with an
- * explicit DACL granting only the owning user and SYSTEM — not the default,
- * which would let any local account connect — and the command surface is a
- * fixed vocabulary of actions rather than anything that can be extended from
- * the config.
- */
-
 #include "mshell.h"
-#include "pipe_sd.h"    /* the DACL, shared with mshelld.exe — see that header */
+#include "pipe_sd.h"
 
 #define IPC_REPLY_MAX    16384
 #define IPC_CMD_MAX      1024
-#define IPC_WAIT_MS      5000   /* how long a client waits for the shell    */
+#define IPC_WAIT_MS      5000
 
-/* ===========================================================================
- * The request handed from the pipe thread to the main thread.
- * =========================================================================== */
 typedef struct {
     wchar_t cmd[IPC_CMD_MAX];
-    char    reply[IPC_REPLY_MAX];   /* UTF-8, so the client can print it raw */
+    char    reply[IPC_REPLY_MAX];
     HANDLE  done;
 } IpcRequest;
 
@@ -45,8 +15,6 @@ static HANDLE g_ipc_thread;
 static HANDLE g_ipc_stop;
 static bool   g_ipc_running;
 
-/* Pipe name is per-session: the shell is per-session, and two users signed in
- * at once each run their own mshell. */
 static void ipc_pipe_name(wchar_t *out, size_t cap) {
     DWORD sid = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &sid);
@@ -54,9 +22,6 @@ static void ipc_pipe_name(wchar_t *out, size_t cap) {
     out[cap - 1] = L'\0';
 }
 
-/* ===========================================================================
- * Server: JSON state
- * =========================================================================== */
 static void json_escape(const wchar_t *w, char *out, size_t cap) {
     char u8[1024];
     if (WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, u8, (int)sizeof u8,
@@ -82,7 +47,6 @@ static void ipc_build_state(char *out, size_t cap) {
 
     o += (size_t)snprintf(out + o, cap - o, "{\"version\":\"%s\",", MSHELL_VERSION);
 
-    /* desktops */
     o += (size_t)snprintf(out + o, cap - o, "\"desktops\":[");
     for (int i = 0; i < g.desktop_count && o < cap; i++) {
         const Desktop *d = &g.desktops[i];
@@ -96,23 +60,15 @@ static void ipc_build_state(char *out, size_t cap) {
     }
     o += (size_t)snprintf(out + o, cap - o, "],");
 
-    /* monitors */
     o += (size_t)snprintf(out + o, cap - o, "\"monitors\":[");
     for (int i = 0; i < g.monitor_count && o < cap; i++) {
         const Monitor *m = &g.monitors[i];
 
-        /* The device name is what a monitor rule is written against, and the
-         * mode is what one asks for — so a script (or a person) can read both
-         * here instead of guessing. `refresh`, `rotation` and `hdr` come from
-         * the display itself rather than from anything cached, so they stay
-         * right when the user changes them outside mshell. */
         json_escape(m->device, esc, sizeof esc);
         DisplayMode mode = {0};
         display_current_mode(m->device, &mode);
         int hdr = display_hdr_state(m->device);
 
-        /* Which desktop this display is SHOWING — the per-monitor set, and
-         * the one piece of state you cannot infer from the desktop list. */
         char dname[4 * DESKTOP_NAME_MAX];
         const Desktop *shown = desktop_by_id(desktop_on_monitor(i));
         if (shown) json_escape(shown->name, dname, sizeof dname);
@@ -135,7 +91,6 @@ static void ipc_build_state(char *out, size_t cap) {
     }
     o += (size_t)snprintf(out + o, cap - o, "],");
 
-    /* focused window */
     HWND f = desktop_get_focused();
     if (f && IsWindow(f)) {
         wchar_t title[256] = {0};
@@ -149,19 +104,12 @@ static void ipc_build_state(char *out, size_t cap) {
     if (o >= cap) out[cap - 1] = '\0';
 }
 
-/* ===========================================================================
- * Server: run one command. MAIN THREAD ONLY (see the file header).
- * =========================================================================== */
 void ipc_handle_request(void *req_ptr) {
     IpcRequest *r = (IpcRequest *)req_ptr;
     if (!r) return;
 
-    /* Whatever happens below, the pipe thread is waiting on r->done and must be
-     * released — including on the early-return paths. One place to get right. */
     #define IPC_DONE() do { if (r->done) SetEvent(r->done); } while (0)
 
-    /* Split "<action> [argument]" — the argument keeps its spaces, since a
-     * desktop name or a spawn command may contain them. */
     wchar_t  verb[64] = {0};
     const wchar_t *arg = NULL;
     {
@@ -183,17 +131,12 @@ void ipc_handle_request(void *req_ptr) {
         return;
     }
 
-    /* query — the read-only half of the surface */
     if (_wcsicmp(verb, L"query") == 0 || _wcsicmp(verb, L"state") == 0) {
         ipc_build_state(r->reply, IPC_REPLY_MAX);
         IPC_DONE();
         return;
     }
 
-    /* Everything else is an ACTION, by the same names the config uses. Reusing
-     * that table rather than inventing a second vocabulary means the two can
-     * never drift, and it keeps the surface to exactly what a keybinding can
-     * already do — which is the property Phase 3's privilege split needs. */
     char verb_u8[64];
     WideCharToMultiByte(CP_UTF8, 0, verb, -1, verb_u8, 64, NULL, NULL);
 
@@ -212,9 +155,6 @@ void ipc_handle_request(void *req_ptr) {
     #undef IPC_DONE
 }
 
-/* ===========================================================================
- * Server: the pipe thread
- * =========================================================================== */
 static DWORD WINAPI ipc_thread_proc(LPVOID param) {
     (void)param;
 
@@ -230,12 +170,6 @@ static DWORD WINAPI ipc_thread_proc(LPVOID param) {
 
     SECURITY_ATTRIBUTES sa = { sizeof sa, sd, FALSE };
 
-    /* FILE_FLAG_FIRST_PIPE_INSTANCE: fail loudly if this name is already taken
-     * rather than quietly adding an instance beside somebody else's. Anything
-     * holding FILE_CREATE_PIPE_INSTANCE on an existing pipe can add one, and a
-     * squatter that got there first would take our clients' connections.
-     * PIPE_REJECT_REMOTE_CLIENTS: a named pipe is otherwise reachable over SMB
-     * as \\host\pipe\mshell-1. Nothing here should ever answer the network. */
     for (;;) {
         if (WaitForSingleObject(g_ipc_stop, 0) == WAIT_OBJECT_0) break;
 
@@ -251,8 +185,6 @@ static DWORD WINAPI ipc_thread_proc(LPVOID param) {
             break;
         }
 
-        /* Blocking accept. kb_shutdown-style teardown wakes it by connecting
-         * to its own pipe (see ipc_stop). */
         BOOL connected = ConnectNamedPipe(pipe, NULL) ||
                          GetLastError() == ERROR_PIPE_CONNECTED;
         if (!connected) { CloseHandle(pipe); continue; }
@@ -273,8 +205,6 @@ static DWORD WINAPI ipc_thread_proc(LPVOID param) {
             req->done = CreateEventW(NULL, TRUE, FALSE, NULL);
             if (req->done && g.message_window) {
                 PostMessageW(g.message_window, WM_MSHELL_IPC, 0, (LPARAM)req);
-                /* Bounded: if the main thread is wedged, the client gets an
-                 * error instead of hanging forever. */
                 if (WaitForSingleObject(req->done, IPC_WAIT_MS) != WAIT_OBJECT_0)
                     snprintf(req->reply, IPC_REPLY_MAX,
                              "error: mshell did not respond within %d ms",
@@ -325,8 +255,6 @@ void ipc_stop(void) {
 
     SetEvent(g_ipc_stop);
 
-    /* The thread is parked in ConnectNamedPipe; a throwaway connection wakes
-     * it so it can notice the stop event and exit. */
     wchar_t name[MAX_PATH];
     ipc_pipe_name(name, MAX_PATH);
     HANDLE poke = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -344,15 +272,6 @@ void ipc_stop(void) {
     g_ipc_running = false;
 }
 
-/* ===========================================================================
- * Client
- *
- * mshell is a GUI-subsystem binary, so it has no console of its own and a bare
- * printf goes nowhere. Attaching to the parent console is what makes
- * `mshell.exe --query` usable from a terminal; when there is no parent console
- * (double-clicked) the output is simply dropped, which is the best available
- * outcome and better than popping a message box.
- * =========================================================================== */
 void console_print(const char *s) {
     if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
 
@@ -365,7 +284,6 @@ void console_print(const char *s) {
     FreeConsole();
 }
 
-/* Send one command to the running shell and print its reply. */
 static int ipc_client_send(const wchar_t *cmd) {
     wchar_t name[MAX_PATH];
     ipc_pipe_name(name, MAX_PATH);
@@ -399,8 +317,6 @@ static int ipc_client_send(const wchar_t *cmd) {
     return (strncmp(reply, "error:", 6) == 0) ? 1 : 0;
 }
 
-/* Called at the very top of WinMain. True if this invocation was a client
- * command, in which case *exit_code is set and the shell must not start. */
 bool ipc_client_try(int *exit_code) {
     int      argc = 0;
     LPWSTR  *argv = CommandLineToArgvW(GetCommandLineW(), &argc);

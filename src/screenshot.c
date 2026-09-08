@@ -1,29 +1,9 @@
-/* ===========================================================================
- * screenshot.c — capture the screen or the focused window to a PNG.
- *
- * Replacing Explorer takes the Snipping Tool's hotkeys with it: PrintScreen is
- * remapped to Snip by a shell setting harden.reg turns off, and Win+Shift+S is
- * a Win chord, which means it belongs to mshell. So without this there is no
- * screenshot at all.
- *
- * WIC rather than GDI+ for the encode. GDI+'s headers are C++-only under
- * mingw-w64, so using it would mean either a C++ translation unit in a C
- * codebase or hand-declaring the flat API; WIC is COM, which C can drive
- * directly through the COBJMACROS wrappers.
- *
- * Files land in %USERPROFILE%\Pictures\Screenshots with a sortable timestamp,
- * which is where Windows itself puts them — so an existing workflow that
- * watches that folder keeps working.
- * =========================================================================== */
 #define COBJMACROS
 #include "mshell.h"
 
 #include <wincodec.h>
 #include <shlobj.h>
 
-/* ---------------------------------------------------------------------------
- * Where to write. Pictures\Screenshots, created if absent.
- * --------------------------------------------------------------------------- */
 static bool screenshot_path(wchar_t *out, size_t cap) {
     PWSTR pics = NULL;
     if (FAILED(SHGetKnownFolderPath(&FOLDERID_Pictures, KF_FLAG_CREATE,
@@ -35,7 +15,7 @@ static bool screenshot_path(wchar_t *out, size_t cap) {
     CoTaskMemFree(pics);
     if (n <= 0 || n >= MAX_PATH) return false;
 
-    CreateDirectoryW(dir, NULL);   /* ERROR_ALREADY_EXISTS is the normal case */
+    CreateDirectoryW(dir, NULL);
 
     SYSTEMTIME t;
     GetLocalTime(&t);
@@ -45,9 +25,6 @@ static bool screenshot_path(wchar_t *out, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
-/* ---------------------------------------------------------------------------
- * Encode a 32-bit top-down BGRA buffer to a PNG file.
- * --------------------------------------------------------------------------- */
 static bool write_png(const wchar_t *path, const BYTE *pixels,
                       UINT w, UINT h, UINT stride) {
     IWICImagingFactory  *factory = NULL;
@@ -56,10 +33,6 @@ static bool write_png(const wchar_t *path, const BYTE *pixels,
     IWICStream          *stream  = NULL;
     bool ok = false;
 
-    /* Apartment-threaded and per-call: mshell has no COM apartment of its own,
-     * and CoInitializeEx is refcounted, so this neither disturbs anything nor
-     * leaves an apartment behind. RPC_E_CHANGED_MODE means somebody already
-     * chose a different model, which is fine — we just must not uninitialise. */
     HRESULT hr_init = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     bool    did_init = SUCCEEDED(hr_init);
 
@@ -81,8 +54,6 @@ static bool write_png(const wchar_t *path, const BYTE *pixels,
     if (FAILED(IWICBitmapFrameEncode_Initialize(frame, NULL)))            goto out;
     if (FAILED(IWICBitmapFrameEncode_SetSize(frame, w, h)))               goto out;
 
-    /* 32bppBGRA is exactly what a DIB section gives us, so the encoder does the
-     * conversion rather than us walking the buffer. */
     WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
     if (FAILED(IWICBitmapFrameEncode_SetPixelFormat(frame, &fmt)))        goto out;
 
@@ -102,11 +73,6 @@ out:
     return ok;
 }
 
-/* ---------------------------------------------------------------------------
- * Capture `src` into a PNG. Also leaves the bitmap on the clipboard, because
- * pasting straight into a chat window is what a screenshot is usually for and
- * mshell has no gallery to browse.
- * --------------------------------------------------------------------------- */
 static void capture_rect(RECT src, const wchar_t *what) {
     int w = src.right - src.left, h = src.bottom - src.top;
     if (w <= 0 || h <= 0) {
@@ -117,9 +83,6 @@ static void capture_rect(RECT src, const wchar_t *what) {
     HDC screen = GetDC(NULL);
     HDC mem    = CreateCompatibleDC(screen);
 
-    /* A DIB section rather than a compatible bitmap: we need the pixels back,
-     * and this hands us a pointer instead of needing GetDIBits. Negative height
-     * makes it top-down, which is the order WIC wants. */
     BITMAPINFO bi = {0};
     bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth       = w;
@@ -140,17 +103,11 @@ static void capture_rect(RECT src, const wchar_t *what) {
 
     HBITMAP old = (HBITMAP)SelectObject(mem, dib);
 
-    /* CAPTUREBLT so layered windows are included — without it our own overlays,
-     * and any translucent app window, come out as holes. */
     if (!BitBlt(mem, 0, 0, w, h, screen, src.left, src.top, SRCCOPY | CAPTUREBLT))
         log_msg(LOG_WARN, L"screenshot: BitBlt failed: %lu", GetLastError());
 
     SelectObject(mem, old);
 
-    /* --- clipboard ---
-     * Done before the file write so a failure to write still leaves something
-     * pasteable. The clipboard takes ownership of the copy, hence the extra
-     * CopyImage rather than handing it our DIB. */
     HBITMAP clip = (HBITMAP)CopyImage(dib, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
     if (clip && OpenClipboard(NULL)) {
         EmptyClipboard();
@@ -174,7 +131,6 @@ static void capture_rect(RECT src, const wchar_t *what) {
     ReleaseDC(NULL, screen);
 }
 
-/* The whole virtual screen — every monitor, in their arranged positions. */
 void screenshot_screen(void) {
     RECT r = { GetSystemMetrics(SM_XVIRTUALSCREEN),
                GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0 };
@@ -183,9 +139,6 @@ void screenshot_screen(void) {
     capture_rect(r, L"screen");
 }
 
-/* Just the focused window, at its DWM visible frame — the same rect the tiler
- * and the focus ring use, so the capture matches what the ring was drawn round
- * rather than including the invisible resize border. */
 void screenshot_window(void) {
     HWND focus = desktop_get_focused();
     RECT r;
