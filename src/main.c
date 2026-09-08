@@ -61,7 +61,6 @@ static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
                                       : NULL);
 
     window_restore_all_visibility();
-    session_save();
 
     /* And give the pointer back. A config with swap_buttons on would otherwise
      * leave a machine whose shell has just died with its mouse buttons the
@@ -1102,9 +1101,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * Nothing exists until now: desktops are created on demand, so this brings
      * the one we land on into being. After the config, because the config picks
      * its name (a desktop rule's `default`) and the rules that describe it. */
-    /* Read the remembered per-desktop settings BEFORE the first desktop is
-     * created, so desktop_apply_rules can use them straight away. */
-    session_load();
     desktop_init();
 
     /* --- desktop backdrop + focus ring + submap hint (need config colors) --- */
