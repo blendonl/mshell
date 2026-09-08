@@ -119,7 +119,8 @@ static void wk_label(const KeyBinding *b, wchar_t *out, int cap) {
                    b->action == ACTION_MOVE_TO_DESKTOP ? L"→ " : L"", b->command);
     } else {
         const char *n = action_enum_to_name(b->action);
-        _snwprintf(out, cap, L"%hs", n ? n : "?");
+        _snwprintf(out, cap, L"%hs",
+                   n ? n : (b->action == ACTION_LUA_CALL ? "lua" : "?"));
     }
     out[cap - 1] = L'\0';
 }
