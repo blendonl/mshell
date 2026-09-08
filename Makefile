@@ -174,7 +174,7 @@ TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
             $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
 
 # --- Rules ---
-.PHONY: all clean check-lua dist test regs msi print-version meta
+.PHONY: all clean check-lua dist test regs msi print-version meta check-config
 
 all: check-lua $(TARGET) $(HELPER)
 
@@ -365,14 +365,30 @@ meta: $(GEN_META)
 	@echo "  META   meta/mshell.lua"
 	@./$(GEN_META) meta/mshell.lua
 
-test: $(TEST_BINS)
+# The shipped configs and the README's examples, loaded against a mock of the
+# real API built from api_spec.c. Catches a name that no longer exists, a key
+# bound to something unbindable, and documentation that has drifted from the
+# API. Uses the vendored sources, so it is the exact interpreter mshell embeds
+# rather than whichever Lua happens to be on the machine.
+HOST_LUA = $(TEST_DIR)/lua
+
+$(HOST_LUA): $(LUA_SRCS) $(LUA_DIR)/lua.c
+	@echo "  HOSTCC $@"
+	@$(HOST_CC) -O1 -w -o $@ -I$(LUA_DIR) $(LUA_SRCS) $(LUA_DIR)/lua.c -lm
+
+check-config: $(HOST_LUA)
+	@echo "  CONFIG"
+	@./$(HOST_LUA) $(TEST_DIR)/check_config.lua $(SRC_DIR)/api_spec.c \
+	    config/init.lua config/init.full.lua README.md
+
+test: $(TEST_BINS) check-config
 	@echo "  TEST"
 	@fail=0; for t in $(TEST_BINS); do ./$$t || fail=1; done; \
 	 if [ $$fail -ne 0 ]; then echo "  TESTS FAILED"; exit 1; fi; \
 	 echo "  all tests passed"
 
 clean:
-	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(GEN_META)
+	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(GEN_META) $(HOST_LUA)
 	rm -f .version-*
 	# also remove artifacts left by Lua's own Makefile (Linux objects,
 	# static lib, and the lua/luac binaries) so a stray `make` inside
