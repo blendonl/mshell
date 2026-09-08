@@ -29,6 +29,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/keys.c       \
               $(SRC_DIR)/input_hook.c \
               $(SRC_DIR)/actions.c    \
+              $(SRC_DIR)/action_util.c \
               $(SRC_DIR)/window.c     \
               $(SRC_DIR)/tiling.c     \
               $(SRC_DIR)/desktop.c    \
@@ -248,7 +249,7 @@ $(TEST_DIR)/test_desktop_list: $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/deskto
 	@echo "  HOSTCC $@"
 	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_desktop_list.c $(SRC_DIR)/desktop_list.c
 
-$(TEST_DIR)/test_api_spec: $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c $(SRC_DIR)/api_spec.h
+$(TEST_DIR)/test_api_spec: $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c $(SRC_DIR)/api_spec.h $(SRC_DIR)/action_table.h
 	@echo "  HOSTCC $@"
 	$(HOST_CC) -O1 -Wall -Wextra -o $@ $(TEST_DIR)/test_api_spec.c $(SRC_DIR)/api_spec.c
 
