@@ -32,6 +32,8 @@ Thumbs.db
 /tools/gen_lua_meta
 /tools/*.exe
 /mshelld.exe
+/mshell.unstripped.exe
+/mshelld.unstripped.exe
 
 # Detached debug symbols
 *.debug
