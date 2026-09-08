@@ -1,4 +1,5 @@
 #include "mshell.h"
+#include "snap.h"
 
 #define FG_BOUNCE_WINDOW_MS   2000
 #define FG_BOUNCE_LIMIT       4
@@ -47,6 +48,232 @@ static bool foreground_bounce_allowed(HWND hwnd) {
     return false;
 }
 
+static void on_object_create(HWND hwnd) {
+    if (IsWindow(hwnd) && IsWindowVisible(hwnd)) window_manage(hwnd);
+}
+
+static void on_object_destroy(HWND hwnd) {
+    window_unmanage(hwnd);
+}
+
+static void on_object_show(HWND hwnd) {
+    if (!IsWindow(hwnd)) return;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw) {
+        window_manage(hwnd);
+        return;
+    }
+    if (!mw->app_hidden) return;
+
+    mw->app_hidden  = false;
+    mw->has_applied = false;
+
+    events_suppress_begin();
+    if (desktop_is_visible(mw->desktop_id)) window_show(mw);
+    else                                    window_hide(mw);
+    events_suppress_end();
+
+    if (desktop_is_visible(mw->desktop_id)) tile_current();
+}
+
+static void on_object_hide(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (window_hidden_by_showwindow(mw)) return;
+    if (!mw || mw->app_hidden) return;
+
+    mw->app_hidden  = true;
+    mw->has_applied = false;
+    log_w(L"app hid its own window: %p — leaving the layout", (void *)hwnd);
+    if (desktop_is_visible(mw->desktop_id)) tile_current();
+}
+
+static void on_movesize_start(HWND hwnd) {
+    mouse_drag_begin(hwnd);
+}
+
+static void on_movesize_end(HWND hwnd) {
+    mouse_drag_end(hwnd);
+}
+
+static void on_minimize_end(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (mw && !mw->is_floating && desktop_is_visible(mw->desktop_id)) {
+        mw->has_applied = false;
+        tile_current();
+    }
+}
+
+static void on_minimize_start(HWND hwnd) {
+    if (g.minimize_never) {
+        ManagedWindow *mw = window_find(hwnd);
+        if (mw && !mw->app_hidden) {
+            static HWND      last;
+            static ULONGLONG first_at;
+            static int       tries;
+
+            ULONGLONG now = GetTickCount64();
+            if (hwnd != last || now - first_at > 1000) {
+                last = hwnd; first_at = now; tries = 0;
+            }
+            if (++tries <= 3) {
+                events_suppress_begin();
+                ShowWindow(hwnd, SW_RESTORE);
+                events_suppress_end();
+                mw->has_applied = false;
+            } else if (tries == 4) {
+                log_msg(LOG_WARN, L"minimize policy: a window keeps "
+                                  L"minimizing itself — letting it");
+            }
+        }
+    }
+
+    on_minimize_end(hwnd);
+}
+
+static void on_statechange(HWND hwnd) {
+    if (!g.urgency_enabled) return;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || mw->urgent) return;
+    if (hwnd == GetForegroundWindow()) return;
+
+    mw->urgent = true;
+    log_msg(LOG_INFO, L"urgent: a window asked for attention");
+    bar_refresh();
+}
+
+static void on_foreground(HWND hwnd) {
+    window_resink();
+
+    if (IsWindow(hwnd) && window_index_of(hwnd) < 0) window_manage(hwnd);
+
+    if (!IsWindow(hwnd) || window_index_of(hwnd) < 0) return;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (mw && !desktop_is_visible(mw->desktop_id)) {
+        if (foreground_bounce_allowed(hwnd)) {
+            HWND back = desktop_get_focused();
+            if (back && back != hwnd && IsWindow(back)) window_focus(back);
+        }
+        return;
+    }
+
+    desktop_focus_update(hwnd);
+    int mon = desktop_monitor_of_window(mw);
+    if (mon >= 0 && mon < g.monitor_count) {
+        g.focused_monitor = mon;
+        desktop_sync_current();
+    }
+    window_raise_floats();
+    border_refresh();
+}
+
+static bool location_settled_where_placed(ManagedWindow *mw, HWND hwnd) {
+    if (!mw->has_applied) return false;
+
+    RECT cur;
+    RECT a = mw->applied_rect;
+    if (window_frame_rect(hwnd, &cur)) {
+        const int EPS = 4;
+        int dx = abs((int)(cur.left - a.left));
+        int dy = abs((int)(cur.top  - a.top));
+        int dw = abs((int)((cur.right - cur.left) - (a.right - a.left)));
+        int dh = abs((int)((cur.bottom - cur.top) - (a.bottom - a.top)));
+        if (dx <= EPS && dy <= EPS && dw <= EPS && dh <= EPS) {
+            snap_backoff_reset(mw);
+            return true;
+        }
+    }
+    mw->has_applied = false;
+    return false;
+}
+
+static void on_locationchange(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw || !desktop_is_visible(mw->desktop_id)) return;
+
+    if (mw->stashed || mw->sunk) return;
+
+    if (mw->is_floating) {
+        window_float_moved(mw);
+
+        if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
+
+        if (hwnd == desktop_get_focused()) border_refresh();
+        return;
+    }
+
+    if (mw->fs_mode == FS_WINDOW) {
+        if (!window_covers_monitor(hwnd)) {
+            mw->has_applied = false;
+            window_park_over_monitor(hwnd);
+        }
+        return;
+    }
+    if (mw->fs_mode == FS_BOTH) return;
+
+    if (g.fullscreen_policy == FS_BOTH || mw->app_fullscreen) {
+        bool covers = (g.fullscreen_policy == FS_BOTH) &&
+                      mw->fs_mode == FS_OFF &&
+                      window_covers_monitor(hwnd);
+        if (covers != mw->app_fullscreen) {
+            log_w(L"app fullscreen %ls: %p",
+                  covers ? L"entered" : L"left", (void *)hwnd);
+            mw->app_fullscreen = covers;
+            mw->has_applied    = false;
+            tile_current();
+            return;
+        }
+        if (covers) return;
+    }
+
+    if (IsZoomed(hwnd)) {
+        events_suppress_begin();
+        ShowWindow(hwnd, SW_RESTORE);
+        events_suppress_end();
+        mw->has_applied = false;
+        tile_current();
+        return;
+    }
+
+    if (anim_is_animating(hwnd)) return;
+
+    if (location_settled_where_placed(mw, hwnd)) return;
+
+    SnapVerdict verdict = snap_backoff(mw);
+    if (verdict != SNAP_KEEP_TRYING) {
+        if (verdict == SNAP_GIVE_UP_LOUDLY)
+            log_msg(LOG_WARN, L"a window will not stay where the "
+                              L"layout puts it: %p — it has a "
+                              L"minimum size or re-places itself. "
+                              L"Leaving it alone rather than "
+                              L"re-tiling in a loop.", (void *)hwnd);
+        return;
+    }
+
+    tile_current();
+}
+
+typedef struct {
+    DWORD event;
+    void (*handler)(HWND hwnd);
+} EventEntry;
+
+static const EventEntry event_handlers[] = {
+    { EVENT_OBJECT_LOCATIONCHANGE,  on_locationchange   },
+    { EVENT_SYSTEM_FOREGROUND,      on_foreground       },
+    { EVENT_OBJECT_CREATE,          on_object_create    },
+    { EVENT_OBJECT_DESTROY,         on_object_destroy   },
+    { EVENT_OBJECT_SHOW,            on_object_show      },
+    { EVENT_OBJECT_HIDE,            on_object_hide      },
+    { EVENT_OBJECT_STATECHANGE,     on_statechange      },
+    { EVENT_SYSTEM_MOVESIZESTART,   on_movesize_start   },
+    { EVENT_SYSTEM_MOVESIZEEND,     on_movesize_end     },
+    { EVENT_SYSTEM_MINIMIZESTART,   on_minimize_start   },
+    { EVENT_SYSTEM_MINIMIZEEND,     on_minimize_end     },
+};
+
 void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
                                      DWORD idEventThread, DWORD dwmsEventTime) {
@@ -59,335 +286,56 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     if (idObject != OBJID_WINDOW) return;
     if (idChild  != CHILDID_SELF) return;
 
-    switch (event) {
-
-    case EVENT_OBJECT_CREATE:
-        if (IsWindow(hwnd) && IsWindowVisible(hwnd)) {
-            window_manage(hwnd);
-        }
-        break;
-
-    case EVENT_OBJECT_DESTROY:
-        window_unmanage(hwnd);
-        break;
-
-    case EVENT_OBJECT_SHOW:
-        if (IsWindow(hwnd)) {
-            ManagedWindow *mw = window_find(hwnd);
-            if (!mw) {
-                window_manage(hwnd);
-            } else if (mw->app_hidden) {
-                mw->app_hidden  = false;
-                mw->has_applied = false;
-                events_suppress_begin();
-                if (desktop_is_visible(mw->desktop_id)) {
-                    window_show(mw);
-                } else {
-                    window_hide(mw);
-                }
-                events_suppress_end();
-                if (desktop_is_visible(mw->desktop_id)) tile_current();
-            }
-        }
-        break;
-
-    case EVENT_OBJECT_HIDE:
-        {
-            ManagedWindow *mw = window_find(hwnd);
-            if (window_hidden_by_showwindow(mw)) break;
-            if (mw && !mw->app_hidden) {
-                mw->app_hidden  = true;
-                mw->has_applied = false;
-                log_w(L"app hid its own window: %p — leaving the layout",
-                      (void *)hwnd);
-                if (desktop_is_visible(mw->desktop_id)) tile_current();
-            }
-        }
-        break;
-
-    case EVENT_SYSTEM_MOVESIZESTART:
-        mouse_drag_begin(hwnd);
-        break;
-
-    case EVENT_SYSTEM_MOVESIZEEND:
-        mouse_drag_end(hwnd);
-        break;
-
-    case EVENT_SYSTEM_MINIMIZESTART:
-        if (g.minimize_never) {
-            ManagedWindow *mw = window_find(hwnd);
-            if (mw && !mw->app_hidden) {
-                static HWND      last;
-                static ULONGLONG first_at;
-                static int       tries;
-
-                ULONGLONG now = GetTickCount64();
-                if (hwnd != last || now - first_at > 1000) {
-                    last = hwnd; first_at = now; tries = 0;
-                }
-                if (++tries <= 3) {
-                    events_suppress_begin();
-                    ShowWindow(hwnd, SW_RESTORE);
-                    events_suppress_end();
-                    mw->has_applied = false;
-                } else if (tries == 4) {
-                    log_msg(LOG_WARN, L"minimize policy: a window keeps "
-                                      L"minimizing itself — letting it");
-                }
-            }
-        }
-        __attribute__((fallthrough));
-    case EVENT_SYSTEM_MINIMIZEEND:
-        {
-            ManagedWindow *mw = window_find(hwnd);
-            if (mw && !mw->is_floating &&
-                desktop_is_visible(mw->desktop_id)) {
-                mw->has_applied = false;
-                tile_current();
-            }
-        }
-        break;
-
-    case EVENT_OBJECT_STATECHANGE: {
-        if (!g.urgency_enabled) break;
-        ManagedWindow *mw = window_find(hwnd);
-        if (!mw || mw->urgent) break;
-        if (hwnd == GetForegroundWindow()) break;
-        mw->urgent = true;
-        log_msg(LOG_INFO, L"urgent: a window asked for attention");
-        bar_refresh();
-        break;
-    }
-
-    case EVENT_SYSTEM_FOREGROUND:
-        window_resink();
-
-        if (IsWindow(hwnd) && window_index_of(hwnd) < 0) window_manage(hwnd);
-
-        if (IsWindow(hwnd) && window_index_of(hwnd) >= 0) {
-            ManagedWindow *mw = window_find(hwnd);
-            if (mw && !desktop_is_visible(mw->desktop_id)) {
-                if (foreground_bounce_allowed(hwnd)) {
-                    HWND back = desktop_get_focused();
-                    if (back && back != hwnd && IsWindow(back))
-                        window_focus(back);
-                }
-                break;
-            }
-            desktop_focus_update(hwnd);
-            int mon = desktop_monitor_of_window(mw);
-            if (mon >= 0 && mon < g.monitor_count) {
-                g.focused_monitor = mon;
-                desktop_sync_current();
-            }
-            window_raise_floats();
-            border_refresh();
-        }
-        break;
-
-    case EVENT_OBJECT_LOCATIONCHANGE:
-        {
-            ManagedWindow *mw = window_find(hwnd);
-            if (!mw || !desktop_is_visible(mw->desktop_id)) break;
-
-            if (mw->stashed || mw->sunk) break;
-
-            if (mw->is_floating) {
-                window_float_moved(mw);
-
-                if (mw->no_decor || mw->fullscreen) window_reassert_rule(hwnd);
-
-                if (hwnd == desktop_get_focused()) border_refresh();
-                break;
-            }
-
-            if (mw->fs_mode == FS_WINDOW) {
-                if (!window_covers_monitor(hwnd)) {
-                    mw->has_applied = false;
-                    window_park_over_monitor(hwnd);
-                }
-                break;
-            }
-            if (mw->fs_mode == FS_BOTH) break;
-
-            if (g.fullscreen_policy == FS_BOTH || mw->app_fullscreen) {
-                bool covers = (g.fullscreen_policy == FS_BOTH) &&
-                              mw->fs_mode == FS_OFF &&
-                              window_covers_monitor(hwnd);
-                if (covers != mw->app_fullscreen) {
-                    log_w(L"app fullscreen %ls: %p",
-                          covers ? L"entered" : L"left", (void *)hwnd);
-                    mw->app_fullscreen = covers;
-                    mw->has_applied    = false;
-                    tile_current();
-                    break;
-                }
-                if (covers) break;
-            }
-
-            if (IsZoomed(hwnd)) {
-                events_suppress_begin();
-                ShowWindow(hwnd, SW_RESTORE);
-                events_suppress_end();
-                mw->has_applied = false;
-                tile_current();
-                break;
-            }
-
-            if (anim_is_animating(hwnd)) break;
-
-            if (mw->has_applied) {
-                RECT cur;
-                RECT a = mw->applied_rect;
-                if (window_frame_rect(hwnd, &cur)) {
-                    const int EPS = 4;
-                    int dx = abs((int)(cur.left - a.left));
-                    int dy = abs((int)(cur.top  - a.top));
-                    int dw = abs((int)((cur.right - cur.left) - (a.right - a.left)));
-                    int dh = abs((int)((cur.bottom - cur.top) - (a.bottom - a.top)));
-                    if (dx <= EPS && dy <= EPS && dw <= EPS && dh <= EPS) {
-                        mw->snap_tries = 0;
-                        break;
-                    }
-                }
-                mw->has_applied = false;
-            }
-
-            {
-                ULONGLONG now = GetTickCount64();
-                if (now - mw->snap_first_at > 1000) {
-                    mw->snap_first_at = now;
-                    mw->snap_tries    = 0;
-                }
-                if (++mw->snap_tries > 3) {
-                    if (mw->snap_tries == 4)
-                        log_msg(LOG_WARN, L"a window will not stay where the "
-                                          L"layout puts it: %p — it has a "
-                                          L"minimum size or re-places itself. "
-                                          L"Leaving it alone rather than "
-                                          L"re-tiling in a loop.",
-                                (void *)hwnd);
-                    break;
-                }
-            }
-
-            tile_current();
-        }
-        break;
-
-    default:
-        break;
+    for (size_t i = 0; i < sizeof event_handlers / sizeof event_handlers[0]; i++) {
+        if (event_handlers[i].event != event) continue;
+        event_handlers[i].handler(hwnd);
+        return;
     }
 }
 
-void mouse_drag_begin(HWND hwnd) {
-    if (!g.mouse_enabled) return;
+typedef struct {
+    DWORD          event_min, event_max;
+    HWINEVENTHOOK *slot;
+    const wchar_t *name;
+    const wchar_t *degradation;
+} EventHookSpec;
 
-    ManagedWindow *mw = window_find(hwnd);
-    if (!mw || mw->is_floating) return;
+static const EventHookSpec event_hooks[] = {
+    { EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE, &g.win_event_hook,
+      NULL, NULL },
 
-    g.drag_hwnd = hwnd;
-    GetCursorPos(&g.drag_start);
-}
+    { EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+      &g.location_hook, L"LOCATIONCHANGE",
+      L"tiled windows dragged out of place won't snap back" },
 
-void mouse_drag_end(HWND hwnd) {
-    if (!g.mouse_enabled || g.drag_hwnd != hwnd) { g.drag_hwnd = NULL; return; }
-    g.drag_hwnd = NULL;
+    { EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, &g.foreground_hook,
+      L"FOREGROUND",
+      L"focus tracking is degraded (mouse-driven focus won't be seen)" },
 
-    POINT drop;
-    if (!GetCursorPos(&drop)) { tile_current(); return; }
+    { EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, &g.minimize_hook,
+      L"MINIMIZE", L"minimized windows will keep an empty tile" },
 
-    Desktop *dt = desktop_current();
-
-    int from = -1, to = -1;
-    for (int i = 0; i < dt->count; i++) {
-        ManagedWindow *mw = window_find(dt->windows[i]);
-        if (!mw || mw->is_floating || !mw->has_applied) continue;
-
-        if (dt->windows[i] == hwnd) { from = i; continue; }
-
-        RECT r = mw->applied_rect;
-        if (drop.x >= r.left && drop.x < r.right &&
-            drop.y >= r.top  && drop.y < r.bottom)
-            to = i;
-    }
-
-    if (from >= 0 && to >= 0 && from != to) {
-        hwnd_swap(&dt->windows[from], &dt->windows[to]);
-        dt->focused = to;
-        log_w(L"mouse: swapped tiles %d <-> %d", from, to);
-    }
-
-    tile_current();
-}
+    { EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, &g.movesize_hook,
+      L"MOVESIZE", L"dragging a tiled window will not swap it" },
+};
 
 bool events_init(void) {
-    g.win_event_hook = SetWinEventHook(
-        EVENT_OBJECT_CREATE,
-        EVENT_OBJECT_HIDE,
-        NULL,
-        events_win_event_proc,
-        0, 0,
-        WINEVENT_OUTOFCONTEXT
-    );
+    for (size_t i = 0; i < sizeof event_hooks / sizeof event_hooks[0]; i++) {
+        const EventHookSpec *h = &event_hooks[i];
 
-    if (!g.win_event_hook) {
-        log_w(L"SetWinEventHook failed: %lu", GetLastError());
-        return false;
+        *h->slot = SetWinEventHook(h->event_min, h->event_max, NULL,
+                                   events_win_event_proc, 0, 0,
+                                   WINEVENT_OUTOFCONTEXT);
+        if (*h->slot) continue;
+
+        if (!h->degradation) {
+            log_w(L"SetWinEventHook failed: %lu", GetLastError());
+            return false;
+        }
+
+        log_w(L"SetWinEventHook(%ls) failed: %lu — %ls",
+              h->name, GetLastError(), h->degradation);
     }
-
-    g.location_hook = SetWinEventHook(
-        EVENT_OBJECT_LOCATIONCHANGE,
-        EVENT_OBJECT_LOCATIONCHANGE,
-        NULL,
-        events_win_event_proc,
-        0, 0,
-        WINEVENT_OUTOFCONTEXT
-    );
-
-    if (!g.location_hook) {
-        log_w(L"SetWinEventHook(LOCATIONCHANGE) failed: %lu — tiled windows "
-              L"dragged out of place won't snap back", GetLastError());
-    }
-
-    g.foreground_hook = SetWinEventHook(
-        EVENT_SYSTEM_FOREGROUND,
-        EVENT_SYSTEM_FOREGROUND,
-        NULL,
-        events_win_event_proc,
-        0, 0,
-        WINEVENT_OUTOFCONTEXT
-    );
-
-    if (!g.foreground_hook)
-        log_w(L"SetWinEventHook(FOREGROUND) failed: %lu — focus tracking is "
-              L"degraded (mouse-driven focus won't be seen)", GetLastError());
-
-    g.minimize_hook = SetWinEventHook(
-        EVENT_SYSTEM_MINIMIZESTART,
-        EVENT_SYSTEM_MINIMIZEEND,
-        NULL,
-        events_win_event_proc,
-        0, 0,
-        WINEVENT_OUTOFCONTEXT
-    );
-
-    if (!g.minimize_hook)
-        log_w(L"SetWinEventHook(MINIMIZE) failed: %lu — minimized windows will "
-              L"keep an empty tile", GetLastError());
-
-    g.movesize_hook = SetWinEventHook(
-        EVENT_SYSTEM_MOVESIZESTART,
-        EVENT_SYSTEM_MOVESIZEEND,
-        NULL,
-        events_win_event_proc,
-        0, 0,
-        WINEVENT_OUTOFCONTEXT
-    );
-
-    if (!g.movesize_hook)
-        log_w(L"SetWinEventHook(MOVESIZE) failed: %lu — dragging a tiled window "
-              L"will not swap it", GetLastError());
 
     return true;
 }
@@ -416,24 +364,11 @@ void events_shutdown(void) {
         UnhookWinEvent(g.statechange_hook);
         g.statechange_hook = NULL;
     }
-    if (g.win_event_hook) {
-        UnhookWinEvent(g.win_event_hook);
-        g.win_event_hook = NULL;
-    }
-    if (g.foreground_hook) {
-        UnhookWinEvent(g.foreground_hook);
-        g.foreground_hook = NULL;
-    }
-    if (g.minimize_hook) {
-        UnhookWinEvent(g.minimize_hook);
-        g.minimize_hook = NULL;
-    }
-    if (g.location_hook) {
-        UnhookWinEvent(g.location_hook);
-        g.location_hook = NULL;
-    }
-    if (g.movesize_hook) {
-        UnhookWinEvent(g.movesize_hook);
-        g.movesize_hook = NULL;
+
+    for (size_t i = 0; i < sizeof event_hooks / sizeof event_hooks[0]; i++) {
+        HWINEVENTHOOK *slot = event_hooks[i].slot;
+        if (!*slot) continue;
+        UnhookWinEvent(*slot);
+        *slot = NULL;
     }
 }
