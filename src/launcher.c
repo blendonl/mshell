@@ -1,35 +1,3 @@
-/* ===========================================================================
- * launcher.c — type a name, run a program.
- *
- * With no Start menu and no Run box, launching anything the config did not
- * anticipate meant editing init.lua. This is the missing piece.
- *
- * THE INPUT PROBLEM, and why it is solved the way it is.
- *
- * Every overlay mshell paints is WS_EX_NOACTIVATE, and the keyboard hook sits
- * above the whole system: inside a modal submap it swallows every key, and it
- * swallows every Win-down unconditionally. So a launcher cannot simply create
- * an EDIT control and let Windows route keys to it — the hook eats them first.
- *
- * Two designs were available:
- *
- *   (a) drop WS_EX_NOACTIVATE and take real focus, letting the app receive
- *       keys normally; or
- *   (b) a CAPTURE MODE in the hook: while it is on, keys are translated and
- *       forwarded to the launcher by PostMessage, and nothing reaches the
- *       keymaps or the foreground app.
- *
- * (b), for the reason window.c documents at length: taking the foreground is
- * the operation Windows makes hardest, needs the synthetic-input trick to work
- * at all, and would put the launcher in a fight with whatever it covered. (b)
- * also composes with what is already here — it is the same shape as the
- * submap-notify path, and the hook already owns the keyboard by design.
- *
- * The obvious hazard of (b) is a capture mode that gets stuck: the keyboard
- * would be dead with no way to type the thing that fixes it. Three guards —
- * Escape always exits, the panic action clears it, and a sanity timer closes
- * the launcher if its window ever stops existing.
- * =========================================================================== */
 #include "mshell.h"
 #include "overlay.h"
 
@@ -38,18 +6,17 @@
 static const wchar_t *LAUNCHER_CLASS = L"mshell_Launcher";
 
 #define LAUNCH_MAX_ENTRIES 512
-#define LAUNCH_MAX_SHOWN   9      /* result rows on screen                  */
+#define LAUNCH_MAX_SHOWN   9
 #define LAUNCH_TIMER_ID    1
 #define LAUNCH_SANITY_MS   250
 
-/* design px at 96 DPI */
 #define L_PAD    14
 #define L_ROW    28
 #define L_WIDTH  520
 
 typedef struct {
-    wchar_t name[128];        /* what you type against, and what is shown */
-    wchar_t target[MAX_PATH]; /* what gets launched                       */
+    wchar_t name[128];
+    wchar_t target[MAX_PATH];
 } Entry;
 
 static Entry       s_index[LAUNCH_MAX_ENTRIES];
@@ -63,14 +30,6 @@ static int         s_hit_n;
 static int         s_sel;
 static OverlayFont s_font;
 
-/* ---------------------------------------------------------------------------
- * Indexing: Start-menu shortcuts, both the user's and the machine's.
- *
- * The .lnk files are indexed rather than resolved to their targets: a shortcut
- * carries arguments and a working directory that the executable alone does not,
- * which is the same reason spawn goes through ShellExecuteW. Launching the
- * .lnk therefore launches the program the way the Start menu would.
- * --------------------------------------------------------------------------- */
 static void index_dir(const wchar_t *dir, int depth) {
     if (depth > 3 || s_index_n >= LAUNCH_MAX_ENTRIES) return;
 
@@ -101,15 +60,11 @@ static void index_dir(const wchar_t *dir, int depth) {
         wcsncpy(e->target, full, MAX_PATH - 1);
         e->target[MAX_PATH - 1] = L'\0';
 
-        /* Display the shortcut's name without ".lnk" — that is what the Start
-         * menu shows and therefore what someone will type. */
         wcsncpy(e->name, fd.cFileName, 127);
         e->name[127] = L'\0';
         wchar_t *dot = wcsrchr(e->name, L'.');
         if (dot) *dot = L'\0';
 
-        /* Both Start menus contain a shortcut for most installed programs;
-         * showing each twice is noise. */
         bool dup = false;
         for (int i = 0; i < s_index_n; i++)
             if (_wcsicmp(s_index[i].name, e->name) == 0) { dup = true; break; }
@@ -130,17 +85,12 @@ static void index_known(REFKNOWNFOLDERID id) {
 static void launcher_build_index(void) {
     if (s_indexed) return;
     s_index_n = 0;
-    index_known(&FOLDERID_CommonPrograms);   /* machine-wide Start menu */
-    index_known(&FOLDERID_Programs);         /* this user's             */
+    index_known(&FOLDERID_CommonPrograms);
+    index_known(&FOLDERID_Programs);
     s_indexed = true;
     log_msg(LOG_INFO, L"launcher: indexed %d entries", s_index_n);
 }
 
-/* ---------------------------------------------------------------------------
- * Matching — subsequence, case-insensitive: "fox" finds "Firefox", "vsc" finds
- * "Visual Studio Code". A prefix match sorts first, because when you type "fi"
- * you almost always mean the thing that starts with it.
- * --------------------------------------------------------------------------- */
 static bool subseq(const wchar_t *needle, const wchar_t *hay) {
     if (!*needle) return true;
     for (; *hay; hay++) {
@@ -156,7 +106,6 @@ static void launcher_filter(void) {
     s_hit_n = 0;
     s_sel   = 0;
 
-    /* Two passes so prefix matches lead, without needing a sort. */
     for (int pass = 0; pass < 2 && s_hit_n < LAUNCH_MAX_ENTRIES; pass++) {
         for (int i = 0; i < s_index_n && s_hit_n < LAUNCH_MAX_ENTRIES; i++) {
             bool prefix = (s_query_n > 0) &&
@@ -169,9 +118,6 @@ static void launcher_filter(void) {
     }
 }
 
-/* ---------------------------------------------------------------------------
- * Presentation
- * --------------------------------------------------------------------------- */
 static void launcher_relayout(void) {
     if (!g.launcher_window) return;
 
@@ -191,7 +137,7 @@ static void launcher_relayout(void) {
     RECT mon = (mi >= 0 && mi < g.monitor_count) ? g.monitors[mi].work_area
                                                  : g.work_area;
     int x = mon.left + ((mon.right - mon.left) - w) / 2;
-    int y = mon.top  + (mon.bottom - mon.top) / 5;   /* upper third reads best */
+    int y = mon.top  + (mon.bottom - mon.top) / 5;
 
     SetWindowPos(g.launcher_window, HWND_TOPMOST, x, y, w, h,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -202,7 +148,6 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
                                          WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_TIMER:
-        /* Sanity: capture mode must never outlive the window it feeds. */
         if (wp == LAUNCH_TIMER_ID) {
             if (!g.launcher_open) { KillTimer(hwnd, LAUNCH_TIMER_ID); }
             else if (!IsWindowVisible(hwnd)) launcher_close();
@@ -238,7 +183,6 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
         HFONT of = (HFONT)SelectObject(mdc, s_font.font);
         SetBkMode(mdc, TRANSPARENT);
 
-        /* The query line, with a block cursor so it is obviously an input. */
         wchar_t line[160];
         _snwprintf(line, 159, L"> %ls_", s_query);
         line[159] = L'\0';
@@ -273,9 +217,6 @@ static LRESULT CALLBACK launcher_wndproc(HWND hwnd, UINT msg,
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-/* ---------------------------------------------------------------------------
- * Open / close / key handling. All main-thread.
- * --------------------------------------------------------------------------- */
 void launcher_open(void) {
     if (!g.launcher_window || g.launcher_open) return;
 
@@ -284,14 +225,14 @@ void launcher_open(void) {
     s_query_n  = 0;
     launcher_filter();
 
-    g.launcher_open = true;      /* the hook reads this to enter capture mode */
+    g.launcher_open = true;
     SetTimer(g.launcher_window, LAUNCH_TIMER_ID, LAUNCH_SANITY_MS, NULL);
     launcher_relayout();
 }
 
 void launcher_close(void) {
     if (!g.launcher_window) return;
-    g.launcher_open = false;     /* FIRST: the keyboard comes back either way */
+    g.launcher_open = false;
     KillTimer(g.launcher_window, LAUNCH_TIMER_ID);
     ShowWindow(g.launcher_window, SW_HIDE);
 }
@@ -301,16 +242,11 @@ static void launcher_run_selected(void) {
         const Entry *e = &s_index[s_hits[s_sel]];
         spawn_command(e->target, NULL, NULL, L"launcher");
     } else if (s_query_n > 0) {
-        /* Nothing matched, so treat what was typed as a command. This is what
-         * makes the launcher a Run box as well as a menu — "cmd", a path, a
-         * URL all work, because ShellExecuteW resolves them. */
         spawn_command(s_query, NULL, NULL, L"launcher");
     }
     launcher_close();
 }
 
-/* Called on the main thread with a key the hook captured. `ch` is the character
- * it produced, or 0 for a key that is not text. */
 void launcher_key(DWORD vk, wchar_t ch) {
     if (!g.launcher_open) return;
 
@@ -379,8 +315,6 @@ bool launcher_spawn_mrun(void) {
 bool launcher_init(void) {
     if (!overlay_register(LAUNCHER_CLASS, launcher_wndproc, false)) return false;
 
-    /* Still NOACTIVATE: the whole design is that keys arrive from the hook
-     * rather than from focus, so this never has to take the foreground. */
     g.launcher_window = overlay_create(
         LAUNCHER_CLASS,
         WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);

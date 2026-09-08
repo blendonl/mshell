@@ -1,14 +1,8 @@
-/* ===========================================================================
- * update_parse.c — the Windows-free half of update.c. See update_parse.h.
- * =========================================================================== */
 #include "update_parse.h"
 
 #include <stdio.h>
 #include <string.h>
 
-/* Local rather than _stricmp/strcasecmp: this file is compiled by both
- * mingw-w64 and the host compiler, and the two disagree about which of those
- * spellings exists. ASCII is all these fields contain. */
 static char lower_ascii(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
 }
@@ -33,16 +27,12 @@ int update_version_cmp(const char *a, const char *b) {
         if (*a == '.') a++;
         if (*b == '.') b++;
         if (!*a && !*b) break;
-        /* A non-numeric suffix ("-rc1") stops the comparison rather than being
-         * guessed at. */
         if ((*a && (*a < '0' || *a > '9')) ||
             (*b && (*b < '0' || *b > '9'))) break;
     }
     return 0;
 }
 
-/* `p` points at the opening quote; returns the character after the closing
- * one, honouring backslash escapes. */
 static const char *json_skip_string(const char *p, const char *end) {
     p++;
     while (p < end && *p) {
@@ -62,23 +52,17 @@ bool update_json_str(const char *start, const char *end, const char *key,
     for (const char *p = start; p < end && *p; ) {
         if (*p != '"') { p++; continue; }
 
-        /* A quote here opens either the key we want or a string to step over.
-         * Matching the closing quote too is what stops "url" from hitting
-         * inside "browser_download_url". */
         if ((size_t)(end - p) > keylen + 1 &&
             strncmp(p + 1, key, keylen) == 0 && p[1 + keylen] == '"') {
 
             const char *q = p + 2 + keylen;
             while (q < end && (*q == ' ' || *q == '\t' ||
                                *q == '\n' || *q == '\r' || *q == ':')) q++;
-            if (q >= end || *q != '"') return false;   /* not a string value */
+            if (q >= end || *q != '"') return false;
 
             q++;
             size_t n = 0;
             while (q < end && *q != '"' && n < cap - 1) {
-                /* The fields read here (versions, URLs, hex digests) contain
-                 * no escapes; an unescaped copy keeps this honest about what
-                 * it supports rather than silently mangling one. */
                 if (*q == '\\') return false;
                 out[n++] = *q++;
             }
@@ -112,11 +96,6 @@ bool update_find_asset(const char *json, const char *suffix,
         while (a < end && *a != '{' && *a != ']') a++;
         if (a >= end || *a == ']') return false;
 
-        /* Bound this asset object, stepping over strings so that a brace
-         * inside one cannot move the boundary. The uploader's "{owner}{repo}"
-         * templates are balanced and would survive naive counting; a lone "{"
-         * in an asset's free-text label would not, and would swallow every
-         * asset after this one. */
         const char *obj = a;
         int depth = 0;
         while (a < end) {
@@ -141,8 +120,6 @@ bool update_find_asset(const char *json, const char *suffix,
 
                 snprintf(name, name_cap, "%s", n);
 
-                /* Optional — absence costs the integrity check, not the
-                 * update. */
                 if (!update_json_str(obj, a, "digest", digest, digest_cap))
                     digest[0] = '\0';
 

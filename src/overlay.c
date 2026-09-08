@@ -1,6 +1,3 @@
-/* ===========================================================================
- * overlay.c — see overlay.h for what this is and why.
- * =========================================================================== */
 #include "mshell.h"
 #include "overlay.h"
 
@@ -12,13 +9,8 @@ bool overlay_register(const wchar_t *cls, WNDPROC proc, bool arrow_cursor) {
     wc.lpszClassName = cls;
     if (arrow_cursor) wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
 
-    /* No background brush on purpose: every overlay returns 1 from
-     * WM_ERASEBKGND and paints its whole client area, which is what keeps them
-     * from flickering. */
     if (RegisterClassExW(&wc)) return true;
 
-    /* Already registered is success — the status bar registers once and then
-     * creates a window per monitor. */
     return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
@@ -72,8 +64,6 @@ HFONT overlay_font_face(OverlayFont *of, UINT dpi, int px, const wchar_t *face) 
         return of->font;
     if (of->font) DeleteObject(of->font);
 
-    /* Negative height means "this many pixels", as opposed to points — which
-     * is what makes the caller's own DPI scaling the only scaling applied. */
     of->font = CreateFontW(-px, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
