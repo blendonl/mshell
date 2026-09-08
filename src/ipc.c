@@ -22,46 +22,86 @@ static void ipc_pipe_name(wchar_t *out, size_t cap) {
     out[cap - 1] = L'\0';
 }
 
-static void json_escape(const wchar_t *w, char *out, size_t cap) {
-    char u8[1024];
-    if (WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, u8, (int)sizeof u8,
-                            NULL, NULL) <= 0) {
-        if (cap) out[0] = '\0';
+typedef struct {
+    char  *buf;
+    size_t cap;
+    size_t len;
+    bool   full;
+} StrBuf;
+
+static void sb_init(StrBuf *b, char *buf, size_t cap) {
+    b->buf  = buf;
+    b->cap  = cap;
+    b->len  = 0;
+    b->full = (cap == 0);
+    if (cap) buf[0] = '\0';
+}
+
+static void sb_addf(StrBuf *b, const char *fmt, ...) {
+    if (b->full) return;
+
+    size_t  room = b->cap - b->len;
+    va_list ap;
+
+    va_start(ap, fmt);
+    int n = vsnprintf(b->buf + b->len, room, fmt, ap);
+    va_end(ap);
+
+    if (n < 0) {
+        b->buf[b->len] = '\0';
+        b->full        = true;
         return;
     }
 
-    size_t o = 0;
-    for (size_t i = 0; u8[i] && o + 2 < cap; i++) {
-        unsigned char c = (unsigned char)u8[i];
-        if (c == '"' || c == '\\') { out[o++] = '\\'; out[o++] = (char)c; }
-        else if (c < 0x20)         { o += (size_t)snprintf(out + o, cap - o,
-                                                           "\\u%04x", c); }
-        else                        out[o++] = (char)c;
+    if ((size_t)n >= room) {
+        b->len  = b->cap - 1;
+        b->full = true;
+        return;
     }
-    out[o < cap ? o : cap - 1] = '\0';
+
+    b->len += (size_t)n;
+}
+
+static void json_escape(const wchar_t *w, char *out, size_t cap) {
+    char   u8[1024];
+    StrBuf b;
+
+    sb_init(&b, out, cap);
+
+    if (WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, u8, (int)sizeof u8,
+                            NULL, NULL) <= 0)
+        return;
+
+    for (size_t i = 0; u8[i] && !b.full; i++) {
+        unsigned char c = (unsigned char)u8[i];
+        if (c == '"' || c == '\\') sb_addf(&b, "\\%c", c);
+        else if (c < 0x20)         sb_addf(&b, "\\u%04x", c);
+        else                       sb_addf(&b, "%c", c);
+    }
 }
 
 static void ipc_build_state(char *out, size_t cap) {
-    size_t o = 0;
+    StrBuf b;
     char   esc[1024];
 
-    o += (size_t)snprintf(out + o, cap - o, "{\"version\":\"%s\",", MSHELL_VERSION);
+    sb_init(&b, out, cap);
 
-    o += (size_t)snprintf(out + o, cap - o, "\"desktops\":[");
-    for (int i = 0; i < g.desktop_count && o < cap; i++) {
+    sb_addf(&b, "{\"version\":\"%s\",", MSHELL_VERSION);
+
+    sb_addf(&b, "\"desktops\":[");
+    for (int i = 0; i < g.desktop_count && !b.full; i++) {
         const Desktop *d = &g.desktops[i];
         json_escape(d->name, esc, sizeof esc);
-        o += (size_t)snprintf(out + o, cap - o,
-                 "%s{\"name\":\"%s\",\"current\":%s,\"windows\":%d,"
-                 "\"layout\":\"%s\",\"monitor\":%d}",
-                 i ? "," : "", esc,
-                 d->id == g.current_desktop_id ? "true" : "false",
-                 d->count, layout_to_name(d->layout), d->monitor);
+        sb_addf(&b, "%s{\"name\":\"%s\",\"current\":%s,\"windows\":%d,"
+                    "\"layout\":\"%s\",\"monitor\":%d}",
+                i ? "," : "", esc,
+                d->id == g.current_desktop_id ? "true" : "false",
+                d->count, layout_to_name(d->layout), d->monitor);
     }
-    o += (size_t)snprintf(out + o, cap - o, "],");
+    sb_addf(&b, "],");
 
-    o += (size_t)snprintf(out + o, cap - o, "\"monitors\":[");
-    for (int i = 0; i < g.monitor_count && o < cap; i++) {
+    sb_addf(&b, "\"monitors\":[");
+    for (int i = 0; i < g.monitor_count && !b.full; i++) {
         const Monitor *m = &g.monitors[i];
 
         json_escape(m->device, esc, sizeof esc);
@@ -74,34 +114,31 @@ static void ipc_build_state(char *out, size_t cap) {
         if (shown) json_escape(shown->name, dname, sizeof dname);
         else       dname[0] = '\0';
 
-        o += (size_t)snprintf(out + o, cap - o,
-                 "%s{\"index\":%d,\"device\":\"%s\",\"desktop\":\"%s\","
-                 "\"x\":%ld,\"y\":%ld,"
-                 "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
-                 "\"rotation\":%d,\"hdr\":%s,\"focused\":%s}",
-                 i ? "," : "", i, esc, dname,
-                 (long)m->full.left, (long)m->full.top,
-                 (long)(m->full.right - m->full.left),
-                 (long)(m->full.bottom - m->full.top),
-                 monitor_dpi(i), mode.refresh,
-                 display_rotation(m->device),
-                 hdr == HDR_UNSUPPORTED ? "null" : hdr == HDR_ON ? "true"
-                                                                 : "false",
-                 i == g.focused_monitor ? "true" : "false");
+        sb_addf(&b, "%s{\"index\":%d,\"device\":\"%s\",\"desktop\":\"%s\","
+                    "\"x\":%ld,\"y\":%ld,"
+                    "\"width\":%ld,\"height\":%ld,\"dpi\":%u,\"refresh\":%d,"
+                    "\"rotation\":%d,\"hdr\":%s,\"focused\":%s}",
+                i ? "," : "", i, esc, dname,
+                (long)m->full.left, (long)m->full.top,
+                (long)(m->full.right - m->full.left),
+                (long)(m->full.bottom - m->full.top),
+                monitor_dpi(i), mode.refresh,
+                display_rotation(m->device),
+                hdr == HDR_UNSUPPORTED ? "null" : hdr == HDR_ON ? "true"
+                                                                : "false",
+                i == g.focused_monitor ? "true" : "false");
     }
-    o += (size_t)snprintf(out + o, cap - o, "],");
+    sb_addf(&b, "],");
 
     HWND f = desktop_get_focused();
     if (f && IsWindow(f)) {
         wchar_t title[256] = {0};
         GetWindowTextW(f, title, 256);
         json_escape(title, esc, sizeof esc);
-        o += (size_t)snprintf(out + o, cap - o, "\"focused\":\"%s\"}", esc);
+        sb_addf(&b, "\"focused\":\"%s\"}", esc);
     } else {
-        o += (size_t)snprintf(out + o, cap - o, "\"focused\":null}");
+        sb_addf(&b, "\"focused\":null}");
     }
-
-    if (o >= cap) out[cap - 1] = '\0';
 }
 
 void ipc_handle_request(void *req_ptr) {
