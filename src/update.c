@@ -205,7 +205,7 @@ static DWORD WINAPI update_thread(LPVOID param) {
 }
 
 void update_check_async(void) {
-    if (!g.update_check) return;
+    if (!g.cfg.update_check) return;
     if (checked_today()) return;
 
     HANDLE t = CreateThread(NULL, 0, update_thread, NULL, 0, NULL);
