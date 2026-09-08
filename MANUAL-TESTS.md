@@ -20,7 +20,7 @@ exists, so they are worth re-running before any release.
 | 1 | Open windows on 3 desktops, then quit (`Win+Shift+Q`). | Every window is visible afterwards. On 0.7.0 the two background desktops' windows stayed hidden forever — no taskbar button, no Alt+Tab entry. |
 | 2 | Hold an autorepeating bound key (e.g. `Win+j`) while pressing `Win+Shift+R`. Then save `init.lua` repeatedly while typing in another window. | No crash. On 0.7.0 the reload freed a keybinding that a queued message was about to dereference. |
 | 3 | Close Discord (or Slack/Telegram/Steam) to the tray. | It stays hidden. On 0.7.0 it reappeared immediately. Then click its tray icon: it comes back and rejoins the layout. |
-| 4 | Minimize a tiled window. | The others reflow to fill the space. Press the `restore` binding: it comes back. On 0.7.0 the tile stayed empty and there was no way back without a taskbar. |
+| 4 | Minimize a tiled window. | The others reflow to fill the space. Press the `window.restore` binding: it comes back. On 0.7.0 the tile stayed empty and there was no way back without a taskbar. |
 | 5 | Send a window to another desktop, then switch there. | The window is visible. (Guards against the app-hidden detection misreading mshell's own hide.) |
 | 6 | Launch a second `mshell.exe`. | It exits immediately and logs why; the first keeps working. |
 | 7 | Run elevated. | The log says so and names the config path; editing `init.lua` does **not** auto-reload. `Win+Shift+R` still works. |
@@ -44,7 +44,7 @@ With `mode = "top_bar"` (the default):
 
 ## Floating bar mode
 
-With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
+With `mshell.bar.setup{ mode = "floating" }` and `"notifications"` in `modules`:
 
 - One panel, in the **middle of the screen**, showing the time large with the
   date under it, then the desktops and layout, then the focused title.
@@ -58,7 +58,7 @@ With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
   toast, and the panel grows to fit it and shrinks again when it expires. A
   warn/error notification's dot is yellow/red.
 - Several messages list newest-first; long ones wrap rather than being clipped.
-- Bind `toggle_bar`: the panel disappears and comes back. While it is hidden, a
+- Bind `bar.toggle`: the panel disappears and comes back. While it is hidden, a
   notification appears as an ordinary toast again.
 - Switching to `mode = "top_bar"` and back at reload leaves no stray window and
   no duplicate notifications.
@@ -66,15 +66,15 @@ With `mshell.set_bar{ mode = "floating" }` and `"notifications"` in `modules`:
 - A window that opens floating is centred on the same spot the panel occupies —
   floats centre on the work area, and floating mode reserves none of it. The
   panel is drawn over it and passes clicks through, so this is a look, not a
-  loss of function; `toggle_bar` gets it out of the way.
+  loss of function; `bar.toggle` gets it out of the way.
 
 ## Control channel (0.10.0)
 
 From a normal terminal, with mshell running:
 
 - `mshell.exe --query` prints JSON and does not start a second shell.
-- `mshell.exe --msg "switch_desktop web"` switches the running shell.
-- `mshell.exe --msg "layout_monocle"`, `--msg "focus_next"` behave as the
+- `mshell.exe --msg "desktop.focus web"` switches the running shell.
+- `mshell.exe --msg "layout.monocle"`, `--msg "window.focus.next"` behave as the
   keybindings do.
 - `mshell.exe --msg "nonsense"` prints an error naming the problem.
 - With mshell **not** running, `--query` reports that rather than hanging.
@@ -83,10 +83,10 @@ From a normal terminal, with mshell running:
 
 ## Features added in 0.11.0
 
-- **Sticky**: `toggle_sticky` on a window, switch desktops — it comes with you,
+- **Sticky**: `window.sticky.toggle` on a window, switch desktops — it comes with you,
   and the bar's window count follows.
-- **Scratchpad**: `mark_scratchpad` on a terminal, switch desktops, then
-  `toggle_scratchpad` — it appears here, focused. Again — it hides.
+- **Scratchpad**: `window.scratchpad.mark` on a terminal, switch desktops, then
+  `window.scratchpad.toggle` — it appears here, focused. Again — it hides.
 
 ## Desktop bookkeeping
 
@@ -96,20 +96,26 @@ something off-screen being handed the keyboard.
 
 | # | Test | Expected |
 |---|------|----------|
-| 1 | `mark_scratchpad` a terminal on `1`, go to `2`, `toggle_scratchpad` to summon it, then close it. Make sure `1` has no other windows. | `1` disappears from the bar. Before: summoning set `desktop_id` without unlinking the window from `1`, so closing it left a dead handle behind — `1` never emptied and never went away. |
-| 2 | `mark_scratchpad` on `1`, `toggle_scratchpad` to stow it, go to `2`, come back to `1`. | Still stowed. Before: the switch-in show loop revealed every window on the desktop, and nothing re-hid a float. |
-| 3 | Stow the scratchpad, then `mark_scratchpad` a *different* window. | The old scratchpad reappears rather than being stranded invisible — nothing else could ever show it once it lost the role. |
+| 1 | `window.scratchpad.mark` a terminal on `1`, go to `2`, `window.scratchpad.toggle` to summon it, then close it. Make sure `1` has no other windows. | `1` disappears from the bar. Before: summoning set `desktop_id` without unlinking the window from `1`, so closing it left a dead handle behind — `1` never emptied and never went away. |
+| 2 | `window.scratchpad.mark` on `1`, `window.scratchpad.toggle` to stow it, go to `2`, come back to `1`. | Still stowed. Before: the switch-in show loop revealed every window on the desktop, and nothing re-hid a float. |
+| 3 | Stow the scratchpad, then `window.scratchpad.mark` a *different* window. | The old scratchpad reappears rather than being stranded invisible — nothing else could ever show it once it lost the role. |
 | 4 | Minimize the **only** window on `1`, go to `2`, come back. | Still minimized, and nothing is focused. Strengthens test #8 above, which passes today only because it never uses a single-window desktop. |
 | 5 | Tray an app (Discord/Slack) that is the focused window on `1`, go to `2`, come back. | Still in the tray. Before: `window_focus` fell back to `SwitchToThisWindow`, which un-hides. |
 | 6 | Pin a desktop with `monitor = 1`, put a **floating** window on it, reload the config. | The float is on display 1. Before: only its recorded monitor changed — the tiler never places floats, so it stayed on display 0. |
-| 7 | `toggle_sticky` a window, then switch to a desktop pinned to another display. | It arrives on that display, not the one it was already on. |
+| 7 | `window.sticky.toggle` a window, then switch to a desktop pinned to another display. | It arrives on that display, not the one it was already on. |
 | 8 | With any of the above, check `%LOCALAPPDATA%\mshell\mshell.log`. | A full desktop or a sticky window that could not follow now logs a line instead of failing silently. |
+| 9 | Put Discord (or Slack) on `1`, go to `2`, and **while you are on `2`** close it to the tray from its tray icon. Come back to `1`. | Still in the tray. Before: only `SW_HIDE` clears `WS_VISIBLE`, so only it can raise `EVENT_OBJECT_HIDE` for a window *we* hid — but the handler tested the one mechanism that stopped being the first choice in 0.14.9. Every tray-hide on a background desktop read as mshell's own, and coming back un-trayed the app. Distinct from test #5, which trays the window on the desktop you are looking at. |
+| 10 | Open four windows on one desktop, focus the **third**, then close the **first**. | Focus stays on the window you were in. Before: the list shifted down under `focused`, which was only clamped, so it came to name the *fourth* window and `window_unmanage` focused that. Repeat with `window.move.to_desktop` on the first window instead of closing it. |
+| 11 | Change a desktop's layout with a keybind, then reload the config (`Win+Shift+R`). | The layout is still the one you chose — a reload re-applies the rules, and no rule names that desktop's layout. |
+| 12 | Add `mshell.desktop.rule("web", { layout = "monocle" })`, reload, and go to `web`. Then edit it to `"grid"` and reload again. | Monocle, then grid. Note `mshell.layout.set(...)` is a default rather than a rule and is still outranked by a layout you chose at runtime — `desktop_rule("*", { layout = ... })` is how a config insists. |
+| 13 | Change a desktop's layout, then restart mshell. | The layout is whatever the config says, not what you switched to. Nothing is remembered across a restart — no `session.txt` is written, and none appears in `%APPDATA%\mshell`. |
+| 14 | Put a window its own app pins **always-on-top** (a media player in that mode) on `1` as a float, go to `2`, then change resolution or plug/unplug a display. | It does not appear over `2`, and the log has no `rescued … from off-screen` line for it. Before: it is hidden by being moved 4000 px clear of every display, which is exactly what the hotplug sweep looks for, so it was hauled back on screen still flagged hidden and nothing put it away. Then unplug the display it was on and return to `1`: it comes back somewhere you can see it. |
+| 15 | With windows spread over several desktops, switch back and forth with `mshell.log.level("debug")` on. | Each switch logs one `hide:`/`show:` line per window that actually moved, and no longer re-asserts the z-order of every hidden window on every desktop on every pass. |
 - **Zoom**: from the stack it swaps into master; pressed again from master it
   swaps back out to where the old master went.
-- **Session**: change a desktop's layout and master ratio, quit, restart —
-  both are restored, and you land on the desktop you left. Then
-  `taskkill /F /IM mshell.exe` and restart: still restored (this is the case
-  shutdown-only saving would miss).
+- **No persistence**: change a desktop's layout and master ratio, quit, restart —
+  both are back to what the config says, and you land on the desktop `default`
+  names. `%APPDATA%\mshell` gains no `session.txt`.
 - **--check**: `mshell.exe --check` on a good config prints counts; on a broken
   one prints the Lua error. Run it while mshell is running and confirm
   `%LOCALAPPDATA%\mshell\mshell.log` is **not** truncated.
@@ -251,6 +257,43 @@ Needs a scaled display; this is the fix most likely to regress silently.
 - **Mixed DPI, two monitors** (e.g. 100% + 150%). Tile on both. Geometry is
   correct on the secondary monitor, not just the primary. Move a window across
   with `Win+Shift+.` and it lands correctly.
+- **A whole desktop across a scale boundary.** The case that broke Chrome. With
+  the two displays at different scales — a portrait secondary makes it obvious —
+  put two or three windows (at least one Chromium: Chrome, Edge, an Electron
+  app) on a desktop and move the desktop with `desktop.to_monitor`. Every window
+  fills its tile on the new display, first time. Send it back: same. Then do it
+  the other way round, by switching to a desktop already up on the other display
+  so the two swap — both desktops land correctly, on both screens.
+
+  What the bug looked like: a window covering half the portrait screen, or one
+  blown up past the far monitor's edges and spilling onto the other, painted
+  flat grey with nothing inside it. Grey that survives a re-tile is the browser
+  having given up presenting, not geometry — see `--tweaks apply apps`.
+- **No grey band down a Chromium window's sides.** Tile Chrome, Edge or Discord
+  on the scaled display and look at its left and right edges: one pixel of the
+  app's own border, then content. A band of ~10px at 150% (wider at higher
+  scale) means `WS_THICKFRAME` was stripped from a window that draws its own
+  frame, and the app's client inset — which that frame exists to hide — is
+  showing. `tools/probe_frame.exe <hwnd>` names it: the window, DWM and client
+  rects with their insets, plus the colour runs across the edge. An ordinary
+  app (alacritty, Notepad) must still be stripped to a bare frame, with its
+  window, DWM and client rects identical.
+
+- **The window fills its tile a second later, too.** Right after any of the
+  moves above, watch a Chromium window (Chrome, Edge, Discord) for a second: it
+  must end up edge to edge in its cell, with no strip of backdrop down its left
+  or right side. The browser resizes itself when its own DPI relayout finishes,
+  which is after the placement loop has stopped looking, so the correction comes
+  from the 250ms janitor tick. `tools/probe_dpiband.exe chrome 20` measures it —
+  the colour runs it prints name the owner of any band: the backdrop colour from
+  the config means the window is short of its tile, an app's own frame colour
+  means the app is insetting its content and the window is placed correctly.
+  A window that will not take the rect after four ticks says so in the log, with
+  the size it insists on.
+
+- **With animation on** (`mshell.appearance.animation(120)`), repeat the move above.
+  Windows crossing the scale boundary jump rather than tween; ones staying on
+  their own display still animate.
 - **Change the scale factor while running.** Layout and overlays follow.
 
 ## Multi-monitor
@@ -261,15 +304,51 @@ Needs a scaled display; this is the fix most likely to regress silently.
   nothing is stranded off-screen.
 - A desktop pinned with `monitor = 1` tiles there, and switching to it moves the
   focus there.
+- **The focus ring stays on the monitor you are actually on.** With a different
+  desktop up on each display and `mshell.mouse.setup{ follow = true }`, move the
+  pointer from a window on one display to a window on the other. The ring
+  follows the pointer. Before: `window_focus()` moved `focused_monitor` without
+  re-deriving the desktop that hangs off it, so `border_refresh()` asked
+  `desktop_get_focused()` and got the window you had just *left* — the ring
+  stayed on the far monitor, hugging a window you were no longer in, and the bar
+  showed that desktop's layout and title too. Repeat with the pointer parked
+  still and the focus moved by closing the last window on one display, by
+  summoning the scratchpad, and by jumping to an urgent window: all four reach
+  the same place.
+
+### Moving a desktop at runtime (`desktop.to_monitor`)
+
+Needs two displays. Bind
+`mshell.keys.bind({mod, ctrl}, ".", function() mshell.desktop.to_monitor(1) end)`
+and the same with `0` on `,` for the first few.
+
+- Open two or three windows, press the binding. Every window on the desktop —
+  tiled **and** floating — moves to that display and re-tiles there; the focus
+  follows. Press the other binding: they all come back.
+- `mshell.exe --msg "desktop.to_monitor 1"` does the same to the desktop you are
+  on. `--msg "desktop.to_monitor chat 1"` moves `chat` **without** switching to
+  it — go there afterwards and its windows are on that display.
+- `--msg "desktop.to_monitor 7"` on a two-head machine: a notification says the
+  monitor does not exist, and nothing moves.
+- **It outranks the rule.** With `mshell.desktop.rule("web", { monitor = 0 })`, move
+  `web` to monitor 1 by hand, then save `init.lua` (any edit). After the reload
+  `web` is still on monitor 1. `--msg "desktop.to_monitor -1"` clears it and the
+  rule takes it back to 0.
+- **It survives an unplug.** Move a desktop to the secondary, unplug it — the
+  windows fall back to the primary. Plug it back in: they return, without
+  touching the binding again.
+- **It does not survive a restart.** Move a desktop, quit, start again: it is
+  back wherever the rules put it. A pin made by hand lasts as long as mshell
+  does; `monitor` on a `desktop_rule` is how it is made to last.
 
 ## Fullscreen
 
 The three modes are distinct and each key is its own toggle:
 
-- `fullscreen` — the window covers the monitor; the app is never told.
-- `fullscreen_content` — the window keeps its tile, so a fullscreen YouTube
+- `window.fullscreen.window` — the window covers the monitor; the app is never told.
+- `window.fullscreen.content` — the window keeps its tile, so a fullscreen YouTube
   video fills the tile rather than the screen.
-- `fullscreen_both` — the app's own fullscreen covers the display.
+- `window.fullscreen.both` — the app's own fullscreen covers the display.
 - With `set_fullscreen_policy("monitor")`, pressing F11 in a browser takes the
   display and leaving fullscreen puts the window back in the layout.
 - An always-on-top utility does **not** show through a fullscreen window, and in
@@ -287,35 +366,66 @@ The three modes are distinct and each key is its own toggle:
 - `require` a module placed beside `init.lua`: it resolves.
 - A submap with a numeric or unknown key errors loudly rather than silently
   ignoring that binding.
+
+### The action API
+
+`make test` already loads both shipped configs and every README example against
+a mock of the API, so a name that does not exist cannot reach a release. What
+needs a real machine is what happens when one does anyway, and whether the
+labels come out right.
+
+- **A config written for the old API fails usefully.** Put
+  `mshell.set_gaps(6, 6)` in `init.lua` and save. The config is rejected, the
+  previous one keeps running, and the notification and log say
+  `mshell.set_gaps was removed — use mshell.layout.gaps`.
+- Same for an action named as a string: `mshell.keys.bind({mod}, "h", "focus_left")`
+  says `actions are functions now — write mshell.window.focus.left`.
+- Binding an action that needs an argument without one —
+  `mshell.keys.bind({mod}, "3", mshell.desktop.focus)` — says so and names the
+  function form to use instead.
+- Binding something that is not an action — `mshell.keys.bind({mod}, "q", mshell.window)`
+  — is refused rather than silently doing nothing.
+- **Which-key labels.** Enter a submap built from bare actions (`Win` `w`): each
+  key is labelled with its dotted path (`window.close`, `layout.tiling`). Enter
+  the `go` map (`Win` `g`): every key shows the desktop name, which comes from
+  the `desc` its closure carries. No key shows `?`; a function binding with no
+  `desc` shows `lua`.
+- **Both vocabularies over the control channel.** `mshell.exe --msg close` and
+  `--msg window.close` both close the focused window; `--msg "desktop.focus web"`
+  and `--msg "switch_desktop web"` both switch.
+- **A count still repeats the right things.** `3` then `Win+j` moves the focus
+  three windows; `3` then `Win+Shift+q` quits once, not three times.
+
+### Editor types
+
+- After `install.bat`, `%APPDATA%\mshell\meta\mshell.lua`,
+  `meta\types.lua` and `.luarc.json` are all present.
+- Open `%APPDATA%\mshell` in an editor with lua-language-server: typing
+  `mshell.win` completes to `mshell.window`, hovering `mshell.window.close`
+  shows its documentation, and `mshell.window.nope` is underlined.
+- A reinstall refreshes `meta\`, but does **not** overwrite a `.luarc.json`
+  you have edited.
 - Press `Win+Space` once and wait a second: the new layout **stays**. Then hold
   it so autorepeat cycles through every layout, and release: the layout you
-  released on stays. (Regression: the session write that follows every layout
-  change tripped the directory watcher, and the self-triggered reload re-applied
-  the startup session snapshot — the layout visibly flipped, then snapped back
-  ~250 ms later. The log must NOT show `config: file changed on disk` after a
-  `Win+Space`; it must show it after actually saving `init.lua`.)
+  released on stays. The log must NOT show `config: file changed on disk` after a
+  `Win+Space`; it must show it after actually saving `init.lua`.
 
 ## The start desktop (`default`)
 
-- With no rule claiming `default`, a first run (no `session.txt` beside
-  `init.lua`) lands on `"1"`.
-- `mshell.desktop_rule("term", { default = true })`, delete `session.txt`,
-  restart: you land on `term`. The startup log line reads
-  `starting on desktop 'term'`.
-- Now switch to another desktop, restart mshell: you come back to that desktop,
-  **not** `term` — `default = true` decides a first run only, and the session
-  remembers where you were.
-- Change it to `default = "always"` and repeat: every restart lands on `term`
-  no matter where you were. Switch back to `default = true` and restart once
-  more: you are returned to wherever you actually were, since the session was
-  being written the whole time.
+- With no rule claiming `default`, a run lands on `"1"`.
+- `mshell.desktop.rule("term", { default = true })`, restart: you land on `term`.
+  The startup log line reads `starting on desktop 'term'`.
+- Now switch to another desktop and restart mshell: you land on `term` again.
+  `default` decides every start, not just the first.
 - Two rules claiming `default` (`"web"` then `"term"`): the **last** one wins.
 - These fail the config load with a message that names the problem, and the
   previous config keeps running:
-  - `mshell.desktop_rule("game-*", { default = true })` — a pattern, not a name.
-  - `mshell.desktop_rule("term", { default = "sometimes" })` — unknown policy.
-  - `mshell.set_start_desktop("term")` — removed; the error names the rule to
-    write instead.
+  - `mshell.desktop.rule("game-*", { default = true })` — a pattern, not a name.
+  - `mshell.desktop.rule("term", { default = "always" })` — a string; the
+    message says `default` is true or false now and names the removed session
+    file. Same for `"remember"` and any other string.
+  - `mshell.set_start_desktop("term")` — removed; the error names
+    `mshell.desktop.rule` as the replacement.
 - Editing `default` and saving reloads the config without moving you: it decides
   where you *start*, and takes effect at the next launch.
 
@@ -329,10 +439,10 @@ The three modes are distinct and each key is its own toggle:
   mshell.exe` and restart — still appended. This is the case that used to lose
   exactly the evidence a crash was worth having.
 - At the default level there is no per-keystroke tracing. Add `--verbose`, or
-  `mshell.set_log_level("debug")` and reload, and it appears without a restart.
-- `mshell.set_log_level("nonsense")` is a config error naming the valid levels,
+  `mshell.log.level("debug")` and reload, and it appears without a restart.
+- `mshell.log.level("nonsense")` is a config error naming the valid levels,
   and — being atomic — leaves the previous config running.
-- `mshell.set_verbose(true)` still behaves as it always did.
+- `mshell.log.verbose(true)` still behaves as it always did.
 - **Rotation**: run at `"debug"` until the file passes 5 MB (holding a key with
   a bound repeat gets there), then confirm `mshell.log.1` appears and
   `mshell.log` restarts small. Past two rotations, `mshell.log.2` exists and
@@ -342,28 +452,28 @@ The three modes are distinct and each key is its own toggle:
 
 ## New actions
 
-- **always-on-top**: `toggle_always_on_top` on a floating window keeps it over
+- **always-on-top**: `window.on_top.toggle` on a floating window keeps it over
   the tiled grid; toggling off demotes it. A window that was already topmost on
   its own account is never demoted.
-- **last_window**: focus A, focus B, `last_window` -> A, again -> B. After
+- **last window**: focus A, focus B, `window.focus.last` -> A, again -> B. After
   closing A it goes to the next most recent instead, not to a dead window.
 - **floating move/resize**: `move_*` moves a floating window and still swaps a
   tiled one; `resize_*` changes a floating window's size and is a no-op on a
   tiled one.
-- **session**: `lock` locks. Test `logoff`/`reboot`/`shutdown`/`sleep` only if
+- **session**: `system.lock` locks. Test `system.logoff`/`system.reboot`/`system.shutdown`/`system.sleep` only if
   you mean it — they do exactly what they say.
-- **media**: `volume_up`/`volume_down`/`volume_mute` move the volume and show
-  Windows' own indicator. `media_play` controls a playing track.
-- **screenshot**: `screenshot` writes a PNG to `Pictures\Screenshots` and puts
+- **media**: `media.volume.up`/`media.volume.down`/`media.volume.mute` move the volume and show
+  Windows' own indicator. `media.play` controls a playing track.
+- **screenshot**: `screenshot.screen` writes a PNG to `Pictures\Screenshots` and puts
   the image on the clipboard (paste it somewhere to confirm).
-  `screenshot_window` captures only the focused window, at the same bounds the
+  `screenshot.window` captures only the focused window, at the same bounds the
   focus ring hugs. A layered/translucent window is captured, not a hole.
 - **counts**: in the leader map, `3j` focuses down three times. `3q` quits ONCE
   (counts do not repeat non-motion actions). In the `go` map, `1` still switches
   to desktop 1 rather than starting a count.
-- **spawn cwd**: bind `{"spawn", {"cmd.exe", nil, "C:\\Windows"}}` and confirm
+- **spawn cwd**: bind `{"exec", {"cmd.exe", nil, "C:\\Windows"}}` and confirm
   the shell opens there.
-- **setenv**: `mshell.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
+- **setenv**: `mshell.exec.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
   %FOO%`.
 
 ## Submap routes for those actions
@@ -378,7 +488,7 @@ below asks for two keys held at once, and any sequence can be abandoned with
 - **media** (`u`, persisting): `u` then `k`/`j` moves the volume with Windows'
   own indicator; `m` mutes; `Space` plays/pauses; `h`/`l` change track; `s`
   stops. Still in the map afterwards — `Esc` leaves. `u` then `10k` is ten
-  volume steps (counts apply; `volume_up`/`down` are on the repeat allowlist).
+  volume steps (counts apply; `media.volume.up`/`down` are on the repeat allowlist).
 - **system** (`x`, one-shot): `x` then `r` reloads, `q` quits, `x` panics (see
   "Panic and safe mode"), `i` raises a notification naming the current desktop,
   layout, window count and focused process. `i` is a function binding, so it is
@@ -395,7 +505,7 @@ below asks for two keys held at once, and any sequence can be abandoned with
   tabbed/stacked container, `n`/`p` cycle its children, `=`/`-` resize it. The
   hint panel labels those last two "grow split" / "shrink split".
 - **folded into existing maps**: `w Tab` = last window, `w o` = always on top,
-  `d u` = jump to urgent (needs `mshell.set_urgency(true)` uncommented, or
+  `d u` = jump to urgent (needs `mshell.appearance.urgency(true)` uncommented, or
   nothing is ever urgent), `o p` = the built-in launcher. Confirm the launcher
   takes your typing immediately — the `launch` map is one-shot, so it has
   already dropped to root by the time the search box is up.
@@ -436,7 +546,7 @@ below asks for two keys held at once, and any sequence can be abandoned with
   screen, so no ring — expected. Minimising the second window is the same as
   closing it as far as the ring is concerned.
 - With `set_urgency(true)`, make a background app flash for attention (a chat
-  mention works): its ring turns the urgent colour and `jump_urgent` goes to it,
+  mention works): its ring turns the urgent colour and `window.urgent.jump` goes to it,
   switching desktops if needed. Focusing it clears the flag. With urgency off
   (the default), no STATECHANGE hook is installed — check the log.
 - `rule({ title = "Picture-in-Picture" }, "float")` floats only that window of a
@@ -472,31 +582,31 @@ below asks for two keys held at once, and any sequence can be abandoned with
 
 ## Manual tiling (BSP) and containers
 
-- `layout_bsp`, then open three terminals: each splits the one that was focused,
-  in the direction `split_h` / `split_v` last named.
-- `rotate_split` flips the split holding the focused window.
-- `split_grow` / `split_shrink` resize that split, and grow means grow from
+- `layout.bsp`, then open three terminals: each splits the one that was focused,
+  in the direction `layout.split.h` / `layout.split.v` last named.
+- `layout.split.rotate` flips the split holding the focused window.
+- `layout.split.grow` / `layout.split.shrink` resize that split, and grow means grow from
   either side of it.
-- `toggle_tabbed` on a split shows one window at a time; `container_next` swaps
+- `layout.container.tabbed` on a split shows one window at a time; `layout.container.next` swaps
   which, and focus follows the tab.
-- Pressing `toggle_tabbed` again on the same split returns it to a plain split.
+- Pressing `layout.container.tabbed` again on the same split returns it to a plain split.
 - Close a window inside a container: its sibling takes the space, no gap left.
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
 - `Win+Space` cycles the seven dynamic layouts and never lands in bsp; from bsp
-  it cycles OUT, to tiling. `layout_bsp` (`b b`) is the only way in.
+  it cycles OUT, to tiling. `layout.bsp` (`b b`) is the only way in.
 
 With **two monitors**, the desktop spanning both:
 
-- `layout_bsp`, windows on both displays: each display holds **its own** splits.
+- `layout.bsp`, windows on both displays: each display holds **its own** splits.
   A window is placed once, on the display it lives on — nothing is placed twice
   per pass, and neither screen's windows appear stacked on the other's.
 - Build a different structure per display (say tabbed on one, a three-way split
   on the other); both survive a switch to `tiling` and back.
-- `rotate_split`, `split_grow` and `toggle_tabbed` act on the **focused
+- `layout.split.rotate`, `layout.split.grow` and `layout.container.tabbed` act on the **focused
   window's** display and leave the other one alone.
-- Drag or `move_to_monitor_next` a window across: it leaves one tree and splits
+- Drag or `window.move.to_monitor.next` a window across: it leaves one tree and splits
   the focused leaf of the other. Nothing is left behind on the display it left.
 - Unplug the second display with bsp windows on it: they land on the primary and
   join its tree. Plug it back in — they return.
@@ -535,7 +645,19 @@ and whether it is still readable.
 
 ## Launcher
 
-- `launcher` opens it; type "fire" and Firefox is selected.
+Handing off to mrun, when it is installed (its own checklist lives in that
+repo):
+
+- With `mrun.exe` beside `mshell.exe`, `launcher.open` opens **mrun**, not the box
+  below.
+- With `mrun.exe` only on `PATH`, it still opens mrun.
+- With `mrun.exe` neither beside mshell nor on `PATH`, it falls back to the
+  built-in box below and nothing errors.
+- mshell does not tile mrun's window, ring it, or count it as a window.
+
+The built-in box:
+
+- `launcher.open` opens it; type "fire" and Firefox is selected.
 - Up/Down move the selection, Return runs it, Escape closes.
 - Backspace edits the query; the list refilters.
 - A query matching nothing ("notepad" if unindexed, or a path) is run as typed.
@@ -588,15 +710,16 @@ those, not four terminals.
   primary. Plug it back in — they RETURN. This is the case an index cannot
   survive.
 
-## Display settings (resolution, refresh, HDR)
+## Display settings (resolution, refresh, rotation, HDR, arrangement)
 
 Needs real hardware — a panel that offers more than one refresh rate for the
 first half, an HDR-capable one for the second. Everything here changes the
 physical display, so run it on a machine you can still reach a keyboard on.
 
 - `mshell.exe --displays` lists each attached display: device name, current
-  mode, HDR state, the monitor's own name, and the modes it accepts. Runs with
-  mshell **not** running at all, and while it is your shell.
+  mode, position, orientation, HDR state, the monitor's own name, and the modes
+  it accepts. Runs with mshell **not** running at all, and while it is your
+  shell.
 - Take a `WIDTHxHEIGHT@HZ` straight out of that listing, put it in
   `monitor_rule("*DISPLAY1", { resolution = "...", refresh = ... })`, save.
   The display changes on reload; the tiling reflows to the new size; the bar
@@ -617,16 +740,57 @@ physical display, so run it on a machine you can still reach a keyboard on.
   visibly shifts). On a display that cannot do HDR, the log says so once and
   nothing else happens. Unlike the mode, this one persists — it is a Windows
   setting.
-- Bind `toggle_hdr` and press it: HDR flips on the display you are LOOKING at,
+- Bind `display.hdr.toggle` and press it: HDR flips on the display you are LOOKING at,
   with a notification saying which way. Press it on a monitor that cannot do
   HDR: a warning toast, no change.
-- Bind `cycle_refresh` with `1` and `-1`: steps through that display's rates at
+- Bind `display.refresh.cycle` with `1` and `-1`: steps through that display's rates at
   the current resolution and wraps, with the new rate in a toast. The
   RESOLUTION must not change. On a 60Hz-only panel: a warning toast instead.
-- `mshell.exe --query` and `mshell.get_monitors()` both report `device`,
-  `refresh` and `hdr` per monitor; `hdr` is `null`/`nil` (not `false`) on a
-  display that cannot do it. Change the rate outside mshell and query again —
-  the new value is reported, not a cached one.
+- `rotation = "portrait"` on a secondary: the desktop turns a quarter clockwise,
+  the monitor's bounds become tall, tiling reflows into the new shape and the
+  bar re-measures. `--displays` says `portrait`. Remove the rule and reload —
+  it goes back.
+- **Rotation and resolution together.** With `resolution = "2560x1440"` AND
+  `rotation = "portrait"` on the same display you get a 1440x2560 desktop, and
+  the log line says `2560x1440 ... portrait`. The resolution is the panel's
+  unrotated size and stays written that way; asking for `"1440x2560"` here is
+  what should be REFUSED, since the panel has no such mode.
+- Bind `display.portrait.toggle`: the focused display stands on its end, press again and
+  it lies back down. Do it from 270° too — one press returns to landscape, not
+  three.
+- Bind `display.rotation.cycle` with `1` and `-1`: four quarter turns, clockwise and
+  back, wrapping through 0/90/180/270 with each one named in a toast. Rotate a
+  monitor you are NOT focused on: nothing happens to it.
+- With a display left in portrait, `--displays` still lists its modes as the
+  panel's unrotated `WIDTHxHEIGHT` (2560x1440, not 1440x2560), and
+  `display.refresh.cycle` still works there — the rates are found against the same
+  unrotated mode.
+- **Arrangement.** Needs two displays. `position = {0, 0}` on the right-hand one
+  and `{-3840, 0}` on the left swaps which side they are on: the mouse crosses
+  the other way, tiling follows, and `--displays` reports the new `+x+y`. Reload
+  again with the same rule — nothing happens the second time, no flicker, since
+  the arrangement already matches.
+- `primary = true` on the secondary makes it primary: `--displays` moves the
+  `(primary)` marker, that display's position becomes `+0+0` and the other one
+  goes negative WITHOUT any position rule naming it. This is the case worth
+  reading twice — one rule moves both displays, because the primary must be at
+  the origin.
+- Write positions from a corner other than the origin — `{1000, 1000}` and
+  `{4840, 1000}` — and the pair lands relative to each other with the primary
+  back at `+0+0`. The absolute numbers are not honoured, only the offsets.
+- **It persists**, unlike a mode. With an arrangement rule in force, quit mshell
+  and reboot to Explorer: the displays are still arranged the way the rule said,
+  and Windows' display settings agree. This is the documented exception —
+  compare with the resolution test above, which comes back the way Windows had
+  it.
+- **Rollback.** Ask for something Windows refuses (a `position` far off in space
+  on a machine where that fails). The log says the arrangement was not changed
+  and the desktop is exactly as it was — in particular, log out and back in and
+  it is STILL as it was, which is what the rollback is for.
+- `mshell.exe --query` and `mshell.monitor.list()` both report `device`,
+  `refresh`, `rotation` and `hdr` per monitor; `hdr` is `null`/`nil` (not
+  `false`) on a display that cannot do it. Change the rate or the orientation
+  outside mshell and query again — the new value is reported, not a cached one.
 
 ## Tweaks
 
@@ -644,11 +808,11 @@ These are Windows' settings rather than mshell's, so the whole point of the
 tests is what is left behind. Note what Settings › Bluetooth & devices › Mouse
 says **before** you start — the checks below are all against that.
 
-- `mshell.set_mouse{ speed = 4 }` and save. The pointer slows down immediately,
+- `mshell.mouse.setup{ speed = 4 }` and save. The pointer slows down immediately,
   and the Settings slider shows 4 if you open it.
 - Delete that line and save again. The pointer goes back to the speed you
   started with — *not* to Windows' middle notch, and not to 4.
-- `mshell.set_mouse{ speed = 4, accel = false }`, save, then delete only the
+- `mshell.mouse.setup{ speed = 4, accel = false }`, save, then delete only the
   `accel` line and save. Acceleration comes back on; the speed stays at 4.
   (Per-field ownership: giving one back must not give the others back.)
 - With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer returns to
@@ -681,7 +845,7 @@ Open one tiled window and one floating one (`Win+f`), overlapping.
 - Two overlapping floats: focusing the lower one raises it, and focusing a tiled
   window afterwards leaves the two floats in that same order instead of
   swapping them.
-- `toggle_always_on_top` on one of two floats keeps it over the other one.
+- `window.on_top.toggle` on one of two floats keeps it over the other one.
 - The float is in the *topmost band*, so nothing has to re-assert it: activate a
   window mshell does not manage (a UAC-elevated console, an installer, an
   Explorer dialog) and the float still sits over it. An app that raises itself a
@@ -693,7 +857,7 @@ Open one tiled window and one floating one (`Win+f`), overlapping.
   fullscreen and the float is gone until you leave fullscreen.
 - With `dim_enabled`, focusing a float dims the wallpaper and the other windows
   but never the bar.
-- `mshell.set_float_on_top(false)` and reload: the old behaviour is back — the
+- `mshell.window.float_on_top(false)` and reload: the old behaviour is back — the
   float sinks behind whatever you focus. Un-floating with `Win+f` takes the
   window back out of the band immediately, without waiting for a re-tile.
 - A float minimized and restored is still on top; one moved to another desktop
@@ -724,7 +888,7 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 - Switch to an **empty** desktop, then type. The keystrokes go nowhere — *not*
   into the window you just left. (Cloaking, unlike hiding, does not disturb the
   foreground, so this is handled deliberately.)
-- Send the last window off the current desktop with `move_to_desktop`, then
+- Send the last window off the current desktop with `window.move.to_desktop`, then
   type. Same check.
 - Monocle: with three windows, cycle focus repeatedly. Each one is fully drawn
   when it comes up. Then switch to another desktop and back — the same single
@@ -740,7 +904,7 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 - Kill `mshell.exe` from Task Manager with windows on three desktops (shell mode
   — Winlogon restarts it). The restarted mshell uncloaks what the dead one left
   behind; the log says `uncloaked N window(s)`.
-- `mshell.set_hide_policy("hide")`, save, then switch desktops. Desktops still
+- `mshell.window.policy.hide("hide")`, save, then switch desktops. Desktops still
   work. Windows may flicker and a GPU-heavy app may briefly blank — that is the
   mechanism, and it is why `"cloak"` is the default.
 - Still on `"hide"`, with two windows on one desktop: `Win+Space` into monocle,
@@ -750,14 +914,53 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
   delivered late and mistaken for a minimise-to-tray — and the window it names
   never returns, on any layout or desktop.
 
-## The `update` action
+## The backdrop and settings broadcasts
+
+The bug this guards against is an intermittent **half-second black screen**
+while a borderless-fullscreen app is running. The backdrop is black by default,
+so the first thing to do is make it not black: `mshell.appearance.background(0xFF00FF)`
+in `init.lua`. A magenta flash is mshell's backdrop; a black one is the display
+itself and nothing here will fix it.
+
+Run with `mshell.log.level("debug")` — the lines below are all at debug
+level.
+
+- Start a borderless-fullscreen game, leave it in the foreground for ten
+  minutes with a second app that raises itself (Remote Desktop, a chat client
+  with notifications). No flash, magenta or black. Before the fix this happened
+  every minute or two.
+- Change a Windows setting that has nothing to do with the layout — the colour
+  theme, a power plan, an environment variable. The log says
+  `settings: ignoring WM_SETTINGCHANGE`, and no window moves.
+- Save `init.lua` with `mshell.mouse.setup{ speed = 4 }` in it. Pointer speed
+  changes; the log shows the ignore line marked `(our own broadcast)`, and the
+  layout does not churn. Setting the pointer back gives the same.
+- Press a focus binding at something that will refuse it — an elevated window
+  with no `mshelld.exe` running. The log shows `focus -> ... FAILED` and, right
+  after it, an ignored broadcast of our own. Nothing re-tiles.
+- Plug in or unplug a second display. Everything still re-measures and re-tiles:
+  the work-area change is one of the two settings still acted on, and the
+  display change itself arrives separately.
+- Change Windows' text size / non-client metrics. Tiled geometry updates — the
+  other setting still acted on.
+- Switch desktops with a game running, then come back. The sunk windows are
+  still off the screen and the backdrop is still at the bottom; nothing of the
+  desktop you left is visible.
+- With windows on two or three other desktops, force the virtual screen to
+  change while you watch the one you are on: plug a display in or out, apply a
+  `monitor_rule` with a different `resolution` or `rotation`, or change a
+  display's scale. Nothing from the other desktops appears, not even for a
+  frame. Before the fix every one of them flashed on and off again, because
+  re-placing the backdrop bottomed it and lifted them all with it.
+
+## The `config.update` action
 
 `make test` covers the version comparison and the release-JSON reading
 (`test_update_parse`). What it cannot cover is the network, the unpack, and the
 hand-off to `install.bat` — after which mshell restarts itself, so the
 shell-mode rows below need a real install rather than `--test`.
 
-Bind it if your config has not: `mshell.bind({mod, shft}, "u", "update")`.
+Bind it if your config has not: `mshell.keys.bind({mod, shft}, "u", "config.update")`.
 
 | # | Test | Expected |
 |---|------|----------|
@@ -803,3 +1006,14 @@ These cannot be tested with `--test` and need a real install. Have Task Manager
 - `uninstall.bat`, sign out and in: Explorer returns, and the foreground-lock
   timeout is back to its previous value.
 - Run a fullscreen game: keybinds keep responding while it has focus.
+
+## Restarting over a live session
+
+The case a crash or a `taskkill` leaves behind, and the one a rebuild during
+development hits several times an hour. Needs a real install.
+
+| # | Test | Expected |
+|---|------|----------|
+| 1 | Tile windows across two or three desktops, then kill mshell from Task Manager (never `Win+Shift+Q` — that runs the shutdown path this is about). Let Winlogon restart it. | Every window is managed again: switch desktops and each one hides and shows with the desktop it is on. Before, a stripped window failed the adoption test and stayed on screen over every desktop — visible on any desktop whose own windows did not cover it. |
+| 2 | Same again, then read `%LOCALAPPDATA%\mshell\mshell.log`. | `startup: handed back the frame of N window(s) a previous mshell stripped and did not live to restore`, with N the number that had been tiled. Their title bars are briefly back before the rules strip them again. |
+| 3 | Switch to a desktop that has nothing on it. | The backdrop, and nothing else. |
