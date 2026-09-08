@@ -177,6 +177,20 @@ REM  refreshed: it is reference material, not your config, so there is nothing
 REM  in it to preserve and an out-of-date copy would document the wrong release.
 copy /Y "%~dp0config\init.full.lua" "%CFGDIR%\init.full.lua" >nul 2>&1
 
+REM  --- editor types: %APPDATA%\mshell\meta ---
+REM  The definitions an LSP reads to complete and check mshell.* while you edit
+REM  init.lua. Generated from the same table the binary dispatches through, so
+REM  they always describe THIS release; always refreshed, for the same reason
+REM  init.full.lua is. .luarc.json points lua-language-server at them, and is
+REM  only written when you have none, since it is a file you may have edited.
+if not exist "%CFGDIR%\meta" mkdir "%CFGDIR%\meta"
+copy /Y "%~dp0meta\mshell.lua" "%CFGDIR%\meta\mshell.lua" >nul 2>&1
+copy /Y "%~dp0meta\types.lua"  "%CFGDIR%\meta\types.lua"  >nul 2>&1
+if not exist "%CFGDIR%\.luarc.json" (
+    copy /Y "%~dp0config\.luarc.json" "%CFGDIR%\.luarc.json" >nul 2>&1
+    echo  Editor type definitions installed to %CFGDIR%\meta
+)
+
 echo  Pointing the %SCOPE% shell at %DEST%\mshell.exe ...
 reg add "%HIVE%\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" ^
     /v Shell /t REG_SZ /d "%DEST%\mshell.exe --shell" /f >nul || goto :fail
