@@ -14,6 +14,8 @@
 
 #include "mshell.h"
 
+#include <errno.h>
+
 /* ===========================================================================
  * Apply built-in appearance / policy defaults (before Lua repopulates them)
  * =========================================================================== */
@@ -437,15 +439,27 @@ static void config_set_package_path(lua_State *L, const wchar_t *config_path) {
 
 static int load_config_bytes(lua_State *L, const wchar_t *wpath) {
     FILE *f = _wfopen(wpath, L"rb");
-    if (!f) return LUA_ERRFILE;
+    if (!f) {
+        lua_pushfstring(L, "cannot open init.lua: %s", strerror(errno));
+        return LUA_ERRFILE;
+    }
 
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return LUA_ERRFILE; }
-    long sz = ftell(f);
-    if (sz < 0) { fclose(f); return LUA_ERRFILE; }
+    long sz = -1;
+    if (fseek(f, 0, SEEK_END) == 0) sz = ftell(f);
+    if (sz < 0) {
+        int e = errno;
+        fclose(f);
+        lua_pushfstring(L, "cannot read init.lua: %s", strerror(e));
+        return LUA_ERRFILE;
+    }
     rewind(f);
 
     char *buf = (char *)malloc((size_t)sz + 1);
-    if (!buf) { fclose(f); return LUA_ERRMEM; }
+    if (!buf) {
+        fclose(f);
+        lua_pushliteral(L, "out of memory reading init.lua");
+        return LUA_ERRMEM;
+    }
 
     size_t rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
