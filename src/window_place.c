@@ -1,6 +1,28 @@
 #include "mshell.h"
 #include "window_internal.h"
+#include "snap.h"
 #include "layout_math.h"
+
+#define SNAP_WINDOW_MS 1000
+#define SNAP_MAX_TRIES 3
+
+SnapVerdict snap_backoff(ManagedWindow *mw) {
+    ULONGLONG now = GetTickCount64();
+
+    if (now - mw->snap_first_at > SNAP_WINDOW_MS) {
+        mw->snap_first_at = now;
+        mw->snap_tries    = 0;
+    }
+
+    if (++mw->snap_tries <= SNAP_MAX_TRIES) return SNAP_KEEP_TRYING;
+
+    return (mw->snap_tries == SNAP_MAX_TRIES + 1) ? SNAP_GIVE_UP_LOUDLY
+                                                  : SNAP_GIVE_UP_QUIETLY;
+}
+
+void snap_backoff_reset(ManagedWindow *mw) {
+    mw->snap_tries = 0;
+}
 
 bool window_frame_rect(HWND hwnd, RECT *out) {
     if (!hwnd || !out) return false;
@@ -406,13 +428,9 @@ void window_float_moved(ManagedWindow *mw) {
         return;
     }
 
-    ULONGLONG now = GetTickCount64();
-    if (now - mw->snap_first_at > 1000) {
-        mw->snap_first_at = now;
-        mw->snap_tries    = 0;
-    }
-    if (++mw->snap_tries > 3) {
-        if (mw->snap_tries == 4)
+    SnapVerdict verdict = snap_backoff(mw);
+    if (verdict != SNAP_KEEP_TRYING) {
+        if (verdict == SNAP_GIVE_UP_LOUDLY)
             log_msg(LOG_WARN, L"%p keeps putting itself on monitor %d when its "
                               L"desktop is on %d — leaving it there rather "
                               L"than fighting it.", (void *)mw->hwnd, at, home);
