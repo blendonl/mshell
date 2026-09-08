@@ -16,6 +16,34 @@
 
 #define UPDATE_ASSET_SUFFIX  "-win64.zip"
 
+#define UPDATE_DIGEST_PREFIX  "sha256:"
+
+static bool fmt_w(wchar_t *out, size_t cap, const wchar_t *fmt, ...) {
+    if (!out || cap == 0) return false;
+
+    va_list ap;
+    va_start(ap, fmt);
+    int n = _vsnwprintf(out, cap, fmt, ap);
+    va_end(ap);
+
+    out[cap - 1] = L'\0';
+    return n >= 0 && (size_t)n < cap;
+}
+
+static bool asset_name_is_safe(const wchar_t *name) {
+    if (!name || !name[0]) return false;
+    if (wcsstr(name, L"..")) return false;
+
+    for (const wchar_t *p = name; *p; p++) {
+        bool plain = (*p >= L'a' && *p <= L'z') ||
+                     (*p >= L'A' && *p <= L'Z') ||
+                     (*p >= L'0' && *p <= L'9') ||
+                     *p == L'.' || *p == L'-' || *p == L'_' || *p == L'+';
+        if (!plain) return false;
+    }
+    return true;
+}
+
 static BYTE *http_get(const wchar_t *url, DWORD *out_len,
                       DWORD max_bytes, DWORD recv_timeout_ms) {
     HINTERNET ses = NULL, con = NULL, req = NULL;
@@ -35,9 +63,17 @@ static BYTE *http_get(const wchar_t *url, DWORD *out_len,
         return NULL;
     }
 
+    if (uc.nScheme != INTERNET_SCHEME_HTTPS) {
+        log_err(L"update: refusing %ls — updates are only fetched over https",
+                url);
+        return NULL;
+    }
+
     wchar_t target[4096];
-    _snwprintf(target, ARRAYSIZE(target) - 1, L"%ls%ls", path, extra);
-    target[ARRAYSIZE(target) - 1] = L'\0';
+    if (!fmt_w(target, ARRAYSIZE(target), L"%ls%ls", path, extra)) {
+        log_err(L"update: URL path is too long: %ls", url);
+        return NULL;
+    }
 
     ses = WinHttpOpen(L"mshell/" MSHELL_VERSION_W,
                       WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -51,8 +87,7 @@ static BYTE *http_get(const wchar_t *url, DWORD *out_len,
 
     req = WinHttpOpenRequest(con, L"GET", target, NULL,
                              WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                             uc.nScheme == INTERNET_SCHEME_HTTPS
-                                 ? WINHTTP_FLAG_SECURE : 0);
+                             WINHTTP_FLAG_SECURE);
     if (!req) goto out;
 
     if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
@@ -217,8 +252,11 @@ static volatile LONG s_update_running = 0;
 static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
                      DWORD timeout_ms, DWORD *exit_code) {
     wchar_t buf[2048];
-    _snwprintf(buf, ARRAYSIZE(buf) - 1, L"%ls", cmdline);
-    buf[ARRAYSIZE(buf) - 1] = L'\0';
+    if (!fmt_w(buf, ARRAYSIZE(buf), L"%ls", cmdline)) {
+        log_err(L"update: command line does not fit in %d characters",
+                (int)ARRAYSIZE(buf));
+        return false;
+    }
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -245,12 +283,11 @@ static bool prepare_workdir(wchar_t *out, size_t cap) {
     DWORD n = GetTempPathW(MAX_PATH, tmp);
     if (!n || n >= MAX_PATH) return false;
 
-    _snwprintf(out, cap - 1, L"%lsmshell-update", tmp);
-    out[cap - 1] = L'\0';
+    if (!fmt_w(out, cap, L"%lsmshell-update", tmp)) return false;
 
     wchar_t cmd[MAX_PATH + 64];
-    _snwprintf(cmd, ARRAYSIZE(cmd) - 1, L"cmd.exe /c rd /s /q \"%ls\"", out);
-    cmd[ARRAYSIZE(cmd) - 1] = L'\0';
+    if (!fmt_w(cmd, ARRAYSIZE(cmd), L"cmd.exe /c rd /s /q \"%ls\"", out))
+        return false;
     run_wait(cmd, NULL, 15000, NULL);
 
     return CreateDirectoryW(out, NULL) ||
@@ -284,10 +321,10 @@ static bool running_as_installed_shell(void) {
         if (type == REG_EXPAND_SZ) {
             if (!ExpandEnvironmentStringsW(shell, path, ARRAYSIZE(path)))
                 continue;
-        } else {
-            _snwprintf(path, ARRAYSIZE(path) - 1, L"%ls", shell);
+            path[ARRAYSIZE(path) - 1] = L'\0';
+        } else if (!fmt_w(path, ARRAYSIZE(path), L"%ls", shell)) {
+            continue;
         }
-        path[ARRAYSIZE(path) - 1] = L'\0';
 
         wchar_t *p = path, *endq;
         if (*p == L'"' && (endq = wcschr(p + 1, L'"')) != NULL) {
@@ -303,16 +340,14 @@ static bool running_as_installed_shell(void) {
     return false;
 }
 
-static void install_log_path(wchar_t *out, size_t cap) {
+static bool install_log_path(wchar_t *out, size_t cap) {
     wchar_t dir[MAX_PATH];
     DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH);
     if (!n || n >= MAX_PATH) {
-        if (!GetTempPathW(MAX_PATH, dir)) { out[0] = L'\0'; return; }
-        _snwprintf(out, cap - 1, L"%lsmshell-install.log", dir);
-    } else {
-        _snwprintf(out, cap - 1, L"%ls\\mshell\\install.log", dir);
+        if (!GetTempPathW(MAX_PATH, dir)) return false;
+        return fmt_w(out, cap, L"%lsmshell-install.log", dir);
     }
-    out[cap - 1] = L'\0';
+    return fmt_w(out, cap, L"%ls\\mshell\\install.log", dir);
 }
 
 static bool winlogon_restarts_the_shell(void) {
@@ -337,8 +372,7 @@ void update_clear_staged_image(void) {
     if (!n || n >= MAX_PATH - 5) return;
 
     wchar_t old[MAX_PATH + 8];
-    _snwprintf(old, ARRAYSIZE(old) - 1, L"%ls.old", self);
-    old[ARRAYSIZE(old) - 1] = L'\0';
+    if (!fmt_w(old, ARRAYSIZE(old), L"%ls.old", self)) return;
 
     if (GetFileAttributesW(old) == INVALID_FILE_ATTRIBUTES) return;
     if (DeleteFileW(old))
@@ -398,8 +432,37 @@ static DWORD WINAPI install_thread(LPVOID param) {
     }
 
     wchar_t url[1024], asset[256];
-    MultiByteToWideChar(CP_UTF8, 0, url_u8,  -1, url,   ARRAYSIZE(url));
-    MultiByteToWideChar(CP_UTF8, 0, name_u8, -1, asset, ARRAYSIZE(asset));
+    if (!MultiByteToWideChar(CP_UTF8, 0, url_u8,  -1, url,   ARRAYSIZE(url)) ||
+        !MultiByteToWideChar(CP_UTF8, 0, name_u8, -1, asset, ARRAYSIZE(asset))) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"Release %ls names its asset or download URL in a way "
+                      L"mshell cannot read.", latest);
+        goto out;
+    }
+
+    if (!asset_name_is_safe(asset)) {
+        update_notify(NOTIFY_ERROR, 20000,
+                      L"Release %ls calls its asset '%ls', which is not a plain "
+                      L"file name. Nothing was downloaded.", latest, asset);
+        goto out;
+    }
+
+    if (!digest_u8[0]) {
+        update_notify(NOTIFY_ERROR, 20000,
+                      L"Release %ls publishes no checksum for %ls. mshell will "
+                      L"not install a download it cannot verify.",
+                      latest, asset);
+        goto out;
+    }
+
+    if (_strnicmp(digest_u8, UPDATE_DIGEST_PREFIX,
+                  sizeof(UPDATE_DIGEST_PREFIX) - 1) != 0) {
+        update_notify(NOTIFY_ERROR, 20000,
+                      L"Release %ls publishes its checksum as '%hs', which is "
+                      L"not sha256. mshell will not install a download it "
+                      L"cannot verify.", latest, digest_u8);
+        goto out;
+    }
 
     update_notify(NOTIFY_INFO, 8000,
                   L"Downloading mshell %ls …", latest);
@@ -412,31 +475,21 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    if (digest_u8[0]) {
-        const char *want = digest_u8;
-        if (_strnicmp(want, "sha256:", 7) == 0) {
-            want += 7;
+    const char *want = digest_u8 + sizeof(UPDATE_DIGEST_PREFIX) - 1;
+    char        got[65];
 
-            char got[65];
-            if (!sha256_hex(zip, zip_len, got)) {
-                update_notify(NOTIFY_ERROR, 12000,
-                              L"Could not hash the download to verify it.");
-                goto out;
-            }
-            if (_stricmp(got, want) != 0) {
-                update_notify(NOTIFY_ERROR, 20000,
-                              L"The download does not match the hash GitHub "
-                              L"published. Nothing was installed.");
-                goto out;
-            }
-            log_msg(LOG_INFO, L"update: sha256 verified (%hs)", got);
-        } else {
-            log_msg(LOG_INFO, L"update: unknown digest algorithm '%hs', "
-                              L"skipping verification", digest_u8);
-        }
-    } else {
-        log_msg(LOG_INFO, L"update: release %ls published no digest", latest);
+    if (!sha256_hex(zip, zip_len, got)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"Could not hash the download to verify it.");
+        goto out;
     }
+    if (_stricmp(got, want) != 0) {
+        update_notify(NOTIFY_ERROR, 20000,
+                      L"The download does not match the hash GitHub published. "
+                      L"Nothing was installed.");
+        goto out;
+    }
+    log_msg(LOG_INFO, L"update: sha256 verified (%hs)", got);
 
     wchar_t dir[MAX_PATH];
     if (!prepare_workdir(dir, ARRAYSIZE(dir))) {
@@ -446,8 +499,11 @@ static DWORD WINAPI install_thread(LPVOID param) {
     }
 
     wchar_t zip_path[MAX_PATH];
-    _snwprintf(zip_path, ARRAYSIZE(zip_path) - 1, L"%ls\\%ls", dir, asset);
-    zip_path[ARRAYSIZE(zip_path) - 1] = L'\0';
+    if (!fmt_w(zip_path, ARRAYSIZE(zip_path), L"%ls\\%ls", dir, asset)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"The path for %ls is too long to write.", asset);
+        goto out;
+    }
 
     HANDLE f = CreateFileW(zip_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
@@ -468,17 +524,19 @@ static DWORD WINAPI install_thread(LPVOID param) {
 
     wchar_t cmd[MAX_PATH * 3];
     DWORD   rc = 1;
-    _snwprintf(cmd, ARRAYSIZE(cmd) - 1,
-               L"tar.exe -xf \"%ls\" -C \"%ls\"", zip_path, dir);
-    cmd[ARRAYSIZE(cmd) - 1] = L'\0';
+    if (!fmt_w(cmd, ARRAYSIZE(cmd),
+               L"tar.exe -xf \"%ls\" -C \"%ls\"", zip_path, dir)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"The command to unpack %ls is too long to run.", asset);
+        goto out;
+    }
     if (!run_wait(cmd, dir, 120000, &rc) || rc != 0) {
-        _snwprintf(cmd, ARRAYSIZE(cmd) - 1,
+        rc = 1;
+        if (!fmt_w(cmd, ARRAYSIZE(cmd),
                    L"powershell.exe -NoProfile -NonInteractive -Command "
                    L"\"Expand-Archive -LiteralPath '%ls' -DestinationPath "
-                   L"'%ls' -Force\"", zip_path, dir);
-        cmd[ARRAYSIZE(cmd) - 1] = L'\0';
-        rc = 1;
-        if (!run_wait(cmd, dir, 180000, &rc) || rc != 0) {
+                   L"'%ls' -Force\"", zip_path, dir) ||
+            !run_wait(cmd, dir, 180000, &rc) || rc != 0) {
             update_notify(NOTIFY_ERROR, 12000,
                           L"Could not unpack %ls.", asset);
             goto out;
@@ -486,13 +544,20 @@ static DWORD WINAPI install_thread(LPVOID param) {
     }
 
     wchar_t root[MAX_PATH], bat[MAX_PATH];
-    _snwprintf(root, ARRAYSIZE(root) - 1, L"%ls\\%ls", dir, asset);
-    root[ARRAYSIZE(root) - 1] = L'\0';
+    if (!fmt_w(root, ARRAYSIZE(root), L"%ls\\%ls", dir, asset)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"The path unpacked from %ls is too long to use.", asset);
+        goto out;
+    }
     size_t rl = wcslen(root);
     if (rl > 4 && _wcsicmp(root + rl - 4, L".zip") == 0) root[rl - 4] = L'\0';
 
-    _snwprintf(bat, ARRAYSIZE(bat) - 1, L"%ls\\install.bat", root);
-    bat[ARRAYSIZE(bat) - 1] = L'\0';
+    if (!fmt_w(bat, ARRAYSIZE(bat), L"%ls\\install.bat", root)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"The path to install.bat in %ls is too long to use.",
+                      asset);
+        goto out;
+    }
 
     if (GetFileAttributesW(bat) == INVALID_FILE_ATTRIBUTES) {
         update_notify(NOTIFY_ERROR, 15000,
@@ -511,12 +576,19 @@ static DWORD WINAPI install_thread(LPVOID param) {
     update_notify(NOTIFY_INFO, 15000, L"Installing mshell %ls …", latest);
 
     wchar_t ilog[MAX_PATH];
-    install_log_path(ilog, ARRAYSIZE(ilog));
+    if (!install_log_path(ilog, ARRAYSIZE(ilog))) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"Could not work out where to write the install log.");
+        goto out;
+    }
 
     wchar_t run[MAX_PATH * 3];
-    _snwprintf(run, ARRAYSIZE(run) - 1,
-               L"cmd.exe /c \"\"%ls\" /norestart >\"%ls\" 2>&1\"", bat, ilog);
-    run[ARRAYSIZE(run) - 1] = L'\0';
+    if (!fmt_w(run, ARRAYSIZE(run),
+               L"cmd.exe /c \"\"%ls\" /norestart >\"%ls\" 2>&1\"", bat, ilog)) {
+        update_notify(NOTIFY_ERROR, 12000,
+                      L"The command to run install.bat is too long.");
+        goto out;
+    }
 
     DWORD irc = 1;
     if (!run_wait(run, root, 300000, &irc)) {
