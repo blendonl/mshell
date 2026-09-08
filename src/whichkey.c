@@ -242,7 +242,7 @@ void whichkey_notify(void) {
     if (!g.cfg.whichkey_enabled) { whichkey_hide(); return; }
 
     kb_lock();
-    KeyMap *m = (g.current_map && g.current_map != g.root_map)
+    KeyMap *m = (g.current_map && g.current_map != g.active_keymaps->root)
                 ? g.current_map : NULL;
     kb_unlock();
 
@@ -257,7 +257,7 @@ static LRESULT CALLBACK wk_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == WK_TIMER_ID) {
             KillTimer(hwnd, WK_TIMER_ID);
             kb_lock();
-            KeyMap *m = (g.current_map && g.current_map != g.root_map)
+            KeyMap *m = (g.current_map && g.current_map != g.active_keymaps->root)
                         ? g.current_map : NULL;
             kb_unlock();
             if (m) whichkey_show(m); else whichkey_hide();

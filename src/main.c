@@ -628,8 +628,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             snprintf(msg, sizeof msg,
                      "ok: %s\n  %d root bindings, %d keymaps, %d window rules, "
                      "%d desktop rules, %d startup programs",
-                     path_u8, g.root_map ? g.root_map->count : 0,
-                     g.cfg.keymap_count, g.cfg.rule_count, g.cfg.desktop_rule_count,
+                     path_u8, g.cfg.keymaps->root ? g.cfg.keymaps->root->count : 0,
+                     g.cfg.keymaps->count, g.cfg.rule_count, g.cfg.desktop_rule_count,
                      g.cfg.startup_count);
             console_print(msg);
             return 0;
@@ -672,9 +672,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
         log_w(L"SetPriorityClass(ABOVE_NORMAL) failed: %lu", GetLastError());
 
-    config_apply_defaults(&g.cfg);
-    g.current_map  = NULL;
-    g.root_map     = NULL;
+    config_reset();
 
     if (!SystemParametersInfoW(SPI_GETFOREGROUNDLOCKTIMEOUT, 0,
                                &g_prev_fg_lock_timeout, 0))
@@ -736,7 +734,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     log_err(L"config loaded: %d root bindings, %d keymaps, %d desktop rules, "
             L"%d startup programs — starting on desktop '%ls'",
-            g.root_map ? g.root_map->count : -1, g.cfg.keymap_count,
+            g.active_keymaps->root ? g.active_keymaps->root->count : -1,
+            g.active_keymaps->count,
             g.cfg.desktop_rule_count, g.cfg.startup_count, desktop_current()->name);
 
     helper_init();
