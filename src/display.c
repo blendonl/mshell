@@ -1,5 +1,6 @@
 /* ===========================================================================
- * display.c — the physical display itself: resolution, refresh rate, HDR.
+ * display.c — the physical display itself: resolution, refresh rate, rotation,
+ * HDR, and where the displays sit relative to each other.
  *
  * Everything else in mshell arranges windows INSIDE a monitor and takes the
  * monitor's mode as given. This file is the one place that changes the mode.
@@ -41,9 +42,14 @@
  * every start, so persistence would buy nothing it does not already have; and
  * booting WITHOUT mshell — the recovery path INSTALL.md walks you through —
  * should hand you back the display Windows was configured with, not the one a
- * config file that is no longer running asked for. HDR is the exception and
- * cannot be otherwise: the advanced-colour state IS a persistent system
- * setting, and there is no transient form of it.
+ * config file that is no longer running asked for. Rotation goes the same way.
+ *
+ * TWO THINGS CANNOT. HDR's advanced-colour state IS a persistent system
+ * setting and has no transient form. Neither has the arrangement — which
+ * display is primary, and where each one sits: batching the displays into one
+ * change needs CDS_NORESET, which only means anything alongside
+ * CDS_UPDATEREGISTRY, and CDS_SET_PRIMARY has no dynamic form at all. Both are
+ * therefore stored, and both say so in the docs.
  * =========================================================================== */
 #include "mshell.h"
 
@@ -460,6 +466,104 @@ bool display_set_mode(const wchar_t *device, const DisplayMode *want,
     return true;
 }
 
+static int primary_at_origin(const POINTL *pos, int n) {
+    for (int i = 0; i < n; i++)
+        if (pos[i].x == 0 && pos[i].y == 0) return i;
+    return -1;
+}
+
+static bool arrangement_submit(const POINTL *pos, int primary, int n) {
+    for (int i = 0; i < n; i++) {
+        DEVMODEW dm = { .dmSize = sizeof dm };
+        if (!EnumDisplaySettingsExW(g.monitors[i].device, ENUM_CURRENT_SETTINGS,
+                                    &dm, 0))
+            return false;
+
+        dm.dmFields   = DM_POSITION;
+        dm.dmPosition = pos[i];
+
+        DWORD flags = CDS_UPDATEREGISTRY | CDS_NORESET;
+        if (i == primary) flags |= CDS_SET_PRIMARY;
+
+        LONG rc = ChangeDisplaySettingsExW(g.monitors[i].device, &dm, NULL,
+                                           flags, NULL);
+        if (rc != DISP_CHANGE_SUCCESSFUL) {
+            log_err(L"display: %ls will not sit at %+ld%+ld (%ld)",
+                    g.monitors[i].device, (long)pos[i].x, (long)pos[i].y,
+                    (long)rc);
+            return false;
+        }
+    }
+    return true;
+}
+
+static void arrangement_apply(void) {
+    int n = g.monitor_count;
+    if (n <= 0 || n > MAX_MONITORS) return;
+
+    POINTL now[MAX_MONITORS], want[MAX_MONITORS];
+    for (int i = 0; i < n; i++) {
+        if (!g.monitors[i].device[0]) return;
+        DEVMODEW dm = { .dmSize = sizeof dm };
+        if (!EnumDisplaySettingsExW(g.monitors[i].device, ENUM_CURRENT_SETTINGS,
+                                    &dm, 0))
+            return;
+        now[i] = want[i] = dm.dmPosition;
+    }
+
+    int  primary = primary_at_origin(now, n);
+    bool any     = false;
+
+    for (int i = 0; i < n; i++) {
+        for (int r = 0; r < g.monitor_rule_count; r++) {
+            const MonitorRule *mr = &g.monitor_rules[r];
+            bool hit = (mr->device[0])
+                           ? wildcard_match(mr->device, g.monitors[i].device)
+                           : (mr->index == i);
+            if (!hit) continue;
+
+            if (mr->set_position) {
+                want[i].x = mr->pos_x;
+                want[i].y = mr->pos_y;
+                any = true;
+            }
+            if (mr->set_primary && mr->primary) { primary = i; any = true; }
+        }
+    }
+    if (!any || primary < 0) return;
+
+    LONG dx = want[primary].x, dy = want[primary].y;
+    for (int i = 0; i < n; i++) { want[i].x -= dx; want[i].y -= dy; }
+
+    bool changed = false;
+    for (int i = 0; i < n; i++)
+        if (want[i].x != now[i].x || want[i].y != now[i].y) changed = true;
+    if (!changed) return;
+
+    if (!arrangement_submit(want, primary, n)) {
+        int  back     = primary_at_origin(now, n);
+        bool restored = back >= 0 && arrangement_submit(now, back, n);
+        if (restored) ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+        log_err(restored
+                    ? L"display: the arrangement was not changed"
+                    : L"display: the arrangement was not changed and could not "
+                      L"be rolled back in full — check Windows' display "
+                      L"settings");
+        return;
+    }
+
+    LONG rc = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+    if (rc != DISP_CHANGE_SUCCESSFUL) {
+        log_err(L"display: applying the arrangement failed (%ld)", (long)rc);
+        return;
+    }
+
+    for (int i = 0; i < n; i++)
+        log_w(L"display: %ls -> %+ld%+ld%ls", g.monitors[i].device,
+              (long)want[i].x, (long)want[i].y,
+              i == primary ? L" (primary)" : L"");
+}
+
 /* ===========================================================================
  * Applying the config's monitor rules
  *
@@ -492,10 +596,13 @@ static void mark_applied(const wchar_t *device) {
 void displays_apply_rules(bool force) {
     if (force) s_applied_count = 0;
 
+    bool fresh = false;
+
     for (int i = 0; i < g.monitor_count; i++) {
         const Monitor *m = &g.monitors[i];
         if (!m->device[0]) continue;              /* the synthesized fallback */
         if (!force && already_applied(m->device)) continue;
+        fresh = true;
 
         /* Layered exactly like the tiling overrides: every matching rule
          * applies, in declaration order, each overwriting only what it names. */
@@ -531,6 +638,8 @@ void displays_apply_rules(bool force) {
         if (set_hdr)
             display_hdr_set(m->device, hdr);
     }
+
+    if (force || fresh) arrangement_apply();
 }
 
 /* ===========================================================================
