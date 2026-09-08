@@ -31,6 +31,15 @@ jobs:
       - name: Host-side unit tests
         run: make test
 
+      # The editor type definitions are generated from src/api_spec.c, which is
+      # also what the binary dispatches through. Regenerating and diffing is
+      # what stops the committed copy describing an API the release no longer
+      # has — the drift this whole surface exists to prevent.
+      - name: Editor types are up to date
+        run: |
+          make meta
+          git diff --exit-code meta/
+
       # -Werror here rather than in the Makefile: a warning should fail CI
       # without making a local build unusable while you are mid-edit.
       - name: Build (warnings are errors)
