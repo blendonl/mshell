@@ -31,6 +31,8 @@ Thumbs.db
 /test/test_whichkey_math
 /test/test_update_parse
 /test/test_desktop_list
+/test/test_api_spec
+/test/lua
 /tools/gen_lua_meta
 /mshelld.exe
 
