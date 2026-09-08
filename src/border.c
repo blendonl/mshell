@@ -39,7 +39,8 @@ void border_hide(void) {
 }
 
 static int monitor_visible_count(int mon) {
-    Desktop *dt = desktop_current();
+    Desktop *dt = desktop_by_id(desktop_on_monitor(mon));
+    if (!dt) dt = desktop_current();
     if (!dt) return 0;
 
     int n = 0;
