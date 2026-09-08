@@ -5,6 +5,845 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Added
+
+- **Rotate a display — landscape, portrait, either one flipped.** A
+  `monitor_rule` takes a `rotation`, as a name (`"landscape"`, `"portrait"`,
+  `"landscape_flipped"`, `"portrait_flipped"`) or as degrees clockwise
+  (`0`/`90`/`180`/`270`), alongside the `resolution`, `refresh` and `hdr` it
+  already took. Two bindable actions go with it: `toggle_portrait` stands the
+  focused display on its end and puts it back, and `cycle_rotation` steps
+  through all four quarter turns (`1` clockwise, `-1` back, wrapping). Both
+  name the new orientation in a notification.
+
+  `resolution` still means the panel's own UNROTATED size, and so do the modes
+  `--displays` prints — Windows states a rotated panel the other way round, as
+  the swapped desktop size, and following it would have made a rule stop being
+  true the moment the screen was turned. So `resolution = "2560x1440"` with
+  `rotation = "portrait"` gives a 1440x2560 desktop and stays the right rule in
+  either orientation; the two fields are set in one mode change rather than two,
+  so the screen blanks once. A rotation goes through the same `CDS_TEST`
+  validation and the same session-only path as a mode: nothing is written to
+  Windows' stored display configuration, so booting without mshell gives the
+  display back the way Windows has it.
+
+  `--displays` now prints each display's orientation, and `--query` and
+  `mshell.get_monitors()` report `rotation` per monitor.
+
+- **Which display is primary, and where each one sits.** A `monitor_rule` takes
+  `primary = true` and `position = {x, y}`, so the arrangement you would
+  otherwise drag out in Settings is stated once and restated after a hotplug
+  shuffles it. `--displays` prints each display's position in the same `+x+y`
+  form the rule is written in.
+
+  Positions are RELATIVE. Windows keeps the primary at (0,0) and states every
+  other display from there, so mshell resolves the positions a config gives and
+  then slides the whole arrangement until the primary lands on the origin —
+  which is why making the right-hand monitor primary moves both of them, and why
+  the coordinates can be written from whichever corner is easiest to think in.
+  `CDS_TEST` bears the model out: moving the current primary off the origin on
+  its own is refused, and the same move as part of a whole arrangement is not.
+
+  This is the first thing here that is applied as one operation on the whole
+  desktop rather than per display, and the second that PERSISTS. Batching the
+  displays needs `CDS_NORESET`, which only means anything alongside
+  `CDS_UPDATEREGISTRY`, and `CDS_SET_PRIMARY` has no transient form at all — so
+  unlike a mode or a rotation, an arrangement is written to Windows' stored
+  display configuration, exactly as `hdr` already was. Nothing is submitted
+  unless the arrangement asked for differs from the one in force, so a satisfied
+  rule costs nothing on reload; and a batch that is refused part-way is rolled
+  back and re-applied, since the calls before it have already written the
+  registry and abandoning them would leave an arrangement that appears at the
+  next logon and never on screen.
+
+- **Move a desktop to a monitor at runtime** — `desktop_to_monitor`, and
+  `mshell.desktop_to_monitor([name, ] monitor)` from Lua. Which display a
+  desktop lived on was decided once, by `desktop_rule`, at config-load time:
+  `desktop_rule` refuses to run from a binding or a callback, and there was no
+  action for it, so the one thing you could not do with a pin was change it
+  without editing a file. The action takes a 0-based index and moves the desktop
+  you are on; `--msg "desktop_to_monitor chat 1"` names one you are not standing
+  on, which is the case a script wants. `-1` drops the pin and the rules decide
+  again.
+
+  A pin set this way outranks the rule and is kept alongside it rather than
+  written over it, which is what lets it survive the two things that re-resolve
+  a desktop: a config reload, and an unplug (the display going away lapses the
+  pin for as long as it is gone, and replugging restores it). It lasts as long
+  as mshell does — a restart goes back to what `desktop_rule` says.
+
+### Changed
+
+- **BREAKING: the config names actions as functions, not strings.** Every
+  binding used to name its action with a string — `"focus_left"`, and
+  `"switch_desktop"` with the desktop in a fourth argument. There were 96 of
+  those names in one flat list, and 45 more `mshell.set_*` functions beside
+  them. Nothing could complete them, nothing could check them, and a typo was
+  discovered when the config loaded rather than when it was written.
+
+  They are values now, grouped by what they act on:
+
+  ```lua
+  mshell.keys.bind({mod}, "h", mshell.window.focus.left)
+  mshell.keys.bind({mod}, "3",
+      function() mshell.desktop.focus("3") end, { desc = "3" })
+  mshell.keys.bind({mod}, "x", "extra")            -- a string enters a submap
+  ```
+
+  Anything an action has to be TOLD — a desktop, a command — goes inside a
+  function, which is where an argument can live. A function has no name for the
+  which-key panel to label the key with, so those bindings take a `desc`; both
+  shipped configs now pass one everywhere it matters, and a binding with no
+  label shows `lua` instead of `?`.
+
+  The old names are gone rather than aliased, but reading one says what
+  replaced it — `mshell.set_gaps was removed — use mshell.layout.gaps` — and a
+  config that fails still leaves the previous one running, so an upgrade cannot
+  strand you. The full mapping is at the end of this entry.
+
+- **The API is one table, and everything is generated from it.** The
+  vocabulary used to be written out in four places that had to be kept in
+  agreement by hand: the action-name table, a second switch listing which of
+  those a repeat count applies to, the `luaL_Reg` table registering the Lua
+  functions, and a sentence in the README. `src/api_spec.c` is now the only
+  list. The Lua bindings, the `--msg` verbs, the which-key labels, the repeat
+  filter and the editor type definitions are all derived from it, and
+  `make test` fails if an action in the enum has no row.
+
+  It deliberately depends on nothing but the C library, which is what lets the
+  host compiler build it — the same reason `desktop_list.c` sits outside
+  `mshell.h`.
+
+- **`--msg` speaks both vocabularies.** `mshell.exe --msg close` still works,
+  and `--msg window.close` now works too, because both resolve through the same
+  table. Scripts written against the old names keep running.
+
+### Added
+
+- **Editor support: completion, signatures and diagnostics over the whole
+  API.** mshell ships `meta/mshell.lua`, generated from `src/api_spec.c` by
+  `tools/gen_lua_meta.c`, plus a hand-written `meta/types.lua` describing the
+  option tables. `install.bat` puts both in `%APPDATA%\mshell\meta` with a
+  `.luarc.json` pointing [lua-language-server][luals] at them, so opening the
+  config folder in an editor gives completion over `mshell.*`, documentation on
+  hover, and a warning on anything mshell does not have.
+
+  Because they are generated from the table the binary dispatches through, they
+  describe exactly the release you have installed. `make meta` regenerates
+  them, and CI fails if the committed copy has drifted.
+
+- **Windows are objects you can act on.** `mshell.window.get()` and the new
+  `mshell.window.list(filter)` hand back windows rather than descriptions of
+  them, and the window events do too. Every window verb takes the window to act
+  on as an optional first argument, falling back to the focused one:
+
+  ```lua
+  for _, w in ipairs(mshell.window.list({ process = "firefox.exe" })) do
+      w:move({ desktop = "web" })
+  end
+  ```
+
+  Fields are read off the live window, so they are never stale, and every verb
+  goes through the same dispatcher a keypress does — which is what keeps the
+  tiling pass and the session bookkeeping from being skipped.
+
+- **New queries and verbs**: `mshell.window.list`, `mshell.desktop.get`,
+  `mshell.desktop.windows`, `mshell.monitor.current`, `mshell.monitor.focus`,
+  `mshell.layout.get`, `mshell.display.modes`, `mshell.display.set_mode`,
+  `mshell.window.center`, `mshell.window.promote`, and `mshell.exec` — the
+  runtime twin of the config-time `mshell.exec.startup` (which was
+  `mshell.spawn`), and the first way to start a program with arguments from
+  anywhere but a keybinding.
+
+- **The configs and the README are checked.** `make test` loads
+  `config/init.lua`, `config/init.full.lua` and every Lua block in the README
+  against a mock built from `api_spec.c`. Nothing validated them before, and
+  the 1,300-line example config is exactly the kind of file that rots quietly.
+
+[luals]: https://github.com/LuaLS/lua-language-server
+
+#### Upgrading
+
+Every removed name says what replaced it when a config reads it, so the
+quickest migration is to load your config and follow the errors. The full
+mapping, for reference:
+
+<details>
+<summary>Actions (the third argument to a binding)</summary>
+
+| was | now |
+|---|---|
+| `bar_floating` | `mshell.bar.floating` |
+| `bar_top` | `mshell.bar.top` |
+| `close` | `mshell.window.close` |
+| `container_next` | `mshell.layout.container.next` |
+| `container_prev` | `mshell.layout.container.prev` |
+| `cycle_layout` | `mshell.layout.cycle` |
+| `cycle_refresh` | `mshell.display.refresh.cycle` |
+| `cycle_rotation` | `mshell.display.rotation.cycle` |
+| `dec_cfact` | `mshell.layout.cfact.shrink` |
+| `dec_master` | `mshell.layout.master.ratio.shrink` |
+| `dec_nmaster` | `mshell.layout.master.count.dec` |
+| `desktop_to_monitor` | `mshell.desktop.to_monitor` |
+| `focus_down` | `mshell.window.focus.down` |
+| `focus_left` | `mshell.window.focus.left` |
+| `focus_monitor_next` | `mshell.monitor.focus.next` |
+| `focus_monitor_prev` | `mshell.monitor.focus.prev` |
+| `focus_next` | `mshell.window.focus.next` |
+| `focus_prev` | `mshell.window.focus.prev` |
+| `focus_right` | `mshell.window.focus.right` |
+| `focus_up` | `mshell.window.focus.up` |
+| `fullscreen` | `mshell.window.fullscreen.window` |
+| `fullscreen_both` | `mshell.window.fullscreen.both` |
+| `fullscreen_content` | `mshell.window.fullscreen.content` |
+| `hibernate` | `mshell.system.hibernate` |
+| `inc_cfact` | `mshell.layout.cfact.grow` |
+| `inc_master` | `mshell.layout.master.ratio.grow` |
+| `inc_nmaster` | `mshell.layout.master.count.inc` |
+| `jump_urgent` | `mshell.window.urgent.jump` |
+| `kill` | `mshell.window.kill` |
+| `last_desktop` | `mshell.desktop.focus.last` |
+| `last_window` | `mshell.window.focus.last` |
+| `launcher` | `mshell.launcher.open` |
+| `layout_bsp` | `mshell.layout.bsp` |
+| `layout_bstack` | `mshell.layout.bstack` |
+| `layout_centered` | `mshell.layout.centered` |
+| `layout_columns` | `mshell.layout.columns` |
+| `layout_grid` | `mshell.layout.grid` |
+| `layout_monocle` | `mshell.layout.monocle` |
+| `layout_spiral` | `mshell.layout.spiral` |
+| `layout_tiling` | `mshell.layout.tiling` |
+| `lock` | `mshell.system.lock` |
+| `logoff` | `mshell.system.logoff` |
+| `mark_scratchpad` | `mshell.window.scratchpad.mark` |
+| `media_next` | `mshell.media.next` |
+| `media_play` | `mshell.media.play` |
+| `media_prev` | `mshell.media.prev` |
+| `media_stop` | `mshell.media.stop` |
+| `minimize` | `mshell.window.minimize` |
+| `move_down` | `mshell.window.move.down` |
+| `move_left` | `mshell.window.move.left` |
+| `move_right` | `mshell.window.move.right` |
+| `move_to_desktop` | `mshell.window.move.to_desktop` |
+| `move_to_monitor_next` | `mshell.window.move.to_monitor.next` |
+| `move_to_monitor_prev` | `mshell.window.move.to_monitor.prev` |
+| `move_up` | `mshell.window.move.up` |
+| `next_desktop` | `mshell.desktop.focus.next` |
+| `notify` | `mshell.notify` |
+| `panic` | `mshell.config.panic` |
+| `prev_desktop` | `mshell.desktop.focus.prev` |
+| `promote_master` | `mshell.layout.master.promote` |
+| `quit` | `mshell.config.quit` |
+| `reboot` | `mshell.system.reboot` |
+| `reload` | `mshell.config.reload` |
+| `reset_cfact` | `mshell.layout.cfact.reset` |
+| `resize_down` | `mshell.window.resize.down` |
+| `resize_left` | `mshell.window.resize.left` |
+| `resize_right` | `mshell.window.resize.right` |
+| `resize_up` | `mshell.window.resize.up` |
+| `restart_helper` | `mshell.config.restart_helper` |
+| `restore` | `mshell.window.restore` |
+| `rotate_split` | `mshell.layout.split.rotate` |
+| `screenshot` | `mshell.screenshot.screen` |
+| `screenshot_window` | `mshell.screenshot.window` |
+| `shutdown` | `mshell.system.shutdown` |
+| `sleep` | `mshell.system.sleep` |
+| `spawn` | `mshell.exec` |
+| `split_grow` | `mshell.layout.split.grow` |
+| `split_h` | `mshell.layout.split.h` |
+| `split_shrink` | `mshell.layout.split.shrink` |
+| `split_v` | `mshell.layout.split.v` |
+| `switch_desktop` | `mshell.desktop.focus` |
+| `toggle_always_on_top` | `mshell.window.on_top.toggle` |
+| `toggle_bar` | `mshell.bar.toggle` |
+| `toggle_float` | `mshell.window.float.toggle` |
+| `toggle_hdr` | `mshell.display.hdr.toggle` |
+| `toggle_portrait` | `mshell.display.portrait.toggle` |
+| `toggle_scratchpad` | `mshell.window.scratchpad.toggle` |
+| `toggle_stacked` | `mshell.layout.container.stacked` |
+| `toggle_sticky` | `mshell.window.sticky.toggle` |
+| `toggle_tabbed` | `mshell.layout.container.tabbed` |
+| `update` | `mshell.config.update` |
+| `volume_down` | `mshell.media.volume.down` |
+| `volume_mute` | `mshell.media.volume.mute` |
+| `volume_up` | `mshell.media.volume.up` |
+| `zoom` | `mshell.layout.master.zoom` |
+
+</details>
+
+<details>
+<summary>Configuration functions</summary>
+
+| was | now |
+|---|---|
+| `bind` | `mshell.keys.bind` |
+| `block_system_keys` | `mshell.keys.block_system` |
+| `desktop_rule` | `mshell.desktop.rule` |
+| `desktop_to_monitor` | `mshell.desktop.to_monitor` |
+| `get_current_desktop` | `mshell.desktop.current` |
+| `get_desktops` | `mshell.desktop.list` |
+| `get_focused_window` | `mshell.window.get` |
+| `get_monitors` | `mshell.monitor.list` |
+| `monitor_rule` | `mshell.monitor.rule` |
+| `rule` | `mshell.window.rule` |
+| `set_animation` | `mshell.appearance.animation` |
+| `set_attach` | `mshell.desktop.attach` |
+| `set_auto_reload` | `mshell.config.auto_reload` |
+| `set_background` | `mshell.appearance.background` |
+| `set_bar` | `mshell.bar.setup` |
+| `set_border` | `mshell.appearance.border` |
+| `set_dim` | `mshell.appearance.dim` |
+| `set_float_on_top` | `mshell.window.float_on_top` |
+| `set_float_placement` | `mshell.window.policy.placement` |
+| `set_float_policy` | `mshell.window.policy.float` |
+| `set_fullscreen_policy` | `mshell.window.policy.fullscreen` |
+| `set_gaps` | `mshell.layout.gaps` |
+| `set_hide_policy` | `mshell.window.policy.hide` |
+| `set_layout` | `mshell.layout.set` |
+| `set_leader` | `mshell.keys.leader` |
+| `set_log_level` | `mshell.log.level` |
+| `set_manage_owned` | `mshell.window.manage_owned` |
+| `set_master_ratio` | `mshell.layout.master.ratio` |
+| `set_min_window_size` | `mshell.window.min_size` |
+| `set_minimize_policy` | `mshell.window.policy.minimize` |
+| `set_mouse` | `mshell.mouse.setup` |
+| `set_nmaster` | `mshell.layout.master.count` |
+| `set_notify` | `mshell.notify.setup` |
+| `set_smart_borders` | `mshell.appearance.smart_borders` |
+| `set_smart_gaps` | `mshell.layout.smart_gaps` |
+| `set_start_desktop` | `mshell.desktop.rule` |
+| `set_update_check` | `mshell.config.update_check` |
+| `set_urgency` | `mshell.appearance.urgency` |
+| `set_verbose` | `mshell.log.verbose` |
+| `set_whichkey` | `mshell.whichkey.setup` |
+| `setenv` | `mshell.exec.setenv` |
+| `spawn` | `mshell.exec.startup` |
+| `submap` | `mshell.keys.submap` |
+
+</details>
+
+Three shapes changed beyond the rename:
+
+- `mshell.bind(mods, key, action, payload)` lost its payload argument.
+  Wrap the call: `function() mshell.desktop.focus("web") end`, and add
+  `{ desc = "web" }` so which-key still has a label.
+- `{"enter_submap", "name"}` is now just `"name"`, in a binding or a submap.
+- A submap entry that carried a label was `{"action", {desc = "…"}}`; it is
+  `{ mshell.path.to.action, desc = "…" }` — `desc` beside the action, not
+  nested in a table of its own.
+
+
+- **The `launcher` action prefers [mrun](https://github.com/notpc/mrun) when it
+  is installed**, falling back to the built-in box when it is not. mrun is a
+  separate application — its own binary, its own Lua config, a module system
+  where app launching is the first module and clipboard history and emoji are
+  the obvious next ones. mshell ships nothing of it and depends on nothing in
+  it; it looks for `mrun.exe` beside `mshell.exe` and then on `PATH`. An
+  existing binding needs no change to start using it, and none to keep working
+  without it.
+
+  Its window class is in the adoption ignore list, so it is never tiled.
+
+### Fixed
+
+- **A desktop moved to a monitor of a different scale arrived the wrong size.**
+  Reported against Chrome, and it is every per-monitor-DPI-aware app: after
+  `desktop_to_monitor`, or after switching to a desktop already up on the other
+  display (the swap), a browser came back covering half of a portrait screen, or
+  blown up past the edges of the other one and painted flat grey with nothing in
+  it — and stayed that way until the browser was restarted.
+
+  Moving a window to a display with a different scale factor raises
+  `WM_DPICHANGED`, and the rect Windows suggests with it is the rect we asked
+  for, *scaled by the ratio between the two DPIs*. Every Chromium window applies
+  that suggestion, so a tile computed for the new monitor came out 1.5x too big
+  going one way and a third of its size coming back. Two things then made it
+  permanent rather than self-correcting:
+
+  - An oversized window straddles both displays, and `MonitorFromWindow` answers
+    with whichever it covers more of — which can still be the one it came from.
+    A snap-back from there crosses the DPI boundary again and is scaled again,
+    so the window oscillates, hits the three-attempts-per-second cap that exists
+    to stop the shell locking up, and is left exactly where it had landed.
+  - The whole layout pass goes out as one `DeferWindowPos` batch, and the app's
+    answer to `WM_DPICHANGED` is its own `SetWindowPos`, re-entrant, in the
+    middle of `EndDeferWindowPos`.
+
+  A placement that crosses a DPI boundary is now recognised
+  (`window_placement_crosses_dpi`) and handled differently in three ways: it is
+  kept out of the deferred batch, it is never animated — a tween across the
+  boundary re-triggers the whole thing every frame — and it goes through
+  `window_place_settled`, which re-asserts the rect (with fresh frame insets,
+  which are themselves DPI-scaled) until the window's DWM frame is within 4px of
+  what the layout asked for, up to four attempts. The app's answer to the DPI
+  change arrives between two of those, which is what overwrites it. The window
+  is also placed with `SWP_NOCOPYBITS` and asked to repaint with
+  `RDW_ALLCHILDREN`, since a Chromium window's content is a child HWND and what
+  it has cached for the old scale is stale. A window that still will not settle
+  says so in the log, by handle and by the size it was refusing, instead of
+  going quiet.
+
+  If a browser window is *already* stuck grey, nothing outside the app repairs
+  it — restart it once, and apply `mshell.exe --tweaks apply apps` from an
+  administrator prompt so Chromium stops deciding for itself whether anyone can
+  see its windows (INSTALL.md).
+
+- **Chrome, Discord and every other app that draws its own frame had a grey
+  border down the left, right and bottom.** Around 10px at 150% scale, wider on
+  a more scaled display, and much wider after the window crossed between two
+  displays of different scale — at which point only closing and reopening the
+  window cleared it.
+
+  It was not a repaint and it was not the backdrop. Measured on the window
+  itself: a Chrome window filling a 3840x2160 tile had `GetWindowRect` and the
+  DWM frame both exactly on the tile, and a CLIENT area of 3820x2150 at +10,+0
+  — inset 10px left, right and bottom, 0 at the top, painted `#202020`. That is
+  Chromium's own client inset, `SM_CXSIZEFRAME + SM_CXPADDEDBORDER` at the
+  window's DPI, which it applies because a window with a resize frame has that
+  much invisible border to hide it in. mshell was stripping `WS_THICKFRAME`
+  along with the caption, so there was no invisible border left and the inset
+  became a visible band. Bigger after a cross-scale move because the inset is
+  computed per monitor DPI, and permanent because nothing re-runs it.
+
+  Stripping now keeps `WS_THICKFRAME` on a window that draws its own non-client
+  area, recognised by measurement rather than by a list of applications: a
+  window whose client area starts at the top of its window rect is claiming the
+  caption for itself, which is exactly what Chromium, Electron and every other
+  custom-frame toolkit does and what no ordinary Win32 window does. The band
+  goes back to being the invisible resize border, `window_adjust_for_frame`
+  already compensates for it so the VISIBLE frame lands on the tile, and the
+  window is edge to edge with 1px of its own border. An ordinary app is stripped
+  exactly as before — measured after the change: `chrome.exe` and `Discord.exe`
+  keep the frame and land on their tiles, `alacritty.exe` does not have one and
+  its window, frame and client rects stay identical.
+
+  `tools/probe_frame.exe <hwnd>` prints those three rects, their insets and the
+  colour runs across a window's edge, and toggles the style to A/B it live.
+
+- **A window moved across a scale boundary settled short of its tile and stayed
+  there.** The other half of the case above, and what was left of it after the
+  synchronous re-assert landed: Chrome and Discord ended up narrower than the
+  cell the layout gave them, with the backdrop showing down each side, and
+  nothing put them right until the window was closed and reopened.
+
+  `window_place_settled` writes the rect and reads it straight back, up to four
+  times. That catches an app that resizes itself *inside* the `SetWindowPos`,
+  which most do. A Chromium-class app does not: it takes the `WM_DPICHANGED`,
+  re-lays itself out on its own thread, and resizes itself when that finishes —
+  after the last of those four reads. Nothing looked again. The tiling pass was
+  over, and the drift detector answered the app's resize by snapping back in the
+  same tick, against a browser still mid-transition, until its
+  three-attempts-per-second guard gave up and left the window where it had
+  landed. Reopening the window worked because a window that opens on the display
+  it belongs to never crosses a boundary at all.
+
+  A placement that crossed a boundary now owes the window a second look. The
+  250ms janitor tick that already retries hides and re-asserts the sink order
+  (`window_verify_placement`) re-places it once the app has stopped moving —
+  by then the transition is over and it is an ordinary same-display resize, the
+  kind the same app accepts on every layout change. Bounded like every other
+  fight in the shell: four chances, then the size the app insists on is recorded
+  as the truth, so the layout stops claiming a window is somewhere it is not.
+
+  `tools/probe_dpiband.exe` measures what is actually at a window's edge — the
+  window rect, the DWM frame, the client area, both DPIs, and the colour runs
+  across the window's edge — which is what separates a window placed short of
+  its tile (the backdrop's colour) from an app insetting its own content (a
+  frame colour of the app's own).
+
+- **`--tweaks list` called a tweak applied when the write had been refused.**
+  Applying reads the existing value into `HKCU\Software\mshell\TweakBackup`
+  BEFORE writing the new one, so a revert can put back exactly what was there.
+  The listing then read that backup — and only that backup — to decide what was
+  applied. So a tweak whose write was refused, which is every tweak under
+  `HKCU\Software\Policies` run without an administrator prompt, left a backup
+  behind and was reported as applied for the rest of the install's life.
+
+  That is the `apps` group in particular: the one group whose whole purpose is
+  to be checked, because the symptom it prevents (a browser window that comes
+  back flat grey) shows up hours later and looks nothing like a missing registry
+  value. `install.bat` run unelevated skips the group, says so once, and the
+  listing then disagreed with it forever after.
+
+  Two changes. `--tweaks list` now reads the LIVE value and compares it to what
+  the tweak wants, so `applied` means the setting is in force; a tweak with a
+  backup whose value is not ours reports `failed`, with a line underneath
+  saying to re-run from an administrator prompt. And `--tweaks apply` drops a
+  backup it has just taken when the write that followed it was refused, so a
+  failed apply leaves no trace to be misread later — an earlier, genuine backup
+  is untouched.
+
+- **The focus ring drawn on the display next door.** The ring is painted just
+  OUTSIDE the window's frame, in the outer gap. With `set_gaps(0, 0)` there is
+  no outer gap to paint in, so every edge landed off the display: the top edge
+  under the bar, the right and bottom edges past the desktop's own boundary —
+  and the left edge on the monitor to the left of it, as a single line down its
+  right-hand side. The focused window had no ring at all, and the other display
+  had a stray one.
+
+  The ring is now clamped to the work area of the display the focused window is
+  on, unioned with the window's own frame so a float parked over the whole
+  monitor or straddling two displays is unaffected. An edge with no room outside
+  the window is drawn just inside it instead of off the screen, which is what
+  makes a zero-gap layout show a complete ring rather than none.
+
+- **Every hidden window flashing onto the screen for a frame.** Anything that
+  changes the virtual screen — a display plugged in, a mode or a rotation
+  applied, a DPI change, and each of the retries that follow one — re-places the
+  backdrop, and re-placing it sent it to `HWND_BOTTOM`. Hidden windows live
+  BELOW the backdrop, which is what hiding them means, so bottoming it lifted
+  every window on every desktop you are not looking at onto the screen at once;
+  `window_resink` then put them back one `SetWindowPos` at a time, each its own
+  composed frame. What you see is the whole session's windows appearing and
+  vanishing again a split second later.
+
+  The backdrop now keeps its place in the z-order (`SWP_NOZORDER`) whenever
+  anything is sunk under it, and is moved only by `window_resink`, which lowers
+  it to sit directly above the topmost sunk window — the one position that
+  covers everything hidden and nothing else. `HWND_BOTTOM` is still what it gets
+  when nothing is sunk, which is the case that flag was written for.
+
+- **A window from another desktop staring back from the one you are on.**
+  Switching to a desktop with nothing on it yet — the game desktop before the
+  game is up — showed Discord, or a terminal, or whatever else happened to be
+  top of the pile behind the backdrop. Those windows were not on that desktop.
+  They were on no desktop at all.
+
+  mshell strips `WS_CAPTION`, `WS_SYSMENU`, `WS_THICKFRAME` and the min/max
+  boxes off the windows it tiles, which leaves a style with none of the
+  `WS_OVERLAPPEDWINDOW` bits and no `WS_POPUP` — Chrome tiled by mshell reads
+  `0x16000000`. The adoption test demanded one of the two, so a window mshell
+  had already stripped failed it: a fresh mshell coming up over windows a
+  previous one had tiled refused to manage a single one of them. That is every
+  restart that does not run the shutdown path — a crash, a kill, a rebuild
+  during development — and it does not heal, because nothing looks at a window
+  a second time. A window that is not managed is on no desktop, so no desktop
+  switch ever hides it, and it stays on screen across all of them; you only
+  see it where the current desktop's own windows do not cover it, which is why
+  an empty desktop was where it showed up.
+
+  Three changes, addressing the adoption, the frame and the second chance:
+
+  - The adoption test rejects `WS_CHILD` rather than demanding
+    `WS_OVERLAPPEDWINDOW` or `WS_POPUP`. `GetAncestor(GA_ROOT)` has already
+    established the window is top-level by then, and the caption-less popup
+    heuristic still drops menus and tooltips — both of which are `WS_POPUP`.
+    Apps that draw their own frame and never had those bits are adopted now
+    too.
+  - The frame a window had is recorded ON THE WINDOW, as the
+    `mshell.orig_style` / `mshell.orig_exstyle` properties, and a startup sweep
+    (`window_recover_frames`) hands it back before anything is adopted. A
+    window a dead mshell left stripped gets its title bar back at the next
+    start instead of keeping the flat look until its app is restarted; the
+    window is then stripped again by the rules, this time with something that
+    remembers what it started as.
+  - A window that takes the foreground while unmanaged is adopted there and
+    then. `EVENT_OBJECT_CREATE` and `EVENT_OBJECT_SHOW` are both dropped while
+    a tiling pass or a desktop switch has events suppressed, and nothing swept
+    up afterwards, so a window could miss adoption without any of the above
+    happening.
+
+- **A half-second black screen, every minute or two.** mshell's handler for
+  `WM_SETTINGCHANGE` was a catch-all: any settings broadcast from anywhere in
+  the session — a power scheme, a theme, an environment variable — re-showed the
+  backdrop across the whole virtual screen and re-placed every managed window.
+  That is expensive, and next to a borderless-fullscreen game it is worse than
+  expensive: re-stacking an opaque window the size of the desktop drops DWM out
+  of independent-flip presentation, and the trip out and back is the black
+  screen.
+
+  mshell was also its own loudest broadcaster. `window_focus()` re-asserts the
+  foreground-lock timeout whenever `SetForegroundWindow` does not take, and the
+  pointer settings are re-applied on every config reload; all of them pass
+  `SPIF_SENDCHANGE`, which sends `WM_SETTINGCHANGE` to every top-level window in
+  the session, mshell's own included. A contested focus change — an app raising
+  itself off a fullscreen game, which is exactly when focus is contested — thus
+  ended in a full re-tile that mshell had asked for itself.
+
+  Three changes, each of which would have been enough on its own and none of
+  which is sufficient alone:
+
+  - The handler now acts only on the settings that actually move the layout:
+    `SPI_SETWORKAREA` and `SPI_SETNONCLIENTMETRICS`. Everything else is logged
+    at debug level and dropped. Display and DPI changes were never delivered
+    this way — they arrive as `WM_DISPLAYCHANGE` and `WM_DPICHANGED`, which are
+    handled separately and unchanged.
+  - Every `SPIF_SENDCHANGE` mshell issues now goes through `spi_set_broadcast()`,
+    which marks the broadcast as ours for its duration. The broadcast is a
+    `SendMessage`, so it is delivered to our own message window inside that
+    window, and the handler ignores it. mshell no longer re-tiles in response to
+    itself.
+  - `background_update()` re-places the backdrop only when it is actually hidden
+    or the virtual screen has changed size, and adds `SWP_SHOWWINDOW` only when
+    it is genuinely hidden. Repainting the backdrop no longer costs a
+    full-screen `SetWindowPos`, and the z-order assert that has to run either
+    way is one call that moves nothing.
+
+  Reported as an intermittent black screen while playing with a second app that
+  raises itself; the backdrop is black by default, so "mshell re-asserted the
+  backdrop" and "the screen went black" are indistinguishable by eye. Setting
+  `mshell.set_background()` to anything but black tells the two apart.
+
+- **The windows of the desktop you left no longer appear on the one you are
+  on when a game starts.** Reported against Valorant and seen with other apps
+  that take the display exclusively fullscreen. A window mshell takes off the
+  screen is *sunk* — dropped below the opaque backdrop in the z-order — so
+  anything that lowers the backdrop, or reshuffles the bottom of the z-order,
+  lifts every one of them back into view. Two things did:
+
+  - `background_update()` moves the backdrop with `HWND_BOTTOM`, which by
+    definition puts it under the windows sunk beneath it. Only the tiling pass
+    put them back, and it does not run on every path that repaints the backdrop.
+  - A display mode change reshuffles the order itself, and can refuse a z-order
+    `SetWindowPos` outright while the transition is in flight — so the assert
+    that rides on `WM_DISPLAYCHANGE` could silently do nothing, with no further
+    event due to try again. The desktop stayed on the screen until you switched
+    away and back, which re-hid it.
+
+  The assert is now its own entry point (`window_resink`), re-run right after
+  the backdrop moves, whenever an app takes the foreground, and on a short
+  leash for a few seconds after a display change so it outlasts the transition.
+  Z-order-only moves: no repaint, no `WM_SIZE`, nothing the app hears about.
+
+- **A hidden window that surfaces anyway now puts itself back, whatever lifted
+  it.** The fix above adds three more places that re-assert the sink, which is
+  three more patches on the same shape of hole: hiding fired once and hoped, and
+  nothing ever checked that the window was *still* off the screen. It is checked
+  now, four times a second, and the check is nearly free because of where sunk
+  windows live — walking UP from the bottom of the z-order meets all of them and
+  then the backdrop, so it stops after a handful of steps, and after none at all
+  when nothing is hidden. Reaching the backdrop with sunk windows unaccounted
+  for means one came back, and it goes straight back down.
+
+  This is what makes the desktop-switch bug class self-healing rather than
+  enumerated: a trigger nobody has found yet costs a quarter-second of a window
+  being visible instead of staying visible until you switch desktops and back.
+
+- **A fullscreen game could never move to the display it asked for.** A window
+  with the game preset (`float` + `fullscreen = true`) is parked over the
+  monitor recorded against it, and `EVENT_OBJECT_LOCATIONCHANGE` re-asserted
+  that *before* reading which display the window had just moved to. So a game
+  that put itself on your second monitor was hauled straight back — and the
+  handler then recorded the display it had been dragged to, which confirmed the
+  stale index and made it self-reinforcing. Valorant in Fullscreen Windowed
+  bounced between two displays in under 300 ms and settled on the wrong one,
+  every time.
+
+  The visible damage was to the pointer, not the window. A game confines the
+  cursor to its own window rect; moving that window out from under the
+  confinement leaves the pointer locked to a rectangle the game is no longer
+  drawn in, so the cursor sits outside the game's borders — on a screen the
+  game is not on, mid-round. The display is now read before the re-assert, so
+  the game's own choice is what mshell parks it over. Minimized is not a move:
+  an iconic window reports a rect at the origin, which would otherwise re-pin
+  the game to whichever display owns it.
+
+- **A window on a desktop you are not on can no longer take the keyboard.**
+  Where DWM refuses to cloak, a hidden window is sunk instead — still visible,
+  still composited, which is the entire point and also what makes it
+  activatable. An app that raises itself for its own reasons (a download
+  finishing, a media session) won the foreground from a desktop you were not
+  looking at. `window_resink` put it back at the bottom of the z-order but not
+  the focus, so the window you could see kept the screen while the one you
+  could not kept the keyboard — worst over a fullscreen game, which lost its
+  cursor confinement with it. Such a window is now bounced: it goes back under
+  the backdrop and the focus returns to the current desktop's window.
+
+- **A display change no longer leaves windows sized for the display that went
+  away.** `WM_DISPLAYCHANGE` arrives while the topology is still in flight, so
+  the work area was measured against an intermediate state and the tiling pass
+  got a single shot at it — leaving, in one case, a window still 1440x2560 on a
+  1920x1080 screen. The short leash that already re-asserts the z-order after a
+  display change now re-measures and re-tiles on the same ticks. Idempotent by
+  construction: a window already at its rect is skipped, and a window's display
+  is only re-homed when it actually changed.
+
+  Windows on *other* desktops are deliberately not covered — the tiler skips
+  sunk and stashed windows — and come right when their desktop returns and they
+  are raised again.
+
+- **The focus ring was drawn on the monitor you had just left.** With a desktop
+  up on each display, moving the focus across displays left the ring hugging the
+  window you were no longer in, over on the other monitor — most visibly with
+  mouse-follow focus, where it happened on every pointer crossing.
+
+  `current_desktop_id` is derived from the focused display, so the two have to
+  move together. `focus_monitor()` had always paired them, but `window_focus()`
+  assigned `g.focused_monitor` on its own and then called `border_refresh()` two
+  lines later — which asks `desktop_get_focused()`, which answers from the
+  desktop that is still recorded as current, i.e. the one on the display you
+  came from. The ring was placed around that window, correctly, in the wrong
+  place. `bar_refresh()` read the same stale pair for its layout and title.
+  Pairing the two where `g.focused_monitor` is actually assigned covers every
+  path that crosses a display rather than only the keybind that had remembered
+  to: mouse-follow, a closing window handing focus to a sibling, summoning the
+  scratchpad, and jumping to an urgent window.
+
+- **An app that minimised itself to the tray on a desktop you were not looking
+  at came straight back out of it.** Close Discord or Slack to the tray while
+  you are on another desktop, come back, and there it was again — on screen,
+  untrayed, as if you had clicked its icon.
+
+  `window_hide()` has four ways of taking a window off the screen, and only one
+  of them — `ShowWindow(SW_HIDE)` — clears `WS_VISIBLE`, which is the bit
+  `EVENT_OBJECT_HIDE` reports. So only that one can produce the event for a
+  window *mshell* hid; sinking, cloaking and stashing are silent. The handler
+  that decides "did we hide this, or did the app?" was still testing the single
+  mechanism that was the first choice when it was written. Since 0.14.9 made
+  sinking the first choice, essentially every hidden window is sunk — so every
+  genuine tray-hide on a background desktop was discarded as mshell's own,
+  `app_hidden` was never set, and the next switch back revealed the window
+  mshell had been asked to leave alone. The question is now asked as
+  `window_hidden_by_showwindow()`, which names all four mechanisms.
+
+- **Closing a window stole the focus to its neighbour.** With four windows on a
+  desktop and the third one focused, closing the *first* moved the focus to the
+  fourth. The desktop's window list is `memmove`d down over the window that
+  left, so everything above it slides down a slot — but `focused` is an index
+  into that list and was only ever clamped back inside the array, never
+  adjusted for the shift. It therefore came to name the window *after* the one
+  you were in, and `window_unmanage()` duly focused it. The same arithmetic ran
+  when a window was moved to another desktop and when a sticky window followed
+  you off one. `desktop_focus_clamp()` is replaced by
+  `desktop_focus_after_remove()`, which knows which index was removed; `make
+  test` covers it, including a sweep over every combination of list length,
+  focused index and removed index.
+
+- **A config reload undid every layout you had changed since mshell started —
+  and ignored the `desktop_rule` you had just edited.** Both halves were the
+  same missing link. The remembered per-desktop settings were read from
+  `session.txt` once at startup and never refreshed, while the file itself was
+  rewritten from the live desktops on every change: so the in-memory copy that
+  a reload re-applies was always a snapshot of launch time. And it was applied
+  *after* the config's rules rather than before, so it overrode them — editing
+  `desktop_rule("web", { layout = "monocle" })` and reloading did nothing at
+  all.
+
+  The remembered set is now refreshed the moment a value changes, and applied
+  between the global defaults and the rules. The precedence that falls out is
+  the one the documentation already claimed: a field no rule mentions keeps
+  whatever you last set it to, at runtime and across a restart, while a field a
+  rule *does* name is the config's to state and a reload is how you change your
+  mind about it. `mshell.set_layout(...)` is a default, not a rule;
+  `desktop_rule("*", { layout = ... })` is how a config insists.
+
+- **A display change threw windows from other desktops onto the screen.** When
+  neither sinking nor cloaking is available — a window its own app pinned
+  topmost, on a machine where DWM refuses cross-process cloaking, which is most
+  of them — mshell hides it by *stashing* it: moving it 4000 px clear of every
+  display, remembering where it came from. The hotplug path then walked every
+  floating window looking for ones stranded off-screen and hauled them back,
+  because "off every display" is exactly what a stashed window looks like. It
+  arrived on top of whatever desktop you were on, still flagged hidden, so
+  nothing put it away again — and `WM_DISPLAYCHANGE` retries that sweep six
+  times over the next three seconds. A stashed window is now recognised as
+  filed rather than stranded. A monitor pin still reaches it, by moving the
+  rect it will come back *to*; and that rect is now checked against the
+  displays that actually exist at the moment it is unstashed, so a window whose
+  monitor was unplugged while it was away comes back somewhere you can see it.
+
+- **A desktop switch cost three times the window moves it needed.** Every
+  tiling pass re-asserted the z-order of every hidden window on *every* desktop
+  — one cross-process `SetWindowPos` each, and each one a synchronous round
+  trip into another application's message loop — even though the desktop switch
+  had just put those windows exactly there. With six desktops of six windows a
+  single switch issued about ninety of those calls where thirty were the actual
+  work. The repair now runs only when the bottom of the z-order is not already
+  what it would produce; the backdrop is still pinned under everything on every
+  pass, which is one call on one of our own windows.
+
+  The pass that keeps floating windows on top had a related problem: it reads
+  the system-wide z-order, and its only bound was how many floats it could
+  *collect*, never how far it would walk. It therefore enumerated every
+  top-level window on the machine — hundreds — doing a linear lookup on each,
+  twice per desktop switch. It now knows from the desktop's own list how many
+  floats it is looking for and stops when it has them.
+
+- **One frozen application could freeze the whole shell mid-switch.** Every way
+  of taking a window off the screen sends to that window's own thread and waits
+  for it. A single application that had stopped pumping messages — on either
+  the desktop you were leaving or the one you were arriving at — therefore
+  blocked the desktop switch, and with it mshell's only message loop. Under a
+  shell with no taskbar there is nothing left to escape to. Such a window is now
+  skipped rather than waited on, and the hide or show it was owed is delivered
+  by the same quarter-second housekeeping tick that watches the backdrop, as
+  soon as its application answers again.
+
+- **Which desktop you are on is no longer written to disk during the switch
+  itself.** The session file was rewritten inline on every desktop switch —
+  `fopen`, format, `fclose` on the message loop, which under an on-access virus
+  scanner is tens of milliseconds on the most latency-sensitive thing mshell
+  does. The write is now coalesced onto a two-second timer, and flushed
+  outright on shutdown, on logoff and from the crash handler. Two seconds is
+  the whole of what that trades: the file exists because `install.bat` upgrades
+  by `taskkill /F`, and that is now the window in which such a kill can still
+  lose your last change. The orderly shutdown never wrote the session at all
+  before this — it did not have to, because every change wrote inline — so that
+  flush is new.
+
+### Changed
+
+- **The "cloak was refused" diagnostic said the wrong thing, and sent you to
+  install a helper that cannot fix it.** It read a refusal as an integrity
+  boundary `mshelld.exe` should be able to cross. It is not one:
+  `DWMWA_CLOAK` is **owner-only**, so no process cloaks another process's window
+  with it, elevated or not. The cloak Windows' own virtual desktops use is a
+  different API — `IApplicationView::SetCloak`, reached through
+  `CLSID_ImmersiveShell` — and that class is registered at runtime by
+  **explorer.exe**, which mshell replaces. Its registry key carries no
+  `LocalServer32` and no `InprocServer32`, so COM has nothing to launch and
+  `CoCreateInstance` answers `REGDB_E_CLASSNOTREG`. Measured on Windows 11
+  build 26100 by `tools/probe_shellcloak.c`, which is in the tree so the result
+  can be re-checked after a Windows update.
+
+  The upshot: cloaking is permanently unavailable to mshell by construction, and
+  sinking under the backdrop is not a fallback but the mechanism. Both the
+  window.c and helper.c messages now say so instead of pointing at INSTALL.md.
+
+### Added
+
+- **`restart_helper` — a key that makes the `mshelld.exe` on disk the one that
+  is running.** mshelld is started by a logon task and holds a singleton mutex,
+  so dropping a new binary beside the old one changes nothing until the running
+  one dies: a second copy launched over it exits immediately and leaves the OLD
+  build serving. An update already handles that inside `install.bat`
+  (`:helper_refresh`); this is the same stop/start for a binary put in place by
+  hand, and for a helper that is alive but has stopped answering.
+
+  No administrator prompt, despite the task being registered `/rl highest` — it
+  belongs to this user, so Task Scheduler starts it at its registered level on
+  mshell's behalf. It runs on its own thread (two waited-on `schtasks` calls with
+  a settle between them is seconds, and that thread answers the keyboard), drops
+  the pipe handle before the old helper dies, reconnects afterwards, and reports
+  which of those happened. Bound to `Win` `x` `h` in `init.full.lua`.
+
+- **`make probe`** builds `tools/probe_shellcloak.exe`, a console diagnostic that
+  reports whether the immersive shell (and therefore the shell cloak and the
+  native virtual-desktop API) is reachable from this process. It checks the
+  `IApplicationView` IID before calling anything on the interface, so it never
+  blind-calls a vtable slot that may have moved, and it always uncloaks what it
+  cloaked — including from a console-Ctrl handler.
+
+### Removed
+
+- **BREAKING: session persistence is gone.** mshell no longer remembers a
+  desktop's layout, master ratio, master count or monitor pin across a restart,
+  and no longer returns you to the desktop you were last on. `session.c`, the
+  2 s save timer and `%APPDATA%\mshell\session.txt` are all removed; an existing
+  `session.txt` is simply ignored and can be deleted.
+
+  Every start is now the one `init.lua` describes. A layout you change with
+  `Win+Space` still lasts as long as mshell does, and a config reload still
+  keeps it unless a `desktop_rule` names that field — what changed is only that
+  a restart no longer carries it over.
+
+  Two smaller things follow from it. A `desktop_rule`'s `default` now decides
+  **every** start rather than only a first run, so `default = "always"` and
+  `default = "remember"` no longer mean anything and are rejected with a message
+  saying so — write `default = true`. And the config watcher no longer has to
+  tell mshell's own writes apart from a config edit, because there are none:
+  every change in the config folder is a config edit again.
+
 ## 0.15.2 — 2026-08-11
 
 ### Added
