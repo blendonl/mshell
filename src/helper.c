@@ -184,11 +184,12 @@ void helper_init(void) {
     if (!helper_connect())
         log_w(L"helper: mshelld.exe is not running. Windows owned by elevated "
               L"processes will float instead of tiling and will stay on every "
-              L"desktop — and, less obviously, NO window can be cloaked: DWM "
-              L"refuses DWMWA_CLOAK on another process's window whoever owns "
-              L"it, so hiding falls back to ShowWindow(SW_HIDE) for everything "
-              L"(see window_hide). Run `install.bat /helper` from an "
-              L"administrator prompt to change both.");
+              L"desktop. Run `install.bat /helper` from an administrator "
+              L"prompt to change that. Cloaking is NOT among the things the "
+              L"helper fixes: DWMWA_CLOAK is owner-only for every process, and "
+              L"the shell cloak needs an immersive shell that only explorer.exe "
+              L"provides, so hiding sinks the window under the backdrop "
+              L"regardless (see window_hide).");
 }
 
 void helper_shutdown(void) {
@@ -297,4 +298,128 @@ bool helper_close_window(HWND hwnd) {
         .hwnd    = (uint64_t)(uintptr_t)hwnd,
     };
     return helper_exchange(&req);
+}
+
+/* ===========================================================================
+ * Restarting the helper.
+ *
+ * mshelld is started by a logon task, and it holds a singleton mutex — so
+ * dropping a new mshelld.exe next to the old one changes nothing until the
+ * running one dies. install.bat does this stop/start as part of an update
+ * (:helper_refresh); this is the same sequence for a build put in place by
+ * hand, and for a helper that is alive but no longer answering.
+ *
+ * Elevation is not needed even though the task is registered /rl highest: it
+ * belongs to this user, and Task Scheduler starts it at its registered level
+ * on our behalf. A machine where the task was never created is the one case
+ * this cannot fix, and it says so rather than looking like it worked.
+ *
+ * On its own thread: two waited-on schtasks calls plus a settle between them
+ * is seconds, and this is the thread that answers the keyboard.
+ * =========================================================================== */
+#define HELPER_TASK_NAME  L"mshelld"
+#define HELPER_SETTLE_MS  1500
+#define HELPER_SCHTASKS_TIMEOUT_MS 15000
+
+static LONG s_restart_running;
+
+static void helper_notify(NotifyKind kind, const wchar_t *fmt, ...) {
+    wchar_t msg[NOTIFY_TEXT_CAP];
+    va_list ap;
+
+    va_start(ap, fmt);
+    _vsnwprintf(msg, NOTIFY_TEXT_CAP - 1, fmt, ap);
+    va_end(ap);
+    msg[NOTIFY_TEXT_CAP - 1] = L'\0';
+
+    log_msg(kind == NOTIFY_ERROR ? LOG_ERROR : LOG_INFO, L"helper: %ls", msg);
+
+    if (g.message_window)
+        PostMessageW(g.message_window, WM_MSHELL_UPDATE,
+                     MAKEWPARAM((WORD)kind, (WORD)8000), (LPARAM)_wcsdup(msg));
+}
+
+static bool helper_schtasks(const wchar_t *verb, DWORD *exit_code) {
+    wchar_t cmd[256];
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+
+    _snwprintf(cmd, ARRAYSIZE(cmd) - 1, L"schtasks.exe /%ls /tn \"%ls\"",
+               verb, HELPER_TASK_NAME);
+    cmd[ARRAYSIZE(cmd) - 1] = L'\0';
+
+    memset(&si, 0, sizeof si);
+    memset(&pi, 0, sizeof pi);
+    si.cb          = sizeof si;
+    si.dwFlags     = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE,
+                        CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
+        return false;
+
+    bool ok = (WaitForSingleObject(pi.hProcess, HELPER_SCHTASKS_TIMEOUT_MS)
+               == WAIT_OBJECT_0);
+    if (ok && exit_code) GetExitCodeProcess(pi.hProcess, exit_code);
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return ok;
+}
+
+static DWORD WINAPI helper_restart_thread(LPVOID unused) {
+    (void)unused;
+
+    /* Our handle names a pipe the process about to die is serving. Dropped
+     * first so nothing tries to use it across the gap, and so the reconnect
+     * below is a real one. */
+    helper_disconnect();
+
+    DWORD rc = 1;
+    if (!helper_schtasks(L"end", &rc))
+        helper_notify(NOTIFY_ERROR, L"could not run schtasks to stop the "
+                                    L"helper — is the mshelld task registered? "
+                                    L"`install.bat /helper` creates it.");
+    Sleep(HELPER_SETTLE_MS);
+
+    rc = 1;
+    if (!helper_schtasks(L"run", &rc) || rc != 0) {
+        helper_notify(NOTIFY_ERROR, L"schtasks could not start the mshelld "
+                                    L"task (exit %lu). Elevated windows will "
+                                    L"float until your next sign-in.", rc);
+        InterlockedExchange(&s_restart_running, 0);
+        return 0;
+    }
+    Sleep(HELPER_SETTLE_MS);
+
+    /* g_tried is what makes the lazy init a one-shot; clearing it lets the
+     * next privileged call reconnect on its own even if the handshake here
+     * lost a race with a helper that is still starting. */
+    g_tried = false;
+    if (helper_connect())
+        helper_notify(NOTIFY_INFO, L"helper restarted — the mshelld.exe on "
+                                   L"disk is now the one running.");
+    else
+        helper_notify(NOTIFY_WARN, L"the mshelld task was started but has not "
+                                   L"answered yet. It should connect on the "
+                                   L"next window it is needed for.");
+
+    InterlockedExchange(&s_restart_running, 0);
+    return 0;
+}
+
+void helper_restart_async(void) {
+    if (InterlockedCompareExchange(&s_restart_running, 1, 0) != 0) {
+        log_msg(LOG_INFO, L"helper: a restart is already in progress");
+        return;
+    }
+
+    HANDLE t = CreateThread(NULL, 0, helper_restart_thread, NULL, 0, NULL);
+    if (!t) {
+        InterlockedExchange(&s_restart_running, 0);
+        log_err(L"helper: could not start the restart thread: %lu",
+                GetLastError());
+        return;
+    }
+    CloseHandle(t);
 }
