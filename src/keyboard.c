@@ -985,9 +985,24 @@ bool spawn_command(const wchar_t *cmd, const wchar_t *args,
 
 void execute_action(Action action, int arg, const wchar_t *command,
                     const wchar_t *args, const wchar_t *cwd) {
-    Desktop *dt  = desktop_current();
-    HWND     focus = desktop_get_focused();
-    int      fi   = dt->focused;   /* focused index in desktop array */
+    execute_action_on(action, NULL, arg, command, args, cwd);
+}
+
+void execute_action_on(Action action, HWND target, int arg,
+                       const wchar_t *command, const wchar_t *args,
+                       const wchar_t *cwd) {
+    if (target && !IsWindow(target)) target = NULL;
+
+    Desktop *dt    = NULL;
+    if (target) {
+        int id = desktop_of_window(target);
+        if (id) dt = desktop_by_id(id);
+    }
+    if (!dt) { dt = desktop_current(); }
+
+    HWND focus = target ? target : desktop_get_focused();
+    int  fi    = target ? desktop_index_of(dt, target) : dt->focused;
+    if (fi < 0) fi = dt->focused;
 
     log_w(L"execute_action: action=%d arg=%d (desktop '%ls', %d windows)",
           (int)action, arg, dt->name, dt->count);
