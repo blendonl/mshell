@@ -1,4 +1,6 @@
 #include "mshell.h"
+#include "cli.h"
+#include "msgwin.h"
 #include <wtsapi32.h>
 #include <shlobj.h>
 
@@ -200,364 +202,123 @@ void resolve_config_path(wchar_t *out, size_t out_len) {
     path_copy(out, out_len, L"config\\init.lua");
 }
 
-static BOOL CALLBACK mon_enum_proc(HMONITOR hmon, HDC dc, LPRECT rc, LPARAM lp) {
-    (void)dc; (void)rc; (void)lp;
-    if (g.monitor_count >= MAX_MONITORS) return TRUE;
 
-    MONITORINFOEXW mi = { .cbSize = sizeof(mi) };
-    if (!GetMonitorInfoW(hmon, (LPMONITORINFO)&mi)) return TRUE;
 
-    Monitor *m = &g.monitors[g.monitor_count];
-    m->handle    = hmon;
-    m->full      = mi.rcMonitor;
-    m->work_area = mi.rcWork;
-    wcsncpy(m->device, mi.szDevice, CCHDEVICENAME - 1);
-    m->device[CCHDEVICENAME - 1] = L'\0';
-    if (mi.dwFlags & MONITORINFOF_PRIMARY) g.primary_monitor = g.monitor_count;
-    g.monitor_count++;
-    return TRUE;
+static bool init_config(void) {
+    config_init();
+    return true;
 }
 
-void monitors_apply_rules(void) {
-    for (int i = 0; i < g.monitor_count; i++) {
-        Monitor *m = &g.monitors[i];
+static bool init_displays(void) {
+    displays_apply_rules(true);
+    return true;
+}
 
-        m->inner_gap    = -1;
-        m->outer_gap    = -1;
-        m->n_master     = -1;
-        m->master_ratio = -1.f;
-        m->layout       = LAYOUT_COUNT;
+static bool init_desktops(void) {
+    desktop_init();
+    return true;
+}
 
-        for (int r = 0; r < g.monitor_rule_count; r++) {
-            const MonitorRule *mr = &g.monitor_rules[r];
+static bool init_background(void) {
+    background_init();
+    return true;
+}
 
-            bool hit = (mr->device[0])
-                     ? wildcard_match(mr->device, m->device)
-                     : (mr->index == i);
-            if (!hit) continue;
+static bool init_border(void) {
+    border_init();
+    return true;
+}
 
-            if (mr->set_gaps)    { m->inner_gap = mr->inner_gap;
-                                   m->outer_gap = mr->outer_gap; }
-            if (mr->set_nmaster)   m->n_master     = mr->n_master;
-            if (mr->set_ratio)     m->master_ratio = mr->master_ratio;
-            if (mr->set_layout)    m->layout       = mr->layout;
-        }
+static bool init_whichkey(void) {
+    whichkey_init();
+    return true;
+}
+
+static bool init_notify(void) {
+    notify_init();
+    return true;
+}
+
+static bool init_launcher(void) {
+    launcher_init();
+    return true;
+}
+
+static bool init_anim(void) {
+    anim_dim_init();
+    return true;
+}
+
+static void shutdown_anim(void) {
+    anim_cancel_all();
+    anim_dim_shutdown();
+}
+
+static bool init_bar(void) {
+    bar_init();
+    update_work_area();
+    bar_reconfigure();
+    return true;
+}
+
+static bool init_helper(void) {
+    helper_init();
+    return true;
+}
+
+static bool init_ipc(void) {
+    ipc_start();
+    return true;
+}
+
+typedef struct {
+    const char *name;
+    bool (*init)(void);
+    void (*shutdown)(void);
+} Subsystem;
+
+static const Subsystem subsystems[] = {
+    { "config",     init_config,     config_shutdown     },
+    { "displays",   init_displays,   NULL                },
+    { "desktops",   init_desktops,   NULL                },
+    { "background", init_background, background_shutdown },
+    { "borders",    init_border,     border_shutdown     },
+    { "which-key",  init_whichkey,   whichkey_shutdown   },
+    { "notify",     init_notify,     notify_shutdown     },
+    { "launcher",   init_launcher,   launcher_shutdown   },
+    { "animation",  init_anim,       shutdown_anim       },
+    { "bar",        init_bar,        bar_shutdown        },
+    { "keyboard",   kb_init,         kb_shutdown         },
+    { "helper",     init_helper,     helper_shutdown     },
+    { "ipc",        init_ipc,        ipc_stop            },
+    { "events",     events_init,     events_shutdown     },
+};
+
+#define SUBSYSTEM_COUNT ((int)(sizeof subsystems / sizeof subsystems[0]))
+
+static int subsystems_init(void) {
+    for (int i = 0; i < SUBSYSTEM_COUNT; i++)
+        if (!subsystems[i].init()) return i;
+    return SUBSYSTEM_COUNT;
+}
+
+static void mshell_teardown(int started) {
+    for (int i = started - 1; i >= 0; i--)
+        if (subsystems[i].shutdown) subsystems[i].shutdown();
+
+    window_restore_all_visibility();
+    window_restore_all_decorations();
+
+    spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
+                      (PVOID)(UINT_PTR)g_prev_fg_lock_timeout);
+
+    mouse_restore_pointer();
+
+    if (g.message_window) {
+        WTSUnRegisterSessionNotification(g.message_window);
+        DestroyWindow(g.message_window);
+        g.message_window = NULL;
     }
-}
-
-void monitors_update(void) {
-    g.monitor_count   = 0;
-    g.primary_monitor = 0;
-    EnumDisplayMonitors(NULL, NULL, mon_enum_proc, 0);
-
-    if (g.monitor_count == 0) {
-        RECT wa;
-        if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0)) {
-            wa.left = 0; wa.top = 0;
-            wa.right  = GetSystemMetrics(SM_CXSCREEN);
-            wa.bottom = GetSystemMetrics(SM_CYSCREEN);
-        }
-        g.monitors[0].handle    = NULL;
-        g.monitors[0].full      = wa;
-        g.monitors[0].work_area = wa;
-        g.monitor_count = 1;
-    }
-
-    monitors_apply_rules();
-
-    if (g.focused_monitor < 0 || g.focused_monitor >= g.monitor_count)
-        g.focused_monitor = g.primary_monitor;
-
-    for (int i = 0; i < g.managed_count; i++) {
-        ManagedWindow *mw = &g.managed[i];
-
-        if (mw->monitor_device[0]) {
-            int found = -1;
-            for (int m = 0; m < g.monitor_count; m++)
-                if (_wcsicmp(g.monitors[m].device, mw->monitor_device) == 0) {
-                    found = m; break;
-                }
-            if (found >= 0) {
-                if (mw->monitor != found) {
-                    mw->monitor     = found;
-                    mw->has_applied = false;
-                }
-                continue;
-            }
-            if (mw->monitor != g.primary_monitor) {
-                mw->monitor     = g.primary_monitor;
-                mw->has_applied = false;
-            }
-            continue;
-        }
-
-        if (mw->monitor < 0 || mw->monitor >= g.monitor_count)
-            mw->monitor = g.primary_monitor;
-        wcsncpy(mw->monitor_device, g.monitors[mw->monitor].device,
-                CCHDEVICENAME - 1);
-        mw->monitor_device[CCHDEVICENAME - 1] = L'\0';
-    }
-
-    for (int i = 0; i < g.managed_count; i++)
-        if (g.managed[i].is_floating) window_rescue_offscreen(&g.managed[i]);
-}
-
-typedef HRESULT (WINAPI *GetDpiForMonitorFn)(HMONITOR, int, UINT *, UINT *);
-
-UINT monitor_dpi_of(HMONITOR handle) {
-    static GetDpiForMonitorFn fn     = NULL;
-    static bool               probed = false;
-
-    if (!probed) {
-        probed = true;
-        HMODULE shcore = LoadLibraryW(L"shcore.dll");
-        if (shcore)
-            fn = (GetDpiForMonitorFn)(void *)
-                     GetProcAddress(shcore, "GetDpiForMonitor");
-        if (!fn)
-            log_w(L"GetDpiForMonitor unavailable — assuming 96 DPI everywhere");
-    }
-
-    if (!fn || !handle) return 96;
-
-    UINT dpi_x = 96, dpi_y = 96;
-    if (FAILED(fn(handle, 0 , &dpi_x, &dpi_y)))
-        return 96;
-    return dpi_x ? dpi_x : 96;
-}
-
-UINT monitor_dpi(int mon) {
-    if (mon < 0 || mon >= g.monitor_count) return 96;
-    return monitor_dpi_of(g.monitors[mon].handle);
-}
-
-int monitor_of_window(HWND hwnd) {
-    HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    for (int i = 0; i < g.monitor_count; i++)
-        if (g.monitors[i].handle == hmon) return i;
-    return g.primary_monitor;
-}
-
-void update_work_area(void) {
-    monitors_update();
-    bar_reserve_work_area();
-    g.work_area = g.monitors[g.primary_monitor].work_area;
-}
-
-static int s_resink_left;
-
-static int s_spi_broadcast_depth;
-
-BOOL spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param) {
-    s_spi_broadcast_depth++;
-    BOOL ok = SystemParametersInfoW(action, ui_param, pv_param, SPIF_SENDCHANGE);
-    if (s_spi_broadcast_depth > 0) s_spi_broadcast_depth--;
-    return ok;
-}
-
-static bool setting_change_affects_layout(WPARAM wp, LPARAM lp) {
-    if (s_spi_broadcast_depth > 0) return false;
-
-    switch (wp) {
-    case SPI_SETWORKAREA:
-    case SPI_SETNONCLIENTMETRICS:
-        return true;
-    default:
-        break;
-    }
-
-    if (wp != 0) return false;
-
-    const wchar_t *area = (const wchar_t *)lp;
-    return area && _wcsicmp(area, L"WindowMetrics") == 0;
-}
-
-LRESULT CALLBACK MessageWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    switch (msg) {
-    case WM_MSHELL_ACTION: {
-        Action  action;
-        int     arg;
-        wchar_t cmd[MAX_PATH];
-        wchar_t args[SPAWN_ARGS_MAX];
-        wchar_t cwd[MAX_PATH];
-        int     count = 0;
-
-        if (kb_take_pending((unsigned)lp, &action, &arg,
-                            cmd, MAX_PATH, args, SPAWN_ARGS_MAX,
-                            cwd, MAX_PATH, &count)) {
-            log_w(L"hook match: vk=0x%02X mods=0x%X -> action=%d",
-                  (unsigned)(wp & 0xFFFF), (unsigned)((wp >> 16) & 0xFFFF),
-                  (int)action);
-            int reps = (count > 1 && action_is_repeatable(action)) ? count : 1;
-            for (int i = 0; i < reps; i++)
-                execute_action(action, arg, cmd[0] ? cmd : NULL,
-                               args[0] ? args : NULL,
-                               cwd[0] ? cwd : NULL);
-        }
-        return 0;
-    }
-
-    case WM_MSHELL_SUBMAP:
-        whichkey_notify();
-        return 0;
-
-    case WM_MSHELL_IPC:
-        ipc_handle_request((void *)lp);
-        return 0;
-
-    case WM_MSHELL_CONFIG_CHANGED:
-        config_on_file_changed((unsigned)wp);
-        return 0;
-
-    case WM_DISPLAYCHANGE:
-        update_work_area();
-        displays_apply_rules(false);
-        desktop_monitors_changed();
-        background_update();
-        bar_reconfigure();
-        tile_current();
-        s_resink_left = RESINK_RETRIES;
-        SetTimer(hwnd, TIMER_RESINK, RESINK_RETRY_MS, NULL);
-        return 0;
-
-    case WM_SETTINGCHANGE:
-        if (!setting_change_affects_layout(wp, lp)) {
-            const wchar_t *area = (wp == 0 && lp) ? (const wchar_t *)lp : L"";
-            log_w(L"settings: ignoring WM_SETTINGCHANGE wParam=%u area='%ls'%ls",
-                  (unsigned)wp, area,
-                  s_spi_broadcast_depth > 0 ? L" (our own broadcast)" : L"");
-            return 0;
-        }
-        update_work_area();
-        desktop_monitors_changed();
-        background_update();
-        bar_reconfigure();
-        tile_current();
-        return 0;
-
-    case WM_DPICHANGED:
-        update_work_area();
-        background_update();
-        whichkey_hide();
-        bar_reconfigure();
-        tile_current();
-        return 0;
-
-    case WM_MSHELL_UPDATE: {
-        wchar_t *msg = (wchar_t *)lp;
-        if (msg) {
-            NotifyKind kind = (NotifyKind)LOWORD(wp);
-            int        ms   = (int)HIWORD(wp);
-            notify_show(msg, kind, ms > 0 ? ms : 15000);
-            free(msg);
-        }
-        return 0;
-    }
-
-    case WM_MSHELL_RESTART:
-        log_w(L"update: handing over to the build just installed");
-        g.running = false;
-        PostQuitMessage(0);
-        return 0;
-
-    case WM_MSHELL_CAPTURE_KEY:
-        launcher_key((DWORD)wp, (wchar_t)lp);
-        return 0;
-
-    case WM_MSHELL_MOUSE:
-        mouse_mod_drag_apply((int)(LONG)wp, (int)(LONG)lp);
-        return 0;
-
-    case WM_TIMER:
-        if (wp == TIMER_FOLLOW_MOUSE) { mouse_poll_focus();  return 0; }
-        if (wp == TIMER_SINK_VERIFY) {
-            window_verify_visibility();
-            window_verify_placement();
-            window_verify_sink();
-            return 0;
-        }
-        if (wp == TIMER_ANIM)          { anim_tick();        return 0; }
-        if (wp == TIMER_RESINK) {
-            update_work_area();
-            background_update();
-            bar_reconfigure();
-            tile_current();
-            window_resink();
-            if (--s_resink_left <= 0) KillTimer(hwnd, TIMER_RESINK);
-            return 0;
-        }
-        if (wp == TIMER_CRASHLOOP_HEALTHY) {
-            KillTimer(hwnd, TIMER_CRASHLOOP_HEALTHY);
-            crashloop_mark_healthy();
-            return 0;
-        }
-        break;
-
-    case WM_WTSSESSION_CHANGE:
-        if (wp == WTS_SESSION_UNLOCK || wp == WTS_SESSION_LOGON ||
-            wp == WTS_CONSOLE_CONNECT || wp == WTS_REMOTE_CONNECT)
-            kb_reset_state();
-        return 0;
-
-    case WM_QUERYENDSESSION:
-        return TRUE;
-
-    case WM_ENDSESSION:
-        if (wp) {
-            g.running = false;
-            PostQuitMessage(0);
-        }
-        return 0;
-
-    case WM_CLOSE:
-        g.running = false;
-        PostQuitMessage(0);
-        return 0;
-    }
-
-    return DefWindowProc(hwnd, msg, wp, lp);
-}
-
-static HWND create_message_window(HINSTANCE hinst) {
-    const wchar_t *class_name = L"mshell_MessageWindow";
-
-    WNDCLASSEXW wc = {0};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = MessageWndProc;
-    wc.hInstance     = hinst;
-    wc.lpszClassName = class_name;
-    RegisterClassExW(&wc);
-
-    return CreateWindowExW(WS_EX_TOOLWINDOW, class_name, L"mshell", WS_POPUP,
-                           0, 0, 0, 0, NULL, NULL, hinst, NULL);
-}
-
-static const char *flag_value(const char *cmd, const char *flag) {
-    if (!cmd) return NULL;
-    size_t flen = strlen(flag);
-    for (const char *p = cmd; *p; ) {
-        while (*p == ' ' || *p == '\t') p++;
-        const char *start = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if ((size_t)(p - start) == flen && strncmp(start, flag, flen) == 0) {
-            while (*p == ' ' || *p == '\t') p++;
-            return *p ? p : NULL;
-        }
-    }
-    return NULL;
-}
-
-static bool has_flag(const char *cmd, const char *flag) {
-    if (!cmd) return false;
-    size_t flen = strlen(flag);
-    for (const char *p = cmd; *p; ) {
-        while (*p == ' ' || *p == '\t') p++;
-        const char *start = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if ((size_t)(p - start) == flen && strncmp(start, flag, flen) == 0)
-            return true;
-    }
-    return false;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
@@ -575,75 +336,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     kb_locks_init();
 
-    if (has_flag(lpCmdLine, "--displays")) {
-        display_list();
-        return 0;
+    {
+        int code = 0;
+        if (cli_run_subcommand(lpCmdLine, &code)) return code;
     }
 
-    if (has_flag(lpCmdLine, "--tweaks")) {
-        const char *arg = flag_value(lpCmdLine, "--tweaks");
-        wchar_t     group[64] = {0};
-        char        verb[32]  = {0};
-
-        if (arg) sscanf(arg, "%31s %63ls", verb, group);
-
-        if (!verb[0] || !strcmp(verb, "list")) {
-            tweaks_list();
-            return 0;
-        }
-        if (!strcmp(verb, "apply")) {
-            char msg[128];
-            snprintf(msg, sizeof msg, "applied %d tweaks",
-                     tweaks_apply(group[0] ? group : NULL));
-            console_print(msg);
-            return 0;
-        }
-        if (!strcmp(verb, "revert")) {
-            char msg[128];
-            snprintf(msg, sizeof msg, "reverted %d tweaks",
-                     tweaks_revert(group[0] ? group : NULL));
-            console_print(msg);
-            return 0;
-        }
-        if (!strcmp(verb, "reg") || !strcmp(verb, "reg-undo")) {
-            tweaks_emit_reg(group[0] ? group : NULL,
-                            strcmp(verb, "reg-undo") == 0);
-            return 0;
-        }
-        console_print("usage: mshell --tweaks <list|apply|revert|reg|reg-undo> "
-                      "[input|visual|quiet|apps|all]");
-        return 1;
-    }
-
-    if (has_flag(lpCmdLine, "--check")) {
-        kb_locks_init();
-        resolve_config_path(g.config_path, MAX_PATH);
-
-        char msg[1024];
-        char path_u8[MAX_PATH * 3];
-        WideCharToMultiByte(CP_UTF8, 0, g.config_path, -1, path_u8,
-                            (int)sizeof path_u8, NULL, NULL);
-
-        if (config_load(g.config_path)) {
-            snprintf(msg, sizeof msg,
-                     "ok: %s\n  %d root bindings, %d keymaps, %d window rules, "
-                     "%d desktop rules, %d startup programs",
-                     path_u8, g.root_map ? g.root_map->count : 0,
-                     g.keymap_count, g.rule_count, g.desktop_rule_count,
-                     g.startup_count);
-            console_print(msg);
-            return 0;
-        }
-        snprintf(msg, sizeof msg,
-                 "FAILED: %s\n  %s\n  Nothing in this file would take effect: "
-                 "a config error is atomic.", path_u8, g.config_error);
-        console_print(msg);
-        return 1;
-    }
-
-    g.test_mode     = has_flag(lpCmdLine, "--test") || has_flag(lpCmdLine, "-t");
-    bool shell_mode = has_flag(lpCmdLine, "--shell");
-    bool verbose    = has_flag(lpCmdLine, "--verbose") || has_flag(lpCmdLine, "-v");
+    g.test_mode     = cli_has_flag(lpCmdLine, "--test") ||
+                      cli_has_flag(lpCmdLine, "-t");
+    bool shell_mode = cli_has_flag(lpCmdLine, "--shell");
+    bool verbose    = cli_has_flag(lpCmdLine, "--verbose") ||
+                      cli_has_flag(lpCmdLine, "-v");
 
     log_init(L"mshell", verbose ? LOG_DEBUG : LOG_INFO);
     log_msg(LOG_INFO, L"=== mshell v%hs starting ===", MSHELL_VERSION);
@@ -710,6 +412,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     g.message_window = create_message_window(hInstance);
     if (!g.message_window) {
         log_w(L"FATAL: could not create message window");
+        mshell_teardown(0);
+        log_shutdown();
         return 1;
     }
 
@@ -735,38 +439,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                 L"disabled in this mode; reload with Win+Shift+R.",
                 g.config_path);
 
-    config_init();
-
-    displays_apply_rules(true);
-
-    desktop_init();
-
-    background_init();
-    border_init();
-    whichkey_init();
-    notify_init();
-    launcher_init();
-    anim_dim_init();
-    bar_init();
-    update_work_area();
-    bar_reconfigure();
-
-    if (!kb_init()) {
-        log_w(L"FATAL: kb_init failed");
+    int started = subsystems_init();
+    if (started < SUBSYSTEM_COUNT) {
+        log_w(L"FATAL: %hs failed to start", subsystems[started].name);
+        mshell_teardown(started);
+        log_shutdown();
         return 1;
     }
+
     log_err(L"config loaded: %d root bindings, %d keymaps, %d desktop rules, "
             L"%d startup programs — starting on desktop '%ls'",
             g.root_map ? g.root_map->count : -1, g.keymap_count,
             g.desktop_rule_count, g.startup_count, desktop_current()->name);
-
-    helper_init();
-    ipc_start();
-
-    if (!events_init()) {
-        log_w(L"FATAL: events_init failed");
-        return 1;
-    }
 
     events_sync_urgency();
     mouse_sync_hook();
@@ -798,34 +482,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     log_w(L"Shutting down…");
 
-    ipc_stop();
-    helper_shutdown();
-    events_shutdown();
-    kb_shutdown();
-    config_shutdown();
-
-    window_restore_all_visibility();
-
-    window_restore_all_decorations();
-
-    bar_shutdown();
-    anim_cancel_all();
-    anim_dim_shutdown();
-    launcher_shutdown();
-    notify_shutdown();
-    whichkey_shutdown();
-    border_shutdown();
-    background_shutdown();
-
-    spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
-                      (PVOID)(UINT_PTR)g_prev_fg_lock_timeout);
-
-    mouse_restore_pointer();
-
-    if (g.message_window) {
-        WTSUnRegisterSessionNotification(g.message_window);
-        DestroyWindow(g.message_window);
-    }
+    mshell_teardown(SUBSYSTEM_COUNT);
 
     log_msg(LOG_INFO, L"mshell exited");
     log_shutdown();
