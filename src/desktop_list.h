@@ -79,11 +79,22 @@ int desktop_name_cmp(const wchar_t *a, const wchar_t *b);
  * Always in [0, count], so it is safe to memmove from. */
 int desktop_attach_index(AttachPolicy policy, int focused, int count);
 
-/* Where `focused` should point after the list has shrunk to `count`. Only ever
- * pulls it back inside the array — an index that is still valid is left alone,
- * so removing a window AFTER the focused one does not move the focus. Answers
- * 0 for an empty list, matching the struct's zero-initialised state. */
-int desktop_focus_clamp(int focused, int count);
+/* Where `focused` should point after the window at index `removed` has been
+ * taken out of the list and everything above it memmove'd down. `count` is the
+ * length AFTER the removal.
+ *
+ * The removal SHIFTS the array, and that is the half a plain clamp gets wrong:
+ * a window removed BEFORE the focused one leaves `focused` naming the window
+ * that was next, so closing the first window on a desktop silently moved the
+ * focus one along and the shell then focused it for you.
+ *
+ *   removed <  focused   the focused window slid down a slot — follow it
+ *   removed == focused   that slot now holds whatever came after — stay put
+ *   removed >  focused   nothing below it moved — leave it alone
+ *
+ * Total, and always answers an index that is safe to read: inside [0, count),
+ * or 0 for an empty list, matching the struct's zero-initialised state. */
+int desktop_focus_after_remove(int focused, int removed, int count);
 
 /* The shift origin for pushing a window to the front of a focus history of
  * length `n` holding at most `cap` entries. `found` is the window's current

@@ -75,11 +75,17 @@ int desktop_attach_index(AttachPolicy policy, int focused, int count) {
     }
 }
 
-int desktop_focus_clamp(int focused, int count) {
-    if (count <= 0)     return 0;
-    if (focused < 0)    return 0;
-    if (focused < count) return focused;   /* still valid — leave it alone */
-    return count - 1;
+int desktop_focus_after_remove(int focused, int removed, int count) {
+    if (count <= 0)  return 0;
+    if (focused < 0) return 0;
+
+    /* The memmove pulled everything above `removed` down one slot, so an index
+     * that pointed past it now points one window too far. A `removed` outside
+     * the list cannot have shifted anything, so it is simply not below. */
+    if (removed >= 0 && removed < focused) focused--;
+
+    if (focused >= count) focused = count - 1;
+    return focused;
 }
 
 int desktop_hist_shift(int n, int found, int cap, int *n_out) {

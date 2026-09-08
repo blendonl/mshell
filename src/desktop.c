@@ -21,8 +21,10 @@
 #include "mshell.h"
 
 /* Defined with the rest of the focus bookkeeping at the bottom; needed by the
- * sticky loop and the move path, both of which land a window on a desktop. */
+ * sticky loop and the move path, which land a window on a desktop, and by the
+ * three paths that take one off again. */
 static void desktop_focus_hist_push(Desktop *dt, HWND hwnd);
+static void desktop_unlink_at(Desktop *dt, int i);
 
 /* ===========================================================================
  * Names
@@ -401,11 +403,7 @@ void desktop_switch(const wchar_t *name) {
             if (!mw || !mw->sticky) continue;
             if (new_dt->count >= MAX_WINDOWS_PER_DESKTOP) { stuck++; continue; }
 
-            memmove(&old_dt->windows[i], &old_dt->windows[i + 1],
-                    (size_t)(old_dt->count - i - 1) * sizeof(HWND));
-            old_dt->count--;
-            old_dt->focused = desktop_focus_clamp(old_dt->focused,
-                                                 old_dt->count);
+            desktop_unlink_at(old_dt, i);
 
             new_dt->windows[new_dt->count++] = h;
             mw->desktop_id  = target_id;
@@ -594,11 +592,7 @@ void desktop_move_window(HWND hwnd, const wchar_t *name) {
     if (old_dt) {
         for (int i = 0; i < old_dt->count; i++) {
             if (old_dt->windows[i] != hwnd) continue;
-            memmove(&old_dt->windows[i], &old_dt->windows[i + 1],
-                    (size_t)(old_dt->count - i - 1) * sizeof(HWND));
-            old_dt->count--;
-            old_dt->focused = desktop_focus_clamp(old_dt->focused,
-                                                 old_dt->count);
+            desktop_unlink_at(old_dt, i);
             break;
         }
     }
@@ -701,11 +695,7 @@ void desktop_remove_window(HWND hwnd) {
 
     for (int i = 0; i < dt->count; i++) {
         if (dt->windows[i] == hwnd) {
-            memmove(&dt->windows[i],
-                    &dt->windows[i + 1],
-                    (size_t)(dt->count - i - 1) * sizeof(HWND));
-            dt->count--;
-            dt->focused = desktop_focus_clamp(dt->focused, dt->count);
+            desktop_unlink_at(dt, i);
             return;
         }
     }
@@ -714,6 +704,45 @@ void desktop_remove_window(HWND hwnd) {
 /* ===========================================================================
  * Track focus change
  * =========================================================================== */
+/* Drop `hwnd` from a desktop's focus history.
+ *
+ * Called when the window LEAVES the desktop, not when it dies. desktop_last_window
+ * validates entries at read time, which handles a window that has simply closed —
+ * but Windows reuses HWND values, so an entry left behind can come back to life
+ * as an unrelated window that happens to have landed on this desktop, and
+ * last_window would then jump to a window you were never in. */
+static void desktop_focus_hist_forget(Desktop *dt, HWND hwnd) {
+    for (int i = 0; i < dt->focus_hist_n; i++) {
+        if (dt->focus_hist[i] != hwnd) continue;
+        memmove(&dt->focus_hist[i], &dt->focus_hist[i + 1],
+                (size_t)(dt->focus_hist_n - i - 1) * sizeof(HWND));
+        dt->focus_hist_n--;
+        return;
+    }
+}
+
+/* Take the window at `i` out of a desktop's list, and out of its focus history
+ * with it.
+ *
+ * The three places a window leaves a desktop — closed, moved away, or carried
+ * off by a sticky follow — all have to do exactly this, and both halves fail
+ * silently when they are wrong. The list shifts under `focused`, so a window
+ * removed before it leaves keybindings walking from the wrong place; the
+ * history outlives the HWND, which the OS hands out again.
+ */
+static void desktop_unlink_at(Desktop *dt, int i) {
+    if (!dt || i < 0 || i >= dt->count) return;
+
+    HWND h = dt->windows[i];
+
+    memmove(&dt->windows[i], &dt->windows[i + 1],
+            (size_t)(dt->count - i - 1) * sizeof(HWND));
+    dt->count--;
+    dt->focused = desktop_focus_after_remove(dt->focused, i, dt->count);
+
+    desktop_focus_hist_forget(dt, h);
+}
+
 /* Push `hwnd` to the front of a desktop's focus history, moving it up rather
  * than duplicating it if it is already there. */
 static void desktop_focus_hist_push(Desktop *dt, HWND hwnd) {
