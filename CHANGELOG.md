@@ -5,6 +5,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.4 — 2026-09-08
+
+- style: remove comments from source, build and packaging files
+
 ## 0.15.3 — 2026-09-08
 
 ### Added
