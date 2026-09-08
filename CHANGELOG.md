@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.3 — 2026-09-08
+
 ### Added
 
 - **Rotate a display — landscape, portrait, either one flipped.** A
