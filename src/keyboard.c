@@ -126,9 +126,9 @@ DWORD mod_name_to_flag(const char *name) {
 }
 
 KeyMap *keymap_new(const wchar_t *name, bool persist) {
-    if (g.cfg.keymap_count >= MAX_KEYMAPS) return NULL;
+    if (g.cfg.keymaps->count >= MAX_KEYMAPS) return NULL;
 
-    KeyMap *km = &g.cfg.keymaps[g.cfg.keymap_count++];
+    KeyMap *km = &g.cfg.keymaps->maps[g.cfg.keymaps->count++];
     km->name     = _wcsdup(name);
     km->capacity = 64;
     km->bindings = (KeyBinding *)calloc((size_t)km->capacity, sizeof(KeyBinding));
@@ -204,7 +204,8 @@ static DWORD current_mods(void) {
 
 static KeyMap *g_wk_last_map = (KeyMap *)-1;
 static void notify_submap(void) {
-    KeyMap *m = (g.current_map && g.current_map != g.root_map) ? g.current_map : NULL;
+    KeyMap *m = (g.current_map && g.current_map != g.active_keymaps->root)
+                ? g.current_map : NULL;
     if (m == g_wk_last_map) return;
     g_wk_last_map = m;
     if (g.message_window)
@@ -218,7 +219,7 @@ void kb_reset_state(void) {
     win_used = false;
     kb_lock();
     s_count = 0;
-    g.current_map = g.root_map;
+    g.current_map = g.active_keymaps->root;
     notify_submap();
     kb_unlock();
 }
@@ -354,10 +355,11 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
         mod_lwin = false;
         kb_lock();
         if (!win_used) {
-            if (g.current_map == g.root_map) {
-                if (g.cfg.leader_map) g.current_map = g.cfg.leader_map;
+            if (g.current_map == g.active_keymaps->root) {
+                if (g.active_keymaps->leader)
+                    g.current_map = g.active_keymaps->leader;
             } else {
-                g.current_map = g.root_map;
+                g.current_map = g.active_keymaps->root;
             }
             s_count = 0;
         }
@@ -396,8 +398,8 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
 
     kb_lock();
 
-    KeyMap *map   = g.current_map ? g.current_map : g.root_map;
-    bool    modal = (map != g.root_map);
+    KeyMap *map   = g.current_map ? g.current_map : g.active_keymaps->root;
+    bool    modal = (map != g.active_keymaps->root);
 
     if (modal) {
         DWORD kmods   = mods & ~MOD_LWIN;
@@ -413,14 +415,14 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         if (map->persist) {
             if (vk == exit_vk) {
-                g.current_map = g.root_map;
+                g.current_map = g.active_keymaps->root;
                 s_count = 0;
             } else if (b) {
                 if (b->action == ACTION_ENTER_SUBMAP) {
                     g.current_map = b->submap;
                 } else {
                     dispatch(b, vk, mods);
-                    if (b->terminal) g.current_map = g.root_map;
+                    if (b->terminal) g.current_map = g.active_keymaps->root;
                 }
             }
         } else {
@@ -428,13 +430,13 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g.current_map = b->submap;
             } else {
                 if (b) dispatch(b, vk, mods);
-                g.current_map = g.root_map;
+                g.current_map = g.active_keymaps->root;
             }
         }
         goto done;
     }
 
-    if (g.cfg.block_system_keys) {
+    if (g.active_keymaps->block_system_keys) {
         bool ctrl_shift_esc = (vk == VK_ESCAPE) && mod_ctrl && mod_shift;
         if (!ctrl_shift_esc) {
             if (mod_alt && (vk == VK_TAB ||
@@ -455,7 +457,7 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g.current_map = b->submap;
             } else {
                 dispatch(b, vk, mods);
-                if (b->terminal) g.current_map = g.root_map;
+                if (b->terminal) g.current_map = g.active_keymaps->root;
             }
         }
     }

@@ -2,8 +2,11 @@
 
 #include <errno.h>
 
-void config_apply_defaults(MShellConfig *c) {
+static void config_apply_defaults(MShellConfig *c, Keymaps *keys) {
     memset(c, 0, sizeof *c);
+    memset(keys, 0, sizeof *keys);
+    c->keymaps = keys;
+    keys->block_system_keys = true;
 
     c->inner_gap        = DEFAULT_INNER_GAP;
     c->outer_gap        = DEFAULT_OUTER_GAP;
@@ -61,7 +64,6 @@ void config_apply_defaults(MShellConfig *c) {
     c->whichkey_border_w  = DEFAULT_WHICHKEY_BORDER_W;
     c->whichkey_opacity   = DEFAULT_WHICHKEY_OPACITY;
     c->whichkey_rounded   = true;
-    c->block_system_keys = true;
     c->auto_reload      = true;
 
     c->float_policy     = FLOAT_RULES;
@@ -79,9 +81,10 @@ void config_apply_defaults(MShellConfig *c) {
     c->default_nmaster      = DEFAULT_NMASTER;
 }
 
-static void config_free_owned(const MShellConfig *c) {
-    for (int i = 0; i < c->keymap_count; i++) {
-        const KeyMap *km = &c->keymaps[i];
+static void keymaps_free(const Keymaps *keys) {
+    if (!keys) return;
+    for (int i = 0; i < keys->count; i++) {
+        const KeyMap *km = &keys->maps[i];
         for (int j = 0; j < km->count; j++) {
             free(km->bindings[j].command);
             free(km->bindings[j].args);
@@ -91,6 +94,10 @@ static void config_free_owned(const MShellConfig *c) {
         free(km->name);
         free(km->bindings);
     }
+}
+
+static void config_free_owned(const MShellConfig *c) {
+    keymaps_free(c->keymaps);
     for (int i = 0; i < c->startup_count; i++) {
         free(c->startup_commands[i].cmd);
         free(c->startup_commands[i].args);
@@ -98,19 +105,21 @@ static void config_free_owned(const MShellConfig *c) {
     }
 }
 
-static void config_detach(void) {
-    config_apply_defaults(&g.cfg);
-    g.root_map    = NULL;
-    g.current_map = NULL;
+static Keymaps s_keymap_pool[2];
+
+void config_reset(void) {
+    Keymaps *spare = (g.cfg.keymaps == &s_keymap_pool[0]) ? &s_keymap_pool[1]
+                                                          : &s_keymap_pool[0];
+    config_apply_defaults(&g.cfg, spare);
+    if (!g.active_keymaps) g.active_keymaps = spare;
 }
 
-static void config_restore(const MShellConfig *snap) {
-    config_free_owned(&g.cfg);
-
-    g.cfg = *snap;
-
-    g.root_map    = g.cfg.keymap_count > 0 ? &g.cfg.keymaps[0] : NULL;
-    g.current_map = g.root_map;
+static void config_publish(void) {
+    kb_lock();
+    g.active_keymaps = g.cfg.keymaps;
+    g.current_map    = g.cfg.keymaps->root;
+    g.config_gen++;
+    kb_unlock();
 }
 
 static bool config_dir_of(const wchar_t *path, wchar_t *out, size_t out_len);
@@ -189,18 +198,15 @@ bool config_load(const wchar_t *path) {
 
     config_set_package_path(L, (path && path[0]) ? path : L"config\\init.lua");
 
-    kb_lock();
-
     MShellConfig snap = g.cfg;
-    config_detach();
+    config_reset();
 
     lua_State *old_L = g.L;
     g.L = L;
 
     lua_register_api(L);
 
-    g.root_map    = keymap_new(L"root", false);
-    g.current_map = g.root_map;
+    g.cfg.keymaps->root = keymap_new(L"root", false);
 
     int status = load_config_bytes(L, (path && path[0]) ? path : L"config\\init.lua");
     if (status == LUA_OK) {
@@ -227,42 +233,42 @@ bool config_load(const wchar_t *path) {
             msg[NOTIFY_TEXT_CAP - 1] = L'\0';
             notify_show(msg, NOTIFY_ERROR, 12000);
         }
-        config_restore(&snap);
+        config_free_owned(&g.cfg);
+        g.cfg = snap;
         lua_close(L);
         g.L = old_L;
-        kb_unlock();
         return false;
     }
 
     g.config_error[0] = '\0';
-    g.config_gen++;
+    config_publish();
     config_free_owned(&snap);
     if (old_L) lua_close(old_L);
-    kb_unlock();
     return true;
 }
 
 void config_load_builtin(void) {
-    config_free_owned(&g.cfg);
-    config_detach();
+    MShellConfig snap = g.cfg;
+    config_reset();
 
-    g.root_map    = keymap_new(L"root", false);
-    g.current_map = g.root_map;
-    if (!g.root_map) return;
+    KeyMap *root = keymap_new(L"root", false);
+    g.cfg.keymaps->root = root;
 
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, VK_RETURN,
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, VK_RETURN,
                        ACTION_SPAWN, 0, NULL, L"cmd.exe", NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'R',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'R',
                        ACTION_RELOAD, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'Q',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'Q',
                        ACTION_QUIT, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN, 'J',
+    keymap_add_binding(root, MOD_LWIN, 'J',
                        ACTION_FOCUS_NEXT, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN, 'K',
+    keymap_add_binding(root, MOD_LWIN, 'K',
                        ACTION_FOCUS_PREV, 0, NULL, NULL, NULL, NULL, NULL, true);
-    keymap_add_binding(g.root_map, MOD_LWIN | MOD_SHIFT, 'C',
+    keymap_add_binding(root, MOD_LWIN | MOD_SHIFT, 'C',
                        ACTION_CLOSE, 0, NULL, NULL, NULL, NULL, NULL, true);
 
+    config_publish();
+    config_free_owned(&snap);
 }
 
 #define CONFIG_DEBOUNCE_MS   250
@@ -546,5 +552,7 @@ void config_shutdown(void) {
         g.L = NULL;
     }
     config_free_owned(&g.cfg);
-    config_detach();
+    config_reset();
+    g.active_keymaps = g.cfg.keymaps;
+    g.current_map    = NULL;
 }

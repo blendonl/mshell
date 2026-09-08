@@ -233,6 +233,14 @@ struct KeyMap {
 };
 
 typedef struct {
+    KeyMap  maps[MAX_KEYMAPS];
+    int     count;
+    KeyMap *root;
+    KeyMap *leader;
+    bool    block_system_keys;
+} Keymaps;
+
+typedef struct {
     HWND      hwnd;
     int       desktop_id;
     int       monitor;
@@ -405,9 +413,7 @@ typedef struct {
     DesktopRule desktop_rules[MAX_DESKTOP_RULES];
     int         desktop_rule_count;
 
-    KeyMap   keymaps[MAX_KEYMAPS];
-    int      keymap_count;
-    KeyMap  *leader_map;
+    Keymaps *keymaps;
 
     WindowRule rules[MAX_RULES];
     int        rule_count;
@@ -493,8 +499,6 @@ typedef struct {
     int      mouse_speed;
     int      mouse_accel;
     int      mouse_swap;
-
-    bool     block_system_keys;
 } MShellConfig;
 
 typedef struct {
@@ -509,7 +513,7 @@ typedef struct {
 
     wchar_t  last_desktop[DESKTOP_NAME_MAX];
 
-    KeyMap  *root_map;
+    Keymaps *active_keymaps;
     KeyMap  *current_map;
 
     ManagedWindow managed[MAX_MANAGED_WINDOWS];
@@ -865,7 +869,7 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                      LONG idObject, LONG idChild,
                                      DWORD idEventThread, DWORD dwmsEventTime);
 
-void     config_apply_defaults(MShellConfig *c);
+void     config_reset(void);
 bool     config_load(const wchar_t *path);
 void     config_reload(void);
 bool     config_init(void);
