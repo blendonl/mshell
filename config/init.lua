@@ -34,7 +34,12 @@ local mod, shft, ctrl = "LWin", "Shift", "Ctrl"
 -- Appearance
 ----------------------------------------------------------------------
 mshell.layout.gaps(6, 6)               -- between windows, at the screen edge
-mshell.appearance.border(2, 0xffffff)  -- focus ring: width, 0xRRGGBB
+mshell.appearance.border {             -- focus ring plus a bar on one edge, because
+    width  = 2,                        -- a 2px ring at the screen edge is easy to miss
+    focused = 0xffffff,                -- 0xRRGGBB
+    accent = "bottom",                 -- "top" | "bottom" | "none"
+    accent_width = 3,
+}
 mshell.appearance.background(0x1e1e2e) -- desktop backdrop (there is no wallpaper)
 mshell.layout.set("tiling")            -- tiling|monocle|grid|spiral|centered|bstack|columns
 mshell.layout.master.ratio(0.60)
