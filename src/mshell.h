@@ -1282,6 +1282,9 @@ const char *action_enum_to_name(Action action); /* reverse lookup (or NULL)     
 void     execute_action(Action action, int arg, const wchar_t *command,
                         const wchar_t *args, const wchar_t *cwd);
 void     focus_monitor_at(int mon);
+void     execute_action_on(Action action, HWND target, int arg,
+                           const wchar_t *command, const wchar_t *args,
+                           const wchar_t *cwd);
 
 /* Launch `cmd` with `args` (either may be NULL/empty). ShellExecuteW, so PATH
  * is resolved and .lnk shortcuts work — which is why arguments have to be a
@@ -1854,6 +1857,14 @@ static inline void hwnd_swap(HWND *a, HWND *b) {
 static inline int window_index_of(HWND hwnd) {
     for (int i = 0; i < g.managed_count; i++) {
         if (g.managed[i].hwnd == hwnd) return i;
+    }
+    return -1;
+}
+
+static inline int desktop_index_of(const Desktop *dt, HWND hwnd) {
+    if (!dt) return -1;
+    for (int i = 0; i < dt->count; i++) {
+        if (dt->windows[i] == hwnd) return i;
     }
     return -1;
 }
