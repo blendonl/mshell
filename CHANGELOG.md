@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- feat(border): add a focus bar on the top or bottom edge of the focused window,
+  drawn inside the frame so the screen edge cannot clip it. On by default at
+  `accent = "bottom"`, `accent_width = 3`; `accent = "none"` restores the bare ring
+- test: extract the focus ring geometry behind a pure seam
+
 ## 0.15.5 — 2026-09-08
 
 - refactor: split keyboard.c into keys, input_hook and actions

@@ -377,6 +377,7 @@ Highlights:
 mshell.layout.gaps(6, 6)                  -- inner gap, outer gap
 mshell.layout.smart_gaps(true)            -- no gaps when a monitor has one window
 mshell.appearance.border(2, 0xffffff)     -- focus ring: width, 0xRRGGBB
+mshell.appearance.border{ accent = "top" }-- move the focus bar; "none" drops it
 mshell.appearance.smart_borders(true)     -- no ring when a monitor shows one window
 mshell.appearance.background(0x000000)    -- desktop backdrop
 
@@ -399,6 +400,17 @@ mshell.keys.submap("launch", {
     p      = mshell.launcher.open,
 })
 ```
+
+**The focus bar.** A 2px ring is easy to lose. It is drawn *outside* the frame,
+so the only side with room to grow is the one facing a neighbour — the other
+three get clamped into the work area and end up as a hairline against the screen
+edge, which reads as a divider rather than as "this window has focus". So the
+ring comes with a bar across one edge of the focused window, drawn *inside* the
+frame where nothing can clip it: `accent = "bottom"` (the default), `"top"`, or
+`"none"` to go back to the bare ring, with `accent_width` for its thickness. It
+shares the ring's colour, so a floating or urgent window tints both together,
+and it obeys the same rules — `no_ring` windows, fullscreen windows and
+`smart_borders` suppress the whole thing.
 
 **API.** Everything is grouped by what it acts on, and every name is a value
 rather than a string: `mshell.window.*`, `mshell.desktop.*`, `mshell.monitor.*`,
@@ -808,7 +820,8 @@ destroyed behind you for being empty — it is simply re-created.
 | `events.c` | WinEvent hooks for window lifecycle tracking |
 | `config.c` | atomic Lua config load/reload + built-in fallback keymap |
 | `lua_api.c` | C functions exposed to the Lua config |
-| `border.c` | focused-window ring overlay |
+| `border.c` | focused-window ring and accent bar overlay |
+| `border_math.c` | ring/accent geometry, clamped to the work area (pure) |
 | `background.c` | solid-color desktop backdrop |
 
 The keyboard hook only mutates state and **defers** heavy work to the message

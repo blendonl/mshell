@@ -13,6 +13,8 @@ static void config_apply_defaults(MShellConfig *c, Keymaps *keys) {
     c->smart_gaps       = false;
     c->smart_borders    = false;
     c->border_width     = DEFAULT_BORDER_WIDTH;
+    c->border_accent    = DEFAULT_BORDER_ACCENT;
+    c->border_accent_width = DEFAULT_BORDER_ACCENT_W;
     c->border_color     = DEFAULT_BORDER_COLOR;
     c->border_color_float  = DEFAULT_BORDER_COLOR;
     c->border_color_urgent = DEFAULT_BORDER_COLOR;
