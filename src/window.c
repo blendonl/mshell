@@ -223,8 +223,12 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
     /* Tool windows are popups; ignore */
     if (exstyle & WS_EX_TOOLWINDOW) return ADOPT_NO;
 
-    /* Must be an overlapped or popup window (not a child) */
-    if (!(style & WS_OVERLAPPEDWINDOW) && !(style & WS_POPUP)) return ADOPT_NO;
+    /* Not a child window. Deliberately NOT "overlapped or popup": a window
+     * mshell has already stripped wears neither bit, so demanding one meant a
+     * restarted mshell refused to re-adopt its own windows — and an unadopted
+     * window is never hidden with any desktop, so it sits above the backdrop
+     * on all of them. Apps that draw their own frame look identical. */
+    if (style & WS_CHILD) return ADOPT_NO;
 
     /* Ignore the desktop window and explorer's shell UI. The shell classes
      * matter in --test mode (explorer is running); harmless otherwise.
@@ -423,7 +427,25 @@ static void window_restore_flat(HWND hwnd) {
 
 /* ===========================================================================
  * Strip window decorations
+ *
+ * The frame is recorded on the WINDOW as well as in its ManagedWindow: mshell
+ * dying takes the ManagedWindow with it, and a window left stripped then has
+ * nothing that remembers what it had (see window_recover_frames).
  * =========================================================================== */
+static ATOM s_prop_style, s_prop_exstyle;
+
+/* Global ATOMS rather than the strings themselves: SetPropW given a string adds
+ * one atom-table reference per call and RemovePropW is what gives it back, so a
+ * window closed while still stripped would leak a reference every time. Two
+ * atoms held for the life of the process cost nothing and cannot. */
+static void frame_props_init(void) {
+    if (!s_prop_style)   s_prop_style   = GlobalAddAtomW(L"mshell.orig_style");
+    if (!s_prop_exstyle) s_prop_exstyle = GlobalAddAtomW(L"mshell.orig_exstyle");
+}
+
+#define PROP_ORIG_STYLE   MAKEINTATOM(s_prop_style)
+#define PROP_ORIG_EXSTYLE MAKEINTATOM(s_prop_exstyle)
+
 static bool window_app_draws_own_frame(HWND hwnd) {
     if (IsIconic(hwnd)) return false;
 
@@ -501,6 +523,28 @@ void window_strip_decorations(HWND hwnd) {
                           L"title bar", (void *)hwnd);
     }
     mw->decorations_stripped = stripped;
+
+    if (stripped) {
+        frame_props_init();
+        SetPropW(hwnd, PROP_ORIG_STYLE,   (HANDLE)mw->orig_style);
+        SetPropW(hwnd, PROP_ORIG_EXSTYLE, (HANDLE)mw->orig_exstyle);
+    }
+}
+
+/* Take over a frame a PREVIOUS mshell stripped: the properties on the window
+ * are the only record of it, and without claiming them this instance would
+ * neither know the window is stripped nor what it was. window_recover_frames()
+ * gets there first at startup; this covers the window adopted before it, or
+ * after it, from an activation. */
+static void window_claim_saved_frame(ManagedWindow *mw) {
+    frame_props_init();
+
+    HANDLE style = GetPropW(mw->hwnd, PROP_ORIG_STYLE);
+    if (!style) return;
+
+    mw->orig_style           = (LONG_PTR)style;
+    mw->orig_exstyle         = (LONG_PTR)GetPropW(mw->hwnd, PROP_ORIG_EXSTYLE);
+    mw->decorations_stripped = true;
 }
 
 /* ===========================================================================
@@ -517,6 +561,9 @@ void window_restore_decorations(HWND hwnd) {
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     mw->decorations_stripped = false;
+    frame_props_init();
+    RemovePropW(hwnd, PROP_ORIG_STYLE);
+    RemovePropW(hwnd, PROP_ORIG_EXSTYLE);
 }
 
 /* ===========================================================================
@@ -1187,6 +1234,7 @@ void window_manage(HWND hwnd) {
     mw->hwnd       = hwnd;
     mw->desktop_id = desk_id;
     mw->cfact      = 1.0f;
+    window_claim_saved_frame(mw);
 
     if (tier == ADOPT_TRACK) {
         /* Desktop membership and window control, nothing else: the window
@@ -2812,6 +2860,41 @@ static BOOL CALLBACK uncloak_stray_proc(HWND hwnd, LPARAM lp) {
     return TRUE;
 }
 
+/* ===========================================================================
+ * Give back the frame of a window a previous mshell stripped and never
+ * restored — a crash, or a kill that never reached the shutdown path.
+ *
+ * The record is the window's own property, written by window_strip_decorations,
+ * so it outlives the process that made it. Run before the adoption sweep: a
+ * window handed its caption back is a window the rules can strip again, this
+ * time with somebody remembering what it started as.
+ * =========================================================================== */
+static BOOL CALLBACK recover_frame_proc(HWND hwnd, LPARAM lp) {
+    HANDLE style = GetPropW(hwnd, PROP_ORIG_STYLE);
+    if (!style) return TRUE;
+
+    SetWindowLongPtrW(hwnd, GWL_STYLE, (LONG_PTR)style);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
+                      (LONG_PTR)GetPropW(hwnd, PROP_ORIG_EXSTYLE));
+    RemovePropW(hwnd, PROP_ORIG_STYLE);
+    RemovePropW(hwnd, PROP_ORIG_EXSTYLE);
+    SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                 SWP_FRAMECHANGED);
+
+    (*(int *)lp)++;
+    return TRUE;
+}
+
+void window_recover_frames(void) {
+    frame_props_init();
+
+    int n = 0;
+    EnumWindows(recover_frame_proc, (LPARAM)&n);
+    if (n) log_err(L"startup: handed back the frame of %d window(s) a previous "
+                   L"mshell stripped and did not live to restore", n);
+}
+
 void window_uncloak_strays(void) {
     if (g.test_mode) return;
 
@@ -2834,6 +2917,7 @@ static BOOL CALLBACK enum_windows_proc(HWND hwnd, LPARAM lp) {
 }
 
 void window_manage_existing(void) {
+    window_recover_frames();
     window_uncloak_strays();
     EnumWindows(enum_windows_proc, 0);
 }
