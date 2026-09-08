@@ -683,8 +683,7 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  *             every desktop.
  *   opts    — table, any subset of:
  *               default      = true           this is the desktop mshell
- *                              starts on; "always" to outrank the session's
- *                              memory of where you were (see below)
+ *                              starts on (see below)
  *               app          = "firefox.exe"  open this when you enter the
  *                              desktop and it has no windows (and again after
  *                              you close the last one and come back)
@@ -714,14 +713,8 @@ static int lua_mshell_set_start_desktop(lua_State *L) {
  * says which. It therefore needs a literal name — "start on game-*" has no
  * answer — and it is read once, when the config is loaded, rather than each
  * time a desktop is created. Declare it twice and the LAST one wins, which is
- * the same layering rule the other fields follow.
- *
- *   default = true        start here on a genuinely first run. On a restart the
- *                         session's memory of where you were still wins, so
- *                         restarting the shell leaves you where you are.
- *   default = "always"    start here every time, session or not — for a config
- *                         that says "I begin the day on 'term'" and means it.
- *   default = "remember"  spells out the default; same as true.
+ * the same layering rule the other fields follow. Every start lands on it: a
+ * restart puts you back here, not wherever you happened to be.
  * =========================================================================== */
 static int lua_mshell_desktop_rule(lua_State *L) {
     reject_at_runtime(L, "desktop_rule");
@@ -739,30 +732,28 @@ static int lua_mshell_desktop_rule(lua_State *L) {
         return luaL_error(L, "desktop_rule: the pattern is empty — use \"*\" to "
                              "match every desktop");
 
-    /* default = true | "always" | "remember" — the desktop to start on.
+    /* default = true — the desktop to start on.
      *
      * Resolved here rather than stored on the rule: it is a single global
      * answer, not a per-desktop one, and assigning it as each rule is read is
-     * what makes the last declaration win for free. */
+     * what makes the last declaration win for free.
+     *
+     * The strings "always" and "remember" were the two halves of a choice that
+     * no longer exists — mshell no longer remembers which desktop you were on —
+     * so they are rejected by name rather than silently accepted as true. */
     lua_getfield(L, 2, "default");
     {
         int t = lua_type(L, -1);
-        if (t != LUA_TNIL && t != LUA_TBOOLEAN && t != LUA_TSTRING)
-            return luaL_error(L, "desktop_rule '%s': default must be true, "
-                                 "false, \"remember\" or \"always\"", pattern);
+        if (t == LUA_TSTRING)
+            return luaL_error(L, "desktop_rule '%s': default is true or false "
+                                 "now — \"always\" and \"remember\" are gone "
+                                 "along with the session file, and `default` "
+                                 "decides every start", pattern);
+        if (t != LUA_TNIL && t != LUA_TBOOLEAN)
+            return luaL_error(L, "desktop_rule '%s': default must be true or "
+                                 "false", pattern);
 
-        if (t == LUA_TSTRING || (t == LUA_TBOOLEAN && lua_toboolean(L, -1))) {
-            bool always = false;
-            if (t == LUA_TSTRING) {
-                const char *policy = lua_tostring(L, -1);
-                if      (strcmp(policy, "always")   == 0) always = true;
-                else if (strcmp(policy, "remember") == 0) always = false;
-                else return luaL_error(L, "desktop_rule '%s': unknown default "
-                                          "'%s' (expected true, false, "
-                                          "\"remember\" or \"always\")",
-                                       pattern, policy);
-            }
-
+        if (t == LUA_TBOOLEAN && lua_toboolean(L, -1)) {
             /* A pattern cannot be created, only matched. */
             if (wcspbrk(r->name_match, L"*?"))
                 return luaL_error(L, "desktop_rule '%s': default needs a "
@@ -776,7 +767,6 @@ static int lua_mshell_desktop_rule(lua_State *L) {
                                   pattern, DESKTOP_NAME_MAX);
 
             wcscpy(g.start_desktop, r->name_match);
-            g.start_desktop_always = always;
         }
     }
     lua_pop(L, 1);
