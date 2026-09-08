@@ -86,14 +86,18 @@ jobs:
       - name: Build and package
         run: make CFLAGS_EXTRA=-Werror dist msi
 
-      - name: Check both artifacts exist
+      - name: Check every artifact exists
         env:
           NEW: ${{ steps.version.outputs.version }}
         run: |
-          for f in "dist/mshell-$NEW-win64.zip" "dist/mshell-$NEW.msi"; do
+          for f in "dist/mshell-$NEW-win64.zip" \
+                   "dist/mshell-$NEW-win64-symbols.zip" \
+                   "dist/mshell-$NEW.msi"; do
             test -s "$f" || { echo "::error::$f was not produced"; exit 1; }
           done
-          ls -l "dist/mshell-$NEW-win64.zip" "dist/mshell-$NEW.msi"
+          ls -l "dist/mshell-$NEW-win64.zip" \
+                "dist/mshell-$NEW-win64-symbols.zip" \
+                "dist/mshell-$NEW.msi"
 
       - name: Commit the bump back to main
         id: commit
@@ -116,4 +120,5 @@ jobs:
             --title "mshell $NEW" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "dist/mshell-$NEW-win64.zip" \
+            "dist/mshell-$NEW-win64-symbols.zip" \
             "dist/mshell-$NEW.msi"

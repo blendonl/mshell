@@ -766,9 +766,9 @@ void execute_action_on(Action action, HWND target, int arg,
         }
         if (dt->layout != LAYOUT_MONOCLE && dt->count > 1 && focus) {
             bool prev = (action == ACTION_MOVE_LEFT || action == ACTION_MOVE_UP);
-            int target = resolve_target(dt, fi, action, prev);
-            hwnd_swap(&dt->windows[fi], &dt->windows[target]);
-            dt->focused = target;
+            int swap_index = resolve_target(dt, fi, action, prev);
+            hwnd_swap(&dt->windows[fi], &dt->windows[swap_index]);
+            dt->focused = swap_index;
             tile_current();
         }
         break;
