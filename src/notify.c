@@ -1,47 +1,23 @@
-/* ===========================================================================
- * notify.c — mshell's own on-screen notifications.
- *
- * With no Explorer there is no toast host, no tray balloon and no taskbar, so
- * anything mshell has to say has previously gone to a log file the user has no
- * reason to be looking at. The case that matters is a config that failed to
- * reload: the previous config keeps running, which is the right behaviour and
- * also completely silent — indistinguishable from the edit having worked.
- *
- * Scope is deliberately mshell's own messages. This is NOT a host for other
- * applications' notifications: real Windows toasts are WinRT/WNS and require
- * being a registered Explorer-class shell, which a replacement shell is not.
- *
- * Stacking, not queueing: several messages are all visible at once, newest at
- * the top, each expiring on its own schedule. A queue would make the second
- * error wait for the first to time out, and errors arrive in bursts.
- *
- * The toast stack here is the STATE; it is not always the surface. When the
- * status bar is in floating mode with its notifications module on, the panel
- * lists these same messages inline and our own toasts stand down — see
- * bar_owns_notifications(). Two windows showing the same message is worse than
- * either one of them alone.
- * =========================================================================== */
 #include "mshell.h"
 #include "overlay.h"
 
 static const wchar_t *NOTIFY_CLASS = L"mshell_Notify";
 
-#define NOTIFY_MAX      5     /* on screen at once; older ones are dropped   */
+#define NOTIFY_MAX      5
 #define NOTIFY_TEXT_MAX 512
 #define NOTIFY_TIMER_ID 1
-#define NOTIFY_TICK_MS  100   /* expiry resolution                           */
+#define NOTIFY_TICK_MS  100
 
-/* design px at 96 DPI */
 #define N_PAD      12
-#define N_GAP      8      /* between stacked toasts                          */
-#define N_MARGIN   16     /* from the monitor edge                           */
-#define N_ACCENT_W 4      /* the colour stripe down the left                 */
+#define N_GAP      8
+#define N_MARGIN   16
+#define N_ACCENT_W 4
 #define N_MAX_W    420
 
 typedef struct {
     wchar_t   text[NOTIFY_TEXT_MAX];
     NotifyKind kind;
-    ULONGLONG expires;    /* GetTickCount64 */
+    ULONGLONG expires;
     bool      used;
 } Toast;
 
@@ -56,8 +32,6 @@ COLORREF notify_kind_color(NotifyKind k) {
     }
 }
 
-/* How many live toasts there are, compacting as it goes so the newest is
- * always index 0 and there are no holes for the layout to skip. */
 static int notify_compact(void) {
     int n = 0;
     for (int i = 0; i < NOTIFY_MAX; i++) {
@@ -69,15 +43,11 @@ static int notify_compact(void) {
     return n;
 }
 
-/* Measure and place the panel over the focused monitor, then repaint. */
 static void notify_relayout(void) {
     if (!g.notify_window) return;
 
     int n = notify_compact();
 
-    /* Someone else is showing them. The stack above is still the state — it
-     * expires on the same schedule and the panel reads it — so all that
-     * changes here is that we do not raise a second copy. */
     if (bar_owns_notifications()) {
         ShowWindow(g.notify_window, SW_HIDE);
         bar_refresh();
@@ -101,7 +71,6 @@ static void notify_relayout(void) {
 
     overlay_font(&s_font, dpi, overlay_scale(15, dpi));
 
-    /* Measure every toast at the final font, wrapping to the maximum width. */
     HDC   dc  = GetDC(g.notify_window);
     HFONT old = (HFONT)SelectObject(dc, s_font.font);
 
@@ -120,8 +89,6 @@ static void notify_relayout(void) {
 
     if (widest > maxw) widest = maxw;
 
-    /* Top-right of the focused monitor's WORK area, so it never sits under the
-     * status bar (which reserves its strip out of exactly that rect). */
     RECT mon = (mi >= 0 && mi < g.monitor_count) ? g.monitors[mi].work_area
                                                  : g.work_area;
     int x = mon.right - widest - margin;
@@ -145,8 +112,6 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 }
             }
             if (changed) notify_relayout();
-            /* Stop ticking once nothing is left, rather than waking 10x a
-             * second forever for a shell that is idle. */
             if (notify_compact() == 0) KillTimer(hwnd, NOTIFY_TIMER_ID);
             return 0;
         }
@@ -200,10 +165,6 @@ static LRESULT CALLBACK notify_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-/* ---------------------------------------------------------------------------
- * The one entry point. Safe to call before init (it simply does nothing), so
- * an early failure does not have to check.
- * --------------------------------------------------------------------------- */
 void notify_show(const wchar_t *text, NotifyKind kind, int ms) {
     if (!g.notify_window || !text || !text[0]) return;
     if (!g.notify_enabled) return;
@@ -211,11 +172,8 @@ void notify_show(const wchar_t *text, NotifyKind kind, int ms) {
 
     int n = notify_compact();
     if (n >= NOTIFY_MAX) {
-        /* Full: drop the oldest, which is the last one, so a burst shows its
-         * most recent messages rather than its first. */
         n = NOTIFY_MAX - 1;
     }
-    /* Newest first: shift down, insert at 0. */
     for (int i = n; i > 0; i--) s_toasts[i] = s_toasts[i - 1];
 
     Toast *t = &s_toasts[0];
@@ -229,22 +187,10 @@ void notify_show(const wchar_t *text, NotifyKind kind, int ms) {
     notify_relayout();
 }
 
-/* ---------------------------------------------------------------------------
- * Which surface shows the live messages can change under us — the config can
- * be reloaded into (or out of) floating-bar mode, and the bar can be toggled
- * off entirely. Whoever changes that calls this, and the one that just lost
- * the messages stops showing them.
- * --------------------------------------------------------------------------- */
 void notify_resurface(void) {
     notify_relayout();
 }
 
-/* ---------------------------------------------------------------------------
- * A copy of the live messages for a surface that is not this one. Newest
- * first, so a caller with room for two shows the two that matter. Text longer
- * than NotifyItem's buffer is truncated: this feeds a panel that wraps and
- * clips anyway.
- * --------------------------------------------------------------------------- */
 int notify_recent(NotifyItem *out, int max) {
     if (!out || max <= 0) return 0;
 
@@ -269,8 +215,6 @@ bool notify_init(void) {
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
     if (!g.notify_window) return false;
 
-    /* Transparent as well as non-activating: a notification must never swallow
-     * a click meant for the window it is covering. */
     SetLayeredWindowAttributes(g.notify_window, 0, 235, LWA_ALPHA);
     return true;
 }

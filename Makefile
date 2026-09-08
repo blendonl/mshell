@@ -1,21 +1,12 @@
-# mshell — keyboard-driven WM shell replacement for Windows
-#
-# Cross-compile from Linux with mingw-w64.
-# Lua 5.4 source must be present in vendor/lua/ (or adjust LUA_DIR below).
-
 CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 
-# --- Version (single source of truth; baked into the binary and the zip) ---
 VERSION  = 0.15.3
 
-# VERSIONINFO needs the parts as separate numbers, so split them out here
-# rather than making anyone maintain the version in two shapes.
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
 VER_PATCH := $(word 3,$(subst ., ,$(VERSION)))
 
-# --- Flags ---
 CFLAGS   = -O2 -s -flto -mwindows \
            -DUNICODE -D_UNICODE \
            -DMSHELL_VERSION='"$(VERSION)"' \
@@ -23,35 +14,17 @@ CFLAGS   = -O2 -s -flto -mwindows \
            -Ivendor/lua/src \
            $(CFLAGS_EXTRA)
 
-# CI passes -Werror through here. Kept out of CFLAGS proper so that a warning
-# fails the build in CI without making a local tree unbuildable mid-edit.
 CFLAGS_EXTRA ?=
 
-# Only integers are passed to windres. It re-invokes a shell to run the
-# preprocessor, so a -D carrying a quoted string has its quotes stripped twice
-# and arrives as a bare token — mshell.rc builds the display string from these
-# three numbers itself instead.
 RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
            -DVER_PATCH=$(VER_PATCH)
-# ole32 + uuid are for SHGetKnownFolderPath/FOLDERID_RoamingAppData (config
-# path resolution in main.c): CoTaskMemFree lives in ole32, the FOLDERID_* GUID
-# symbols in uuid.
-# advapi32: the IPC pipe's DACL (ConvertSidToStringSid,
-# ConvertStringSecurityDescriptorToSecurityDescriptor).
-# powrprof: SetSuspendState (sleep/hibernate actions in system.c).
-# windowscodecs: WIC, which encodes screenshots to PNG. Not GDI+, whose headers
-# are C++-only under mingw-w64.
-# bcrypt: SHA-256, which update.c hashes a downloaded release with before it
-# unpacks it (update.c).
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
            -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lbcrypt -lm
 
-# --- Paths ---
 SRC_DIR  = src
 LUA_DIR  = vendor/lua/src
 
-# --- mshell sources ---
 MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/keyboard.c   \
               $(SRC_DIR)/window.c     \
@@ -86,8 +59,6 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/update.c
 
-# --- Lua sources (amalgamated or individual) ---
-# Lua 5.4 core source files:
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
             $(LUA_DIR)/lauxlib.c    \
             $(LUA_DIR)/lbaselib.c   \
@@ -121,87 +92,41 @@ LUA_SRCS  = $(LUA_DIR)/lapi.c       \
             $(LUA_DIR)/lvm.c        \
             $(LUA_DIR)/lzio.c
 
-# If you use the Lua amalgamation (lua.c + luac.c → just lua.c), uncomment:
-# LUA_SRCS  = $(LUA_DIR)/lua.c
-
 ALL_SRCS = $(MSHELL_SRCS) $(LUA_SRCS)
 ALL_OBJS = $(ALL_SRCS:.c=.o)
 
-# mshell's own objects, apart from Lua's — the ones a version bump has to
-# invalidate. See the version stamp under Rules.
 MSHELL_OBJS = $(MSHELL_SRCS:.c=.o)
 
-# Resources: the application manifest (DPI awareness) + VERSIONINFO.
 RES_OBJ  = $(SRC_DIR)/mshell.res.o
 
 TARGET   = mshell.exe
 
-# The privileged helper: a second, tiny binary with no Lua and no config. See
-# src/proto.h for why it exists and what was deliberately left out of it.
 HELPER        = mshelld.exe
-# log.c and pipe_sd.c are shared with mshell.exe. Both depend on nothing but the
-# Win32 API — in particular not on the MShell global — precisely so they can
-# link here. pipe_sd.c is the named pipe's security descriptor, shared so the
-# shell's pipe and the helper's cannot come to disagree about who may open one.
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
 HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
 
-# --- Release packaging ---
 DISTNAME = mshell-$(VERSION)-win64
 DISTDIR  = dist/$(DISTNAME)
-# Files shipped in the release zip. The optional debloat/services tweaks are
-# included because INSTALL.md step 5 tells you to import them — shipping the
-# docs without the files they name leaves the release half-usable.
 DIST_FILES = install.bat uninstall.bat \
              harden.reg harden-undo.reg \
              debloat.reg debloat-undo.reg \
              services.reg services-undo.reg \
              INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
 
-# --- Host-side tests ---
-# mshell itself cross-compiles to Windows and cannot run here, but the logic
-# with no Windows in it can: match.c (rule patterns), layout_math.c (the
-# proportional split), whichkey_math.c (the hint panel's grid and anchor) and
-# desktop_list.c (the desktop index and name arithmetic).
-# Those are built with the HOST compiler and run directly, so `make test` needs
-# no emulator and no Windows machine. Everything else is covered by
-# MANUAL-TESTS.md.
 HOST_CC   = cc
 TEST_DIR  = test
 TEST_BINS = $(TEST_DIR)/test_match $(TEST_DIR)/test_layout_math \
             $(TEST_DIR)/test_whichkey_math $(TEST_DIR)/test_update_parse \
             $(TEST_DIR)/test_desktop_list $(TEST_DIR)/test_api_spec
 
-# --- Rules ---
 .PHONY: all clean check-lua dist test regs msi print-version probe meta check-config
 
 all: check-lua $(TARGET) $(HELPER)
 
-# The release workflow decides whether to cut a release by comparing VERSION
-# against the tags already pushed, so something outside the Makefile has to
-# learn the version. It asks here rather than parsing line 10 with sed: a
-# second reader of the single source of truth is a second thing that can come
-# to disagree with it, and this one cannot.
 print-version:
 	@echo $(VERSION)
 
-# --- Version stamp ---
-# VERSION reaches the compiler as -DMSHELL_VERSION and windres as -DVER_MAJOR
-# and friends. Those are command-line flags, and make compares timestamps, not
-# command lines: bump VERSION and every object already on disk is still "up to
-# date", so the new number reaches only the files something else happened to
-# make stale. The build then succeeds and lies — a zip named for one version
-# holding a binary that reports another in its VERSIONINFO, its log banner and
-# its update-check User-Agent. Whether a release came out right depended on
-# whether the tree happened to have been cleaned since the bump.
-#
-# The stamp turns the flag into a file. Its NAME carries the version, so a bump
-# names a file that does not exist yet, and everything that bakes the version
-# in is declared to depend on it. Lua's objects are deliberately not: they are
-# compiled with the same CFLAGS but never mention MSHELL_VERSION, and
-# recompiling 32 files to change a string none of them contain is a minute
-# spent on nothing.
 VERSION_STAMP = .version-$(VERSION)
 
 $(VERSION_STAMP):
@@ -218,21 +143,14 @@ $(HELPER): $(HELPER_OBJS)
 	@echo "  LINK  $@"
 	$(CC) $(CFLAGS) -o $@ $^ $(HELPER_LDLIBS)
 
-# The helper deliberately does NOT depend on mshell.h — it shares only proto.h,
-# which is the point: it has no access to the shell's types or state.
 $(SRC_DIR)/mshelld.o: $(SRC_DIR)/mshelld.c $(SRC_DIR)/proto.h $(SRC_DIR)/log.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# log.c links into BOTH binaries, so like mshelld.o it must not pick up a
-# dependency on mshell.h — it deliberately has no access to the shell's state.
 $(SRC_DIR)/log.o: $(SRC_DIR)/log.c $(SRC_DIR)/log.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# pipe_sd.c likewise: shared by both binaries, and its own rule for the same
-# reason — the pattern rule below would make it depend on mshell.h, which the
-# helper must not be built against.
 $(SRC_DIR)/pipe_sd.o: $(SRC_DIR)/pipe_sd.c $(SRC_DIR)/pipe_sd.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -241,8 +159,6 @@ $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Resource script -> linkable object. Depends on the manifest too, so editing
-# the manifest alone still rebuilds.
 $(RES_OBJ): $(SRC_DIR)/mshell.rc $(SRC_DIR)/mshell.exe.manifest
 	@echo "  RC    $<"
 	$(WINDRES) $(RCFLAGS) -I$(SRC_DIR) -O coff -i $< -o $@
@@ -267,16 +183,6 @@ check-lua:
 		exit 1; \
 	fi
 
-# Regenerate the shipped .reg files from the table in src/tweaks.c, so the
-# files and the in-process implementation cannot drift.
-#
-# Generated into a temp directory and moved into place only once every file is
-# non-empty. Redirecting straight onto the real files truncates them BEFORE the
-# command runs, so a missing wine — or any failure mid-sequence — left a
-# zero-byte harden.reg behind, which install.bat imports automatically and which
-# would therefore have silently disabled every keyboard tweak. Needs wine to run the
-# cross-compiled binary; skipped with a clear message when it is absent, since
-# the checked-in files are perfectly usable without regenerating them.
 regs: $(TARGET)
 	@if command -v wine >/dev/null 2>&1; then \
 	    echo "  REGS  harden/debloat"; \
@@ -295,15 +201,6 @@ regs: $(TARGET)
 	    echo "  SKIP  regs — wine not installed (the .reg files are checked in)"; \
 	fi
 
-# An MSI, built on Linux with wixl so CI stays single-platform.
-# UNSIGNED: there is no code-signing certificate, so SmartScreen will warn. The
-# zip remains the primary artifact; this is for people who want an installer
-# that Add/Remove Programs knows about.
-#
-# The package is `wixl`, not `msitools`. Both are built from the msitools
-# source, so the name below is the easy thing to get wrong: installing
-# msitools gets you msiinfo and msibuild, this target still skips, and the
-# reason it gives you is the package you just installed.
 msi: $(TARGET) $(HELPER)
 	@if command -v wixl >/dev/null 2>&1; then \
 	    echo "  MSI   dist/mshell-$(VERSION).msi"; \
@@ -314,8 +211,6 @@ msi: $(TARGET) $(HELPER)
 	    echo "  SKIP  msi — wixl not installed (apt install wixl)"; \
 	fi
 
-# Assemble dist/mshell-$(VERSION)-win64/ and zip it. Uses Python's zipfile so
-# no `zip` binary is required. The archive keeps the versioned top-level folder.
 dist: $(TARGET) $(HELPER)
 	@echo "  DIST  $(DISTNAME)"
 	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip"
@@ -385,11 +280,6 @@ tools/probe_frame.exe: tools/probe_frame.c
 	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
 	      -o $@ $< -ldwmapi -luser32 -lgdi32
 
-# The shipped configs and the README's examples, loaded against a mock of the
-# real API built from api_spec.c. Catches a name that no longer exists, a key
-# bound to something unbindable, and documentation that has drifted from the
-# API. Uses the vendored sources, so it is the exact interpreter mshell embeds
-# rather than whichever Lua happens to be on the machine.
 HOST_LUA = $(TEST_DIR)/lua
 
 $(HOST_LUA): $(LUA_SRCS) $(LUA_DIR)/lua.c
@@ -410,8 +300,5 @@ test: $(TEST_BINS) check-config
 clean:
 	rm -f $(TARGET) $(HELPER) $(ALL_OBJS) $(HELPER_OBJS) $(RES_OBJ) $(TEST_BINS) $(PROBE) $(GEN_META) $(HOST_LUA)
 	rm -f .version-*
-	# also remove artifacts left by Lua's own Makefile (Linux objects,
-	# static lib, and the lua/luac binaries) so a stray `make` inside
-	# vendor/lua can't poison our cross-compile link step.
 	rm -f $(LUA_DIR)/lua.o $(LUA_DIR)/luac.o $(LUA_DIR)/liblua.a \
 	      $(LUA_DIR)/lua $(LUA_DIR)/luac

@@ -1,9 +1,3 @@
-# Cross-compiles the Windows binary and runs the host-side tests.
-#
-# Both halves run on Linux, which is how mshell is developed: the exe is built
-# with mingw-w64, and the logic with no Windows in it (rule patterns, tiling
-# arithmetic) is compiled natively and executed. Nothing here needs a Windows
-# runner — what does need one is in MANUAL-TESTS.md, by definition.
 name: build
 
 on:
@@ -31,17 +25,11 @@ jobs:
       - name: Host-side unit tests
         run: make test
 
-      # The editor type definitions are generated from src/api_spec.c, which is
-      # also what the binary dispatches through. Regenerating and diffing is
-      # what stops the committed copy describing an API the release no longer
-      # has — the drift this whole surface exists to prevent.
       - name: Editor types are up to date
         run: |
           make meta
           git diff --exit-code meta/
 
-      # -Werror here rather than in the Makefile: a warning should fail CI
-      # without making a local build unusable while you are mid-edit.
       - name: Build (warnings are errors)
         run: make CFLAGS_EXTRA=-Werror
 
