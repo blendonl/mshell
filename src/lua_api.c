@@ -46,9 +46,9 @@ static void set_bool(lua_State *L, const char *k, bool v) {
 static KeyMap *find_keymap(const char *name) {
     wchar_t wname[256];
     u8_to_w(name, wname, 256);
-    for (int i = 0; i < g.keymap_count; i++) {
-        if (_wcsicmp(g.keymaps[i].name, wname) == 0) {
-            return &g.keymaps[i];
+    for (int i = 0; i < g.cfg.keymaps->count; i++) {
+        if (_wcsicmp(g.cfg.keymaps->maps[i].name, wname) == 0) {
+            return &g.cfg.keymaps->maps[i];
         }
     }
     return NULL;
@@ -166,7 +166,7 @@ static void bind_value(lua_State *L, KeyMap *map, DWORD mods, DWORD vk,
         KeyMap     *sm = find_keymap(nm);
         if (sm) {
             keymap_add_binding(map, mods, vk, ACTION_ENTER_SUBMAP,
-                               (int)(sm - g.keymaps), sm, NULL, NULL, NULL,
+                               (int)(sm - g.cfg.keymaps->maps), sm, NULL, NULL, NULL,
                                desc_w, false);
             free(desc_w);
             return;
@@ -225,7 +225,8 @@ static int lua_mshell_bind(lua_State *L) {
     DWORD vk = key_name_to_vk(key_str);
     if (vk == 0) return luaL_error(L, "unknown key: %s", key_str);
 
-    if (!g.root_map) return luaL_error(L, "root keymap not initialized");
+    if (!g.cfg.keymaps->root)
+        return luaL_error(L, "root keymap not initialized");
 
     const char *desc     = NULL;
     bool        terminal = true;
@@ -237,7 +238,7 @@ static int lua_mshell_bind(lua_State *L) {
         lua_pop(L, 1);
     }
 
-    bind_value(L, g.root_map, mods, vk, 3, desc, terminal, "keys.bind");
+    bind_value(L, g.cfg.keymaps->root, mods, vk, 3, desc, terminal, "keys.bind");
     return 0;
 }
 
@@ -312,32 +313,32 @@ static int lua_mshell_set_leader(lua_State *L) {
         return luaL_error(L, "set_leader: submap '%s' not found "
                              "(define it with mshell.submap before set_leader)",
                           name);
-    if (km == g.root_map)
+    if (km == g.cfg.keymaps->root)
         return luaL_error(L, "set_leader: the leader must be a submap, not root");
-    g.leader_map = km;
+    g.cfg.keymaps->leader = km;
     return 0;
 }
 
 static int lua_mshell_set_gaps(lua_State *L) {
     int inner = (int)luaL_checkinteger(L, 1);
     int outer = (int)luaL_optinteger(L, 2, inner);
-    g.inner_gap = clamp_i(inner, 0, 100);
-    g.outer_gap = clamp_i(outer, 0, 100);
+    g.cfg.inner_gap = clamp_i(inner, 0, 100);
+    g.cfg.outer_gap = clamp_i(outer, 0, 100);
     return 0;
 }
 
 static int lua_mshell_set_smart_gaps(lua_State *L) {
-    g.smart_gaps = lua_toboolean(L, 1);
+    g.cfg.smart_gaps = lua_toboolean(L, 1);
     return 0;
 }
 
 static int lua_mshell_set_smart_borders(lua_State *L) {
-    g.smart_borders = lua_toboolean(L, 1);
+    g.cfg.smart_borders = lua_toboolean(L, 1);
     return 0;
 }
 
 static int lua_mshell_block_system_keys(lua_State *L) {
-    g.block_system_keys = lua_toboolean(L, 1);
+    g.cfg.keymaps->block_system_keys = lua_toboolean(L, 1);
     return 0;
 }
 
@@ -349,34 +350,34 @@ static int lua_mshell_set_border(lua_State *L) {
     if (lua_istable(L, 1)) {
         lua_getfield(L, 1, "width");
         if (lua_isnumber(L, -1))
-            g.border_width = clamp_i((int)lua_tointeger(L, -1), 0, 10);
+            g.cfg.border_width = clamp_i((int)lua_tointeger(L, -1), 0, 10);
         lua_pop(L, 1);
 
         lua_getfield(L, 1, "focused");
         if (lua_isnumber(L, -1)) {
-            g.border_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
-            g.border_color_float  = g.border_color;
-            g.border_color_urgent = g.border_color;
+            g.cfg.border_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+            g.cfg.border_color_float  = g.cfg.border_color;
+            g.cfg.border_color_urgent = g.cfg.border_color;
         }
         lua_pop(L, 1);
 
         lua_getfield(L, 1, "floating");
         if (lua_isnumber(L, -1))
-            g.border_color_float = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+            g.cfg.border_color_float = rgb_from_lua((unsigned)lua_tointeger(L, -1));
         lua_pop(L, 1);
 
         lua_getfield(L, 1, "urgent");
         if (lua_isnumber(L, -1))
-            g.border_color_urgent = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+            g.cfg.border_color_urgent = rgb_from_lua((unsigned)lua_tointeger(L, -1));
         lua_pop(L, 1);
 
         lua_getfield(L, 1, "corners");
         if (lua_isstring(L, -1)) {
             const char *c = lua_tostring(L, -1);
-            if      (!strcmp(c, "square"))  g.corner_pref = 1;
-            else if (!strcmp(c, "round"))   g.corner_pref = 2;
-            else if (!strcmp(c, "small"))   g.corner_pref = 3;
-            else if (!strcmp(c, "default")) g.corner_pref = 0;
+            if      (!strcmp(c, "square"))  g.cfg.corner_pref = 1;
+            else if (!strcmp(c, "round"))   g.cfg.corner_pref = 2;
+            else if (!strcmp(c, "small"))   g.cfg.corner_pref = 3;
+            else if (!strcmp(c, "default")) g.cfg.corner_pref = 0;
             else {
                 lua_pop(L, 1);
                 return luaL_error(L, "set_border: unknown corners '%s' "
@@ -388,24 +389,24 @@ static int lua_mshell_set_border(lua_State *L) {
     }
 
     int width = (int)luaL_checkinteger(L, 1);
-    g.border_width = clamp_i(width, 0, 10);
+    g.cfg.border_width = clamp_i(width, 0, 10);
 
     if (lua_gettop(L) >= 2) {
-        g.border_color = rgb_from_lua((unsigned)luaL_checkinteger(L, 2));
-        g.border_color_float  = g.border_color;
-        g.border_color_urgent = g.border_color;
+        g.cfg.border_color = rgb_from_lua((unsigned)luaL_checkinteger(L, 2));
+        g.cfg.border_color_float  = g.cfg.border_color;
+        g.cfg.border_color_urgent = g.cfg.border_color;
     }
     return 0;
 }
 
 static int lua_mshell_set_background(lua_State *L) {
     unsigned c = (unsigned)luaL_checkinteger(L, 1);
-    g.background_color = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+    g.cfg.background_color = RGB((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
     return 0;
 }
 
 static int lua_mshell_set_auto_reload(lua_State *L) {
-    g.auto_reload = lua_toboolean(L, 1);
+    g.cfg.auto_reload = lua_toboolean(L, 1);
     return 0;
 }
 
@@ -429,11 +430,11 @@ static int lua_mshell_desktop_rule(lua_State *L) {
     const char *pattern = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TTABLE);
 
-    if (g.desktop_rule_count >= MAX_DESKTOP_RULES)
+    if (g.cfg.desktop_rule_count >= MAX_DESKTOP_RULES)
         return luaL_error(L, "desktop_rule: too many rules (max %d)",
                           MAX_DESKTOP_RULES);
 
-    DesktopRule *r = &g.desktop_rules[g.desktop_rule_count];
+    DesktopRule *r = &g.cfg.desktop_rules[g.cfg.desktop_rule_count];
     memset(r, 0, sizeof(*r));
     u8_to_w(pattern, r->name_match, DESKTOP_NAME_MAX);
     if (!r->name_match[0])
@@ -464,7 +465,7 @@ static int lua_mshell_desktop_rule(lua_State *L) {
                                      "spaces, and be under %d characters",
                                   pattern, DESKTOP_NAME_MAX);
 
-            wcscpy(g.start_desktop, r->name_match);
+            wcscpy(g.cfg.start_desktop, r->name_match);
         }
     }
     lua_pop(L, 1);
@@ -544,81 +545,81 @@ static int lua_mshell_desktop_rule(lua_State *L) {
     }
     lua_pop(L, 1);
 
-    g.desktop_rule_count++;
+    g.cfg.desktop_rule_count++;
     return 0;
 }
 
 static int lua_mshell_set_master_ratio(lua_State *L) {
-    g.default_master_ratio = clamp_f((float)luaL_checknumber(L, 1), 0.2f, 0.9f);
+    g.cfg.default_master_ratio = clamp_f((float)luaL_checknumber(L, 1), 0.2f, 0.9f);
     return 0;
 }
 
 static int lua_mshell_set_nmaster(lua_State *L) {
-    g.default_nmaster = clamp_i((int)luaL_checkinteger(L, 1), 1, 20);
+    g.cfg.default_nmaster = clamp_i((int)luaL_checkinteger(L, 1), 1, 20);
     return 0;
 }
 
 static int lua_mshell_set_layout(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if (!layout_from_name(s, &g.default_layout))
+    if (!layout_from_name(s, &g.cfg.default_layout))
         return luaL_error(L, "unknown layout: %s", s);
     return 0;
 }
 
 static int lua_mshell_set_float_policy(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if      (strcmp(s, "never") == 0) g.float_policy = FLOAT_NEVER;
-    else if (strcmp(s, "rules") == 0) g.float_policy = FLOAT_RULES;
+    if      (strcmp(s, "never") == 0) g.cfg.float_policy = FLOAT_NEVER;
+    else if (strcmp(s, "rules") == 0) g.cfg.float_policy = FLOAT_RULES;
     else return luaL_error(L, "float_policy must be 'rules' or 'never'");
     return 0;
 }
 
 static int lua_mshell_set_hide_policy(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if      (strcmp(s, "cloak") == 0) g.hide_policy = HIDE_CLOAK;
-    else if (strcmp(s, "hide")  == 0) g.hide_policy = HIDE_SHOWWINDOW;
+    if      (strcmp(s, "cloak") == 0) g.cfg.hide_policy = HIDE_CLOAK;
+    else if (strcmp(s, "hide")  == 0) g.cfg.hide_policy = HIDE_SHOWWINDOW;
     else return luaL_error(L, "hide_policy must be 'cloak' or 'hide'");
     return 0;
 }
 
 static int lua_mshell_set_fullscreen_policy(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if      (strcmp(s, "contain") == 0) g.fullscreen_policy = FS_CONTENT;
-    else if (strcmp(s, "monitor") == 0) g.fullscreen_policy = FS_BOTH;
+    if      (strcmp(s, "contain") == 0) g.cfg.fullscreen_policy = FS_CONTENT;
+    else if (strcmp(s, "monitor") == 0) g.cfg.fullscreen_policy = FS_BOTH;
     else return luaL_error(L, "fullscreen_policy must be 'contain' or 'monitor'");
     return 0;
 }
 
 static int lua_mshell_set_float_placement(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if      (strcmp(s, "center") == 0) g.float_placement = FLOAT_PLACE_CENTER;
-    else if (strcmp(s, "none")   == 0) g.float_placement = FLOAT_PLACE_NONE;
+    if      (strcmp(s, "center") == 0) g.cfg.float_placement = FLOAT_PLACE_CENTER;
+    else if (strcmp(s, "none")   == 0) g.cfg.float_placement = FLOAT_PLACE_NONE;
     else return luaL_error(L, "float_placement must be 'center' or 'none'");
     return 0;
 }
 
 static int lua_mshell_set_attach(lua_State *L) {
     const char *s = luaL_checkstring(L, 1);
-    if      (strcmp(s, "end")    == 0) g.attach_policy = ATTACH_END;
-    else if (strcmp(s, "master") == 0) g.attach_policy = ATTACH_MASTER;
-    else if (strcmp(s, "after")  == 0) g.attach_policy = ATTACH_AFTER;
+    if      (strcmp(s, "end")    == 0) g.cfg.attach_policy = ATTACH_END;
+    else if (strcmp(s, "master") == 0) g.cfg.attach_policy = ATTACH_MASTER;
+    else if (strcmp(s, "after")  == 0) g.cfg.attach_policy = ATTACH_AFTER;
     else return luaL_error(L, "attach must be 'end', 'master', or 'after'");
     return 0;
 }
 
 static int lua_mshell_set_manage_owned(lua_State *L) {
-    g.manage_owned = lua_toboolean(L, 1);
+    g.cfg.manage_owned = lua_toboolean(L, 1);
     return 0;
 }
 
 static int lua_mshell_set_float_on_top(lua_State *L) {
-    g.float_on_top = lua_toboolean(L, 1);
+    g.cfg.float_on_top = lua_toboolean(L, 1);
     return 0;
 }
 
 static int lua_mshell_set_min_window_size(lua_State *L) {
-    g.min_win_w = clamp_i((int)luaL_checkinteger(L, 1), 0, 100000);
-    g.min_win_h = clamp_i((int)luaL_checkinteger(L, 2), 0, 100000);
+    g.cfg.min_win_w = clamp_i((int)luaL_checkinteger(L, 1), 0, 100000);
+    g.cfg.min_win_h = clamp_i((int)luaL_checkinteger(L, 2), 0, 100000);
     return 0;
 }
 
@@ -635,12 +636,12 @@ static int lua_mshell_rule(lua_State *L) {
                               "(expected 'manage', 'float' or 'ignore')",
                            action_str);
 
-    if (g.rule_count >= MAX_RULES) {
+    if (g.cfg.rule_count >= MAX_RULES) {
         luaL_error(L, "too many rules");
         return 0;
     }
 
-    WindowRule *r = &g.rules[g.rule_count++];
+    WindowRule *r = &g.cfg.rules[g.cfg.rule_count++];
     memset(r, 0, sizeof(*r));
     r->action = action;
 
@@ -757,7 +758,7 @@ static int lua_mshell_spawn(lua_State *L) {
     const char *args = luaL_optstring(L, 2, NULL);
     const char *cwd  = luaL_optstring(L, 3, NULL);
 
-    if (g.startup_count >= MAX_STARTUP_COMMANDS) {
+    if (g.cfg.startup_count >= MAX_STARTUP_COMMANDS) {
         return luaL_error(L, "too many startup commands (max %d)",
                           MAX_STARTUP_COMMANDS);
     }
@@ -778,41 +779,41 @@ static int lua_mshell_spawn(lua_State *L) {
                      return luaL_error(L, "out of memory"); }
     }
 
-    g.startup_commands[g.startup_count].cmd  = wcmd;
-    g.startup_commands[g.startup_count].args = wargs;
-    g.startup_commands[g.startup_count].cwd  = wcwd;
-    g.startup_count++;
+    g.cfg.startup_commands[g.cfg.startup_count].cmd  = wcmd;
+    g.cfg.startup_commands[g.cfg.startup_count].args = wargs;
+    g.cfg.startup_commands[g.cfg.startup_count].cwd  = wcwd;
+    g.cfg.startup_count++;
     return 0;
 }
 
 static int lua_mshell_set_update_check(lua_State *L) {
-    g.update_check = lua_toboolean(L, 1);
+    g.cfg.update_check = lua_toboolean(L, 1);
     return 0;
 }
 
 static int lua_mshell_set_animation(lua_State *L) {
     int ms = (int)luaL_checkinteger(L, 1);
-    g.anim_ms = clamp_i(ms, 0, 200);
+    g.cfg.anim_ms = clamp_i(ms, 0, 200);
     return 0;
 }
 
 static int lua_mshell_set_dim(lua_State *L) {
     if (!lua_istable(L, 1)) {
-        g.dim_enabled = lua_toboolean(L, 1);
+        g.cfg.dim_enabled = lua_toboolean(L, 1);
         return 0;
     }
     lua_getfield(L, 1, "enabled");
-    if (!lua_isnil(L, -1)) g.dim_enabled = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.dim_enabled = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "color");
     if (lua_isnumber(L, -1))
-        g.dim_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
+        g.cfg.dim_color = rgb_from_lua((unsigned)lua_tointeger(L, -1));
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "opacity");
     if (lua_isnumber(L, -1))
-        g.dim_alpha = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
+        g.cfg.dim_alpha = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
     lua_pop(L, 1);
     return 0;
 }
@@ -820,47 +821,47 @@ static int lua_mshell_set_dim(lua_State *L) {
 static int lua_mshell_set_mouse_tbl(lua_State *L) {
     reject_at_runtime(L, "mouse.setup");
     if (!lua_istable(L, 1)) {
-        g.mouse_enabled = lua_toboolean(L, 1);
+        g.cfg.mouse_enabled = lua_toboolean(L, 1);
         return 0;
     }
     lua_getfield(L, 1, "drag_swap");
-    if (!lua_isnil(L, -1)) g.mouse_enabled = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.mouse_enabled = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "follow");
-    if (!lua_isnil(L, -1)) g.mouse_follow = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.mouse_follow = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "warp");
-    if (!lua_isnil(L, -1)) g.mouse_warp = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.mouse_warp = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "mod_drag");
-    if (!lua_isnil(L, -1)) g.mouse_mod_drag = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.mouse_mod_drag = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "speed");
     if (lua_isnumber(L, -1))
-        g.mouse_speed = clamp_i((int)lua_tointeger(L, -1), 1, 20);
+        g.cfg.mouse_speed = clamp_i((int)lua_tointeger(L, -1), 1, 20);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "accel");
-    if (!lua_isnil(L, -1)) g.mouse_accel = lua_toboolean(L, -1) ? 1 : 0;
+    if (!lua_isnil(L, -1)) g.cfg.mouse_accel = lua_toboolean(L, -1) ? 1 : 0;
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "swap_buttons");
-    if (!lua_isnil(L, -1)) g.mouse_swap = lua_toboolean(L, -1) ? 1 : 0;
+    if (!lua_isnil(L, -1)) g.cfg.mouse_swap = lua_toboolean(L, -1) ? 1 : 0;
     lua_pop(L, 1);
     return 0;
 }
 
 static int lua_mshell_monitor_rule(lua_State *L) {
-    if (g.monitor_rule_count >= MAX_MONITOR_RULES)
+    if (g.cfg.monitor_rule_count >= MAX_MONITOR_RULES)
         return luaL_error(L, "too many monitor rules (max %d)",
                           MAX_MONITOR_RULES);
     luaL_checktype(L, 2, LUA_TTABLE);
 
-    MonitorRule *r = &g.monitor_rules[g.monitor_rule_count];
+    MonitorRule *r = &g.cfg.monitor_rules[g.cfg.monitor_rule_count];
     memset(r, 0, sizeof(*r));
     r->index = -1;
 
@@ -1035,21 +1036,21 @@ static int lua_mshell_monitor_rule(lua_State *L) {
     }
     lua_pop(L, 1);
 
-    g.monitor_rule_count++;
+    g.cfg.monitor_rule_count++;
     return 0;
 }
 
 static int lua_mshell_set_minimize_policy(lua_State *L) {
     const char *p = luaL_checkstring(L, 1);
-    if      (!strcmp(p, "allow")) g.minimize_never = false;
-    else if (!strcmp(p, "never")) g.minimize_never = true;
+    if      (!strcmp(p, "allow")) g.cfg.minimize_never = false;
+    else if (!strcmp(p, "never")) g.cfg.minimize_never = true;
     else return luaL_error(L, "set_minimize_policy: expected \"allow\" or "
                               "\"never\", got '%s'", p);
     return 0;
 }
 
 static int lua_mshell_set_urgency(lua_State *L) {
-    g.urgency_enabled = lua_toboolean(L, 1);
+    g.cfg.urgency_enabled = lua_toboolean(L, 1);
     return 0;
 }
 
@@ -1074,11 +1075,11 @@ static int lua_mshell_set_notify(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
 
     lua_getfield(L, 1, "enabled");
-    if (!lua_isnil(L, -1)) g.notify_enabled = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.notify_enabled = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "desktop_switch");
-    if (!lua_isnil(L, -1)) g.notify_desktop = (bool)lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.notify_desktop = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
     return 0;
 }
@@ -1227,14 +1228,14 @@ static int lua_mshell_set_bar(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
 
     lua_getfield(L, 1, "enabled");
-    if (!lua_isnil(L, -1)) g.bar_enabled = lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.bar_enabled = lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "mode");
     if (lua_isstring(L, -1)) {
         const char *s = lua_tostring(L, -1);
-        if      (strcmp(s, "top_bar")  == 0) g.bar_mode = BAR_MODE_TOP_BAR;
-        else if (strcmp(s, "floating") == 0) g.bar_mode = BAR_MODE_FLOATING;
+        if      (strcmp(s, "top_bar")  == 0) g.cfg.bar_mode = BAR_MODE_TOP_BAR;
+        else if (strcmp(s, "floating") == 0) g.cfg.bar_mode = BAR_MODE_FLOATING;
         else return luaL_error(L, "set_bar: mode must be 'top_bar' or "
                                   "'floating'");
     }
@@ -1243,22 +1244,22 @@ static int lua_mshell_set_bar(lua_State *L) {
     lua_getfield(L, 1, "position");
     if (lua_isstring(L, -1)) {
         const char *s = lua_tostring(L, -1);
-        if      (strcmp(s, "top")    == 0) g.bar_bottom = false;
-        else if (strcmp(s, "bottom") == 0) g.bar_bottom = true;
+        if      (strcmp(s, "top")    == 0) g.cfg.bar_bottom = false;
+        else if (strcmp(s, "bottom") == 0) g.cfg.bar_bottom = true;
         else return luaL_error(L, "set_bar: position must be 'top' or 'bottom'");
     }
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "height");
     if (lua_isnumber(L, -1))
-        g.bar_height = clamp_i((int)lua_tointeger(L, -1), 12, 200);
+        g.cfg.bar_height = clamp_i((int)lua_tointeger(L, -1), 12, 200);
     lua_pop(L, 1);
 
     const struct { const char *field; COLORREF *dst; } colors[] = {
-        {"bg",     &g.bar_bg},
-        {"fg",     &g.bar_fg},
-        {"accent", &g.bar_accent},
-        {"dim",    &g.bar_dim},
+        {"bg",     &g.cfg.bar_bg},
+        {"fg",     &g.cfg.bar_fg},
+        {"accent", &g.cfg.bar_accent},
+        {"dim",    &g.cfg.bar_dim},
     };
     for (size_t i = 0; i < sizeof colors / sizeof colors[0]; i++) {
         lua_getfield(L, 1, colors[i].field);
@@ -1291,7 +1292,7 @@ static int lua_mshell_set_bar(lua_State *L) {
             }
             lua_pop(L, 1);
         }
-        g.bar_modules = mods;
+        g.cfg.bar_modules = mods;
     }
     lua_pop(L, 1);
 
@@ -1302,11 +1303,11 @@ static int lua_mshell_set_whichkey(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
 
     lua_getfield(L, 1, "enabled");
-    if (!lua_isnil(L, -1)) g.whichkey_enabled = lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.whichkey_enabled = lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "rounded");
-    if (!lua_isnil(L, -1)) g.whichkey_rounded = lua_toboolean(L, -1);
+    if (!lua_isnil(L, -1)) g.cfg.whichkey_rounded = lua_toboolean(L, -1);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "position");
@@ -1327,7 +1328,7 @@ static int lua_mshell_set_whichkey(lua_State *L) {
         size_t i = 0;
         for (; i < sizeof places / sizeof places[0]; i++)
             if (strcmp(s, places[i].name) == 0) {
-                g.whichkey_pos = places[i].pos;
+                g.cfg.whichkey_pos = places[i].pos;
                 break;
             }
         if (i == sizeof places / sizeof places[0]) {
@@ -1340,16 +1341,16 @@ static int lua_mshell_set_whichkey(lua_State *L) {
     lua_pop(L, 1);
 
     const struct { const char *field; int *dst; int lo, hi; } ints[] = {
-        {"delay",          &g.whichkey_delay,      0, 5000},
-        {"margin",         &g.whichkey_margin,    -1, 2000},
-        {"max_rows",       &g.whichkey_max_rows,   1, WHICHKEY_MAX_ROWS},
-        {"padding",        &g.whichkey_padding,    0, 200},
-        {"row_spacing",    &g.whichkey_row_gap,    0, 100},
-        {"column_spacing", &g.whichkey_col_gap,    0, 400},
-        {"key_spacing",    &g.whichkey_key_gap,    0, 200},
-        {"header_spacing", &g.whichkey_hdr_gap,    0, 200},
-        {"font_size",      &g.whichkey_font_size,  6, 96},
-        {"border_width",   &g.whichkey_border_w,   0, 20},
+        {"delay",          &g.cfg.whichkey_delay,      0, 5000},
+        {"margin",         &g.cfg.whichkey_margin,    -1, 2000},
+        {"max_rows",       &g.cfg.whichkey_max_rows,   1, WHICHKEY_MAX_ROWS},
+        {"padding",        &g.cfg.whichkey_padding,    0, 200},
+        {"row_spacing",    &g.cfg.whichkey_row_gap,    0, 100},
+        {"column_spacing", &g.cfg.whichkey_col_gap,    0, 400},
+        {"key_spacing",    &g.cfg.whichkey_key_gap,    0, 200},
+        {"header_spacing", &g.cfg.whichkey_hdr_gap,    0, 200},
+        {"font_size",      &g.cfg.whichkey_font_size,  6, 96},
+        {"border_width",   &g.cfg.whichkey_border_w,   0, 20},
     };
     for (size_t i = 0; i < sizeof ints / sizeof ints[0]; i++) {
         lua_getfield(L, 1, ints[i].field);
@@ -1360,8 +1361,8 @@ static int lua_mshell_set_whichkey(lua_State *L) {
     }
 
     const struct { const char *field; float *dst; } maxes[] = {
-        {"max_width",  &g.whichkey_max_w},
-        {"max_height", &g.whichkey_max_h},
+        {"max_width",  &g.cfg.whichkey_max_w},
+        {"max_height", &g.cfg.whichkey_max_h},
     };
     for (size_t i = 0; i < sizeof maxes / sizeof maxes[0]; i++) {
         lua_getfield(L, 1, maxes[i].field);
@@ -1376,19 +1377,19 @@ static int lua_mshell_set_whichkey(lua_State *L) {
 
     lua_getfield(L, 1, "opacity");
     if (lua_isnumber(L, -1))
-        g.whichkey_opacity = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
+        g.cfg.whichkey_opacity = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
     lua_pop(L, 1);
 
     lua_getfield(L, 1, "font");
     if (lua_isstring(L, -1))
-        u8_to_w(lua_tostring(L, -1), g.whichkey_font, LF_FACESIZE);
+        u8_to_w(lua_tostring(L, -1), g.cfg.whichkey_font, LF_FACESIZE);
     lua_pop(L, 1);
 
     const struct { const char *field; COLORREF *dst; } colors[] = {
-        {"bg",     &g.whichkey_bg},
-        {"fg",     &g.whichkey_fg},
-        {"key_fg", &g.whichkey_key_fg},
-        {"border", &g.whichkey_border},
+        {"bg",     &g.cfg.whichkey_bg},
+        {"fg",     &g.cfg.whichkey_fg},
+        {"key_fg", &g.cfg.whichkey_key_fg},
+        {"border", &g.cfg.whichkey_border},
     };
     for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
         lua_getfield(L, 1, colors[i].field);
@@ -1457,14 +1458,14 @@ static int lua_mshell_on(lua_State *L) {
                              "%s)", ev_name, lua_tostring(L, -1));
     }
 
-    if (g.lua_hook_count >= MAX_LUA_HOOKS)
+    if (g.cfg.lua_hook_count >= MAX_LUA_HOOKS)
         return luaL_error(L, "mshell.on: too many handlers (max %d)",
                           MAX_LUA_HOOKS);
 
     lua_pushvalue(L, 2);
-    g.lua_hooks[g.lua_hook_count].event = ev;
-    g.lua_hooks[g.lua_hook_count].ref   = luaL_ref(L, LUA_REGISTRYINDEX);
-    g.lua_hook_count++;
+    g.cfg.lua_hooks[g.cfg.lua_hook_count].event = ev;
+    g.cfg.lua_hooks[g.cfg.lua_hook_count].ref   = luaL_ref(L, LUA_REGISTRYINDEX);
+    g.cfg.lua_hook_count++;
     return 0;
 }
 
@@ -1482,7 +1483,7 @@ static void push_event_arg(lua_State *L, LuaEvent ev, HWND hwnd,
 }
 
 void lua_fire(LuaEvent ev, HWND hwnd, const wchar_t *name) {
-    if (!g.L || g.lua_hook_count == 0) return;
+    if (!g.L || g.cfg.lua_hook_count == 0) return;
     if (g.lua_running) {
         log_w(L"config: event %d fired while Lua was running — skipped", (int)ev);
         return;
@@ -1490,10 +1491,10 @@ void lua_fire(LuaEvent ev, HWND hwnd, const wchar_t *name) {
 
     g.lua_running = true;
 
-    for (int i = 0; i < g.lua_hook_count; i++) {
-        if (g.lua_hooks[i].event != ev) continue;
+    for (int i = 0; i < g.cfg.lua_hook_count; i++) {
+        if (g.cfg.lua_hooks[i].event != ev) continue;
 
-        lua_rawgeti(g.L, LUA_REGISTRYINDEX, g.lua_hooks[i].ref);
+        lua_rawgeti(g.L, LUA_REGISTRYINDEX, g.cfg.lua_hooks[i].ref);
         if (!lua_isfunction(g.L, -1)) { lua_pop(g.L, 1); continue; }
 
         push_event_arg(g.L, ev, hwnd, name);
