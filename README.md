@@ -852,4 +852,5 @@ it moves the focus there.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Vendors Lua (also MIT).
+MIT — see [LICENSE](LICENSE). Vendors Lua, also MIT; its notice is in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
