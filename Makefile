@@ -136,7 +136,8 @@ DIST_FILES = install.bat uninstall.bat \
              harden.reg harden-undo.reg \
              debloat.reg debloat-undo.reg \
              services.reg services-undo.reg \
-             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
+             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md \
+             LICENSE THIRD-PARTY-NOTICES.md
 
 CPPCHECK       = cppcheck
 CPPCHECK_DIR   = .github/cppcheck
