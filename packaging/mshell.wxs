@@ -39,6 +39,12 @@
       <Component Id="cmpReadme" Guid="*">
         <File Id="filInstallMd" Source="INSTALL.md" KeyPath="yes" />
       </Component>
+      <Component Id="cmpLicense" Guid="*">
+        <File Id="filLicense" Source="LICENSE" KeyPath="yes" />
+      </Component>
+      <Component Id="cmpThirdPartyNotices" Guid="*">
+        <File Id="filThirdPartyNotices" Source="THIRD-PARTY-NOTICES.md" KeyPath="yes" />
+      </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="CONFIGDIR">
@@ -56,6 +62,8 @@
       <ComponentRef Id="cmpInstallBat" />
       <ComponentRef Id="cmpUninstallBat" />
       <ComponentRef Id="cmpReadme" />
+      <ComponentRef Id="cmpLicense" />
+      <ComponentRef Id="cmpThirdPartyNotices" />
       <ComponentRef Id="cmpInitLua" />
       <ComponentRef Id="cmpInitFullLua" />
     </Feature>
