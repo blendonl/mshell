@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.16 — 2026-09-14
+
 - feat(settings): configure Windows' own settings from the domain they belong to
   — `mouse.setup` gains scrolling, cursor size, trails, click lock and friends;
   new `keyboard.setup` (key repeat, Sticky/Filter/Toggle Keys and their
