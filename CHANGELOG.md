@@ -7,6 +7,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## 0.15.15 — 2026-09-14
 
+- Maintenance release.
+
+## 0.15.15 — 2026-09-14
+
 - feat(dim): set how much unfocused windows are dimmed as a percentage
 - feat(dim)!: rename appearance.dim to appearance.dim_unfocused
 
