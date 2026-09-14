@@ -192,10 +192,11 @@ function Window:restore() end
 ---@field accent mshell.BorderAccent? Extra bar on one edge, so focus reads at a glance.
 ---@field accent_width integer? Thickness of that bar. 0 turns it off.
 
----@class mshell.DimOpts
----@field enabled boolean?
+---@class mshell.DimUnfocusedOpts
+---@field enabled boolean? Defaults to true once a table is passed.
 ---@field color integer?
----@field opacity integer? 0 to 255.
+---@field percent number? How dark the unfocused windows get, 0 to 100.
+---@field opacity integer? The same in scrim alpha, 0 to 255. percent wins if both are set.
 
 ---@class mshell.NotifyOpts
 ---@field enabled boolean?

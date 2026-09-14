@@ -91,7 +91,10 @@ for _, node in ipairs(nodes) do
     }
     if row.kind == "API_NAMESPACE" or row.callable or has_children(row.path) then
         mt.__index = function(_, k)
-            fail("mshell.%s.%s does not exist", row.path, tostring(k))
+            local path = row.path .. "." .. tostring(k)
+            local now  = removed[path]
+            if now then fail('mshell.%s was removed — use mshell.%s', path, now)
+            else        fail("mshell.%s does not exist", path) end
             return function() end
         end
     end
