@@ -77,8 +77,6 @@ if exist "%CFGDIR%\init.lua" (
     echo  Default config installed to %CFGDIR%\init.lua
 )
 
-copy /Y "%~dp0config\init.full.lua" "%CFGDIR%\init.full.lua" >nul 2>&1
-
 if not exist "%CFGDIR%\meta" mkdir "%CFGDIR%\meta"
 copy /Y "%~dp0meta\mshell.lua" "%CFGDIR%\meta\mshell.lua" >nul 2>&1
 copy /Y "%~dp0meta\types.lua"  "%CFGDIR%\meta\types.lua"  >nul 2>&1

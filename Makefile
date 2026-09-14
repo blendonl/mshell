@@ -278,7 +278,6 @@ dist: $(TARGET) $(HELPER) $(SYMBOLS)
 	cp $(HELPER)          "$(DISTDIR)/"
 	cp $(SYMBOLS)         "$(SYMDIR)/"
 	cp config/init.lua      "$(DISTDIR)/config/"
-	cp config/init.full.lua "$(DISTDIR)/config/"
 	cp meta/mshell.lua      "$(DISTDIR)/meta/"
 	cp meta/types.lua       "$(DISTDIR)/meta/"
 	cp config/.luarc.json   "$(DISTDIR)/config/"
@@ -333,7 +332,7 @@ $(HOST_LUA): $(LUA_SRCS) $(LUA_DIR)/lua.c
 check-config: $(HOST_LUA)
 	@echo "  CONFIG"
 	@./$(HOST_LUA) $(TEST_DIR)/check_config.lua $(SRC_DIR)/api_spec.c \
-	    config/init.lua config/init.full.lua README.md
+	    config/init.lua README.md
 
 cppcheck:
 	@if command -v $(CPPCHECK) >/dev/null 2>&1; then \
