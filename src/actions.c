@@ -374,9 +374,6 @@ static void act_media_next (const ActionCtx *c) { system_media_key(ACTION_MEDIA_
 static void act_media_prev (const ActionCtx *c) { system_media_key(ACTION_MEDIA_PREV);  }
 static void act_media_stop (const ActionCtx *c) { system_media_key(ACTION_MEDIA_STOP);  }
 
-static void act_screenshot       (const ActionCtx *c) { screenshot_screen(); }
-static void act_screenshot_window(const ActionCtx *c) { screenshot_window(); }
-
 static void act_notify(const ActionCtx *c) {
     if (c->command && c->command[0])
         notify_show(c->command, NOTIFY_INFO, 4000);
