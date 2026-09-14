@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- feat(mouse): save `speed`, `accel` and `swap_buttons` to the user profile the
+  way the Settings page does, instead of borrowing them and restoring the
+  originals on exit. A reload writes only a field that differs from what Windows
+  has; deleting a field stops asserting it without undoing it
+
 ## 0.15.15 — 2026-09-14
 
 - feat(dim): set how much unfocused windows are dimmed as a percentage
