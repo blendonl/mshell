@@ -1,6 +1,23 @@
 #include "mshell.h"
+#include "focus_pick.h"
 
 static POINT s_last_pointer;
+
+static bool has_caption(HWND hwnd) {
+    return (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION) == WS_CAPTION;
+}
+
+static bool foreground_holds_pointer(HWND fg) {
+    if (!fg) return false;
+
+    GUITHREADINFO gti = { .cbSize = sizeof gti };
+    if (!GetGUIThreadInfo(GetWindowThreadProcessId(fg, NULL), &gti))
+        return false;
+
+    const DWORD menu_modes = GUI_INMENUMODE | GUI_POPUPMENUMODE |
+                             GUI_SYSTEMMENUMODE;
+    return (gti.flags & menu_modes) != 0 || gti.hwndCapture != NULL;
+}
 
 static bool drag_in_progress(void) {
     kb_lock();
@@ -57,10 +74,20 @@ void mouse_poll_focus(void) {
     if (!under) return;
 
     HWND top = GetAncestor(under, GA_ROOT);
-    if (!top || top == GetForegroundWindow()) return;
+    if (!top) return;
 
+    HWND           fg = GetForegroundWindow();
     ManagedWindow *mw = window_find(top);
-    if (!mw || !desktop_is_visible(mw->desktop_id)) return;
+
+    PointerTarget target = {
+        .managed                  = mw != NULL,
+        .tracked_popup            = mw && mw->tracked_only &&
+                                    !has_caption(top),
+        .on_visible_desktop       = mw && desktop_is_visible(mw->desktop_id),
+        .is_foreground            = top == fg,
+        .foreground_holds_pointer = foreground_holds_pointer(fg),
+    };
+    if (!focus_pick_follows_pointer(&target)) return;
 
     desktop_focus_update(top);
     window_focus(top);
