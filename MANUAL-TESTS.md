@@ -974,8 +974,10 @@ Bind it if your config has not: `mshell.keys.bind({mod, shft}, "u", "config.upda
 
 **Shell-mode only** (needs a real install, Task Manager ready):
 
-- Run #5 as the installed shell. mshell waits for the install, then exits and
-  Winlogon brings the new build back up. **The check that matters is the log
+- Run #5 as the installed shell. mshell waits for the install, starts the
+  registered shell with `--takeover`, then exits; the new instance logs
+  `takeover: waiting …` and comes up as soon as the old one is gone, without
+  relying on Winlogon's `AutoRestartShell`. **The check that matters is the log
   banner**: `=== mshell vX.Y.Z starting ===` naming the version just installed.
   That line is the only proof the restart happened — an update that copies the
   exe and leaves the old process running looks identical from the desktop, and
