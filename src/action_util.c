@@ -1,14 +1,13 @@
 #include "mshell.h"
 #include "actions.h"
+#include "focus_pick.h"
 
-typedef enum { DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_DOWN } Direction;
-
-static Direction action_to_dir(Action a) {
+static FocusDirection action_to_dir(Action a) {
     switch (a) {
-    case ACTION_FOCUS_LEFT:  case ACTION_MOVE_LEFT:  return DIR_LEFT;
-    case ACTION_FOCUS_RIGHT: case ACTION_MOVE_RIGHT: return DIR_RIGHT;
-    case ACTION_FOCUS_UP:    case ACTION_MOVE_UP:    return DIR_UP;
-    default:                                          return DIR_DOWN;
+    case ACTION_FOCUS_LEFT:  case ACTION_MOVE_LEFT:  return FOCUS_LEFT;
+    case ACTION_FOCUS_RIGHT: case ACTION_MOVE_RIGHT: return FOCUS_RIGHT;
+    case ACTION_FOCUS_UP:    case ACTION_MOVE_UP:    return FOCUS_UP;
+    default:                                          return FOCUS_DOWN;
     }
 }
 
@@ -20,42 +19,46 @@ static bool center_of(HWND hwnd, POINT *out) {
     return true;
 }
 
-static int neighbor_in_dir(Desktop *dt, int from, Direction dir) {
-    POINT fc;
-    if (from < 0 || from >= dt->count || !center_of(dt->windows[from], &fc))
-        return -1;
+static FocusCandidate focus_candidate(HWND hwnd) {
+    FocusCandidate c = { 0 };
+    if (!hwnd || !IsWindow(hwnd)) return c;
 
-    int  best = -1;
-    long best_score = 0;
-    for (int i = 0; i < dt->count; i++) {
-        if (i == from) continue;
-        POINT c;
-        if (!center_of(dt->windows[i], &c)) continue;
+    const ManagedWindow *mw = window_find(hwnd);
+    if (mw && (mw->app_hidden || mw->user_hidden)) return c;
+    c.focusable = true;
 
-        long dx = c.x - fc.x, dy = c.y - fc.y;
-        bool ok = false;
-        switch (dir) {
-        case DIR_LEFT:  ok = dx < 0 && labs(dx) >= labs(dy); break;
-        case DIR_RIGHT: ok = dx > 0 && labs(dx) >= labs(dy); break;
-        case DIR_UP:    ok = dy < 0 && labs(dy) >= labs(dx); break;
-        case DIR_DOWN:  ok = dy > 0 && labs(dy) >= labs(dx); break;
-        }
-        if (!ok) continue;
+    if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return c;
+    if (mw && (mw->layout_hidden || mw->wm_hidden)) return c;
 
-        long score = dx * dx + dy * dy;
-        if (best < 0 || score < best_score) { best = i; best_score = score; }
-    }
-    return best;
+    POINT center;
+    if (!center_of(hwnd, &center)) return c;
+    c.x         = center.x;
+    c.y         = center.y;
+    c.on_screen = true;
+    return c;
+}
+
+static void focus_candidates(const Desktop *dt, FocusCandidate *out) {
+    for (int i = 0; i < dt->count; i++)
+        out[i] = focus_candidate(dt->windows[i]);
 }
 
 int resolve_target(Desktop *dt, int from, Action action, bool cycle_prev) {
+    FocusCandidate cands[MAX_WINDOWS_PER_DESKTOP];
+    focus_candidates(dt, cands);
+
     int target = -1;
     if (dt->layout != LAYOUT_MONOCLE)
-        target = neighbor_in_dir(dt, from, action_to_dir(action));
+        target = focus_pick_neighbor(cands, dt->count, from, action_to_dir(action));
     if (target < 0)
-        target = cycle_prev ? (from - 1 + dt->count) % dt->count
-                            : (from + 1) % dt->count;
+        target = focus_pick_cycle(cands, dt->count, from, cycle_prev);
     return target;
+}
+
+int cycle_target(Desktop *dt, int from, bool prev) {
+    FocusCandidate cands[MAX_WINDOWS_PER_DESKTOP];
+    focus_candidates(dt, cands);
+    return focus_pick_cycle(cands, dt->count, from, prev);
 }
 
 void focus_monitor_at(int mon) {
