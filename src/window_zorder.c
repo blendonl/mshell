@@ -1,6 +1,7 @@
 #include "mshell.h"
 #include "window_internal.h"
 #include "overlay.h"
+#include "sink_order.h"
 
 static bool zorder_wants_topmost(const ManagedWindow *mw) {
     return window_is_screen_fullscreen(mw) || mw->always_on_top ||
@@ -99,44 +100,61 @@ int window_sunk_count(void) {
     return n;
 }
 
+static bool zorder_is_topmost(HWND hwnd) {
+    return (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+}
+
+static SinkSlot zorder_sink_slot(HWND hwnd, HWND bg) {
+    if (hwnd == bg) return SINK_SLOT_BACKDROP;
+
+    ManagedWindow *mw = window_find(hwnd);
+    if (!mw)      return SINK_SLOT_OTHER;
+    if (mw->sunk) return SINK_SLOT_SUNK;
+
+    bool shown = window_on_screen(mw) && !IsIconic(hwnd) &&
+                 desktop_is_visible(mw->desktop_id) &&
+                 !zorder_is_topmost(hwnd);
+    return shown ? SINK_SLOT_SHOWN : SINK_SLOT_OTHER;
+}
+
+static HWND zorder_insert_after(const HWND *bottom_up, int count, int slot) {
+    HWND above = (slot < count) ? bottom_up[slot]
+                                : GetWindow(bottom_up[count - 1], GW_HWNDPREV);
+    return (above && !zorder_is_topmost(above)) ? above : HWND_TOP;
+}
+
 void window_resink(void) {
     HWND bg = g.background_window;
     if (!bg || !IsWindow(bg)) return;
 
-    int sunk = window_sunk_count();
-
-    if (sunk == 0) {
+    if (window_sunk_count() == 0) {
         SetWindowPos(bg, HWND_BOTTOM, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         return;
     }
 
-    if (!window_sink_intact()) {
-        for (int i = 0; i < g.managed_count; i++) {
-            ManagedWindow *mw = &g.managed[i];
-            if (!mw->sunk || !IsWindow(mw->hwnd)) continue;
-            SetWindowPos(mw->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-    }
-
-    HWND top      = GetTopWindow(NULL);
-    HWND top_sunk = NULL;
-    int  steps    = 0;
+    HWND     bottom_up[SINK_WALK_MAX];
+    SinkSlot slots[SINK_WALK_MAX];
+    int      n   = 0;
+    HWND     top = GetTopWindow(NULL);
     for (HWND h = top ? GetWindow(top, GW_HWNDLAST) : NULL;
-         h && steps < SINK_WALK_MAX;
-         h = GetWindow(h, GW_HWNDPREV), steps++) {
-        if (h == bg) continue;
-        ManagedWindow *mw = window_find(h);
-        if (mw && mw->sunk) { top_sunk = h; continue; }
-        break;
+         h && n < SINK_WALK_MAX;
+         h = GetWindow(h, GW_HWNDPREV), n++) {
+        bottom_up[n] = h;
+        slots[n]     = zorder_sink_slot(h, bg);
     }
-    if (!top_sunk) return;
 
-    HWND anchor = GetWindow(top_sunk, GW_HWNDPREV);
-    if (anchor && anchor != bg)
-        SetWindowPos(bg, anchor, 0, 0, 0, 0,
+    SinkOrderPlan plan = sink_order_plan(slots, n);
+
+    if (plan.backdrop_below >= 0)
+        SetWindowPos(bg, zorder_insert_after(bottom_up, n, plan.backdrop_below),
+                     0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    for (int i = plan.surfaced_from; i < n; i++) {
+        if (slots[i] != SINK_SLOT_SUNK) continue;
+        SetWindowPos(bottom_up[i], bg, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 bool window_sink_intact(void) {
@@ -262,4 +280,5 @@ void window_focus_none(void) {
     SetForegroundWindow(sink);
 
     SetWindowLongPtrW(sink, GWL_EXSTYLE, ex);
+    window_resink();
 }
