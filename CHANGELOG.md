@@ -5,6 +5,15 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- fix(mouse): stop focus-follows-mouse from closing right-click menus. Moving
+  the pointer onto a Chrome (or any app's) context menu focused the menu itself,
+  since mshell tracks owned popups; that took the activation away from the app
+  and it dismissed the menu. The pointer now skips captionless tracked popups,
+  and does not move focus at all while the focused app is in a menu or has
+  captured the mouse, so crossing a neighbouring tile no longer ends a menu or
+  a drag-select either
+- test: extract the focus-follows-mouse decision behind a pure seam
+
 ## 0.15.13 — 2026-09-14
 
 - fix: serve each mshelld client on its own thread
