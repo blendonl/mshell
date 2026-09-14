@@ -35,6 +35,8 @@ Thumbs.db
 /mshell.unstripped.exe
 /mshelld.unstripped.exe
 
+__pycache__/
+
 # Detached debug symbols
 *.debug
 

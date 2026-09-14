@@ -5,6 +5,68 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.17 — 2026-09-14
+
+- chore: stop shipping `config/init.full.lua`. It was one person's setup (Flow
+  Launcher, Discord, Valorant, KovaaK's) rather than an example anyone else could
+  run, so the release, the MSI and `install.bat` now carry only the generic
+  `config/init.lua`, still installed to `%APPDATA%\mshell\init.lua` when no
+  config exists. An `init.full.lua` a previous install left beside your config
+  is not touched
+- chore: drop the vendored Lua tarball and upstream HTML docs; the unpacked
+  source under `vendor/lua/src` is identical and is what the build uses
+- docs: remove a duplicate 0.15.15 heading a re-run release added
+
+## 0.15.16 — 2026-09-14
+
+- feat(settings): configure Windows' own settings from the domain they belong to
+  — `mouse.setup` gains scrolling, cursor size, trails, click lock and friends;
+  new `keyboard.setup` (key repeat, Sticky/Filter/Toggle Keys and their
+  shortcuts), `theme.setup` (light, dark or custom, transparency, animations,
+  scrollbars, accent title bars) and `gaming.setup` (Game Mode, Game Bar). They
+  drive the Settings app's own handlers, which work without Explorer, and are
+  saved to the profile; a background `mshell.exe` applies only what differs on
+  each start and reload, so a hung handler cannot stall the shell
+- feat(cli): `mshell.exe --settings list|get|set` reads and writes the same
+  fields by their config names
+- feat(mouse): save `speed`, `accel` and `swap_buttons` to the user profile the
+  way the Settings page does, instead of borrowing them and restoring the
+  originals on exit. A reload writes only a field that differs from what Windows
+  has; deleting a field stops asserting it without undoing it
+
+## 0.15.15 — 2026-09-14
+
+- feat(dim): set how much unfocused windows are dimmed as a percentage
+- feat(dim)!: rename appearance.dim to appearance.dim_unfocused
+
+## 0.15.14 — 2026-09-14
+
+- fix(mouse): stop focus-follows-mouse from closing right-click menus. Moving
+  the pointer onto a Chrome (or any app's) context menu focused the menu itself,
+  since mshell tracks owned popups; that took the activation away from the app
+  and it dismissed the menu. The pointer now skips captionless tracked popups,
+  and does not move focus at all while the focused app is in a menu or has
+  captured the mouse, so crossing a neighbouring tile no longer ends a menu or
+  a drag-select either
+- test: extract the focus-follows-mouse decision behind a pure seam
+- feat(dim): set how much unfocused windows are dimmed as a percentage.
+  `mshell.appearance.dim_unfocused(30)` turns dimming on at 30%, and
+  `mshell.appearance.dim_unfocused{ percent = 30 }` does the same alongside
+  `color`; `opacity` (0–255) still works. Passing a table now turns dimming on
+  unless it says `enabled = false`, and 0% hides the scrim instead of drawing
+  an invisible one
+- **BREAKING:** `mshell.appearance.dim` is now
+  `mshell.appearance.dim_unfocused`, so the name says what gets dimmed. A config
+  still using the old name fails to load with `mshell.appearance.dim was
+  removed — use mshell.appearance.dim_unfocused`; a removed name inside a
+  namespace now says what replaced it, as top-level ones already did
+- fix(dim): hide the scrim of a monitor that was unplugged
+
+## 0.15.13 — 2026-09-14
+
+- fix: serve each mshelld client on its own thread
+- fix: pin mshelld clients to the helper's own Authenticode signer
+
 ## 0.15.12 — 2026-09-14
 
 - fix(zorder): stop the backdrop dropping below hidden windows

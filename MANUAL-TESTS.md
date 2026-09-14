@@ -221,6 +221,16 @@ belongs to a desktop instead of sitting on all of them.
   adopted rather than invisible to the WM, and tiles when restored.
 - An `ignore` rule still leaves a window completely alone: on screen across
   every desktop switch, no bindings reaching it.
+- **Right-click menus stay open under `follow = true`.** With
+  `mshell.mouse.setup{ follow = true }`, right-click a page in Chrome and move
+  the pointer down the menu, into a submenu, then click an item: the menu stays
+  up and the item runs. Repeat in Notepad (a Win32 menu) and Windows Terminal (a
+  XAML flyout). With two tiles side by side, open a menu near the shared edge and
+  sweep the pointer across the other tile: focus stays put until the menu
+  closes. Before: the log showed `Tracking: <menu>` followed by
+  `focus -> <menu> FAILED` and the app dismissed the menu the moment the pointer
+  reached it. Owned Open/Save dialogs are tracked too and still take the focus
+  when the pointer moves onto them.
 
 ### Installing it
 
@@ -476,40 +486,6 @@ labels come out right.
 - **setenv**: `mshell.exec.setenv("FOO", "bar")`, then spawn `cmd.exe` and `echo
   %FOO%`.
 
-## Submap routes for those actions
-
-With `init.full.lua`. Every one of these starts with a bare `Win` TAP — nothing
-below asks for two keys held at once, and any sequence can be abandoned with
-`Esc`. The tests above say what each action should do; this says how to fire it.
-
-- **which-key lists the new maps**: tap `Win` and confirm `+media`, `+system`,
-  `+capture` and `+bsp` appear alongside `+window`, `+resize`, `+desktop`,
-  `+launch`, `+go` and `+move`.
-- **media** (`u`, persisting): `u` then `k`/`j` moves the volume with Windows'
-  own indicator; `m` mutes; `Space` plays/pauses; `h`/`l` change track; `s`
-  stops. Still in the map afterwards — `Esc` leaves. `u` then `10k` is ten
-  volume steps (counts apply; `media.volume.up`/`down` are on the repeat allowlist).
-- **system** (`x`, one-shot): `x` then `r` reloads, `q` quits, `x` panics (see
-  "Panic and safe mode"), `i` raises a notification naming the current desktop,
-  layout, window count and focused process. `i` is a function binding, so it is
-  deliberately ABSENT from the which-key panel — the other four are listed.
-- **power** (`x` `p`, one-shot, nested): the panel shows `+power` under `p`.
-  `x p l` locks. `x p s`/`h` sleep/hibernate. `x p o`/`r`/`d` log off, reboot
-  and shut down — test those only if you mean it. Confirm an unbound key inside
-  the map (say `z`) drops back to root having done nothing, and that `Esc` at
-  any depth returns to root rather than to the parent map.
-- **capture** (`c`, one-shot): `c s` for the whole virtual screen, `c w` for the
-  focused window; both land in `Pictures\Screenshots` and on the clipboard.
-- **bsp** (`b`, persisting): `b b` puts the desktop in the manual layout, then
-  `h`/`v` set the next split's direction, `r` rotates, `t`/`s` make the split a
-  tabbed/stacked container, `n`/`p` cycle its children, `=`/`-` resize it. The
-  hint panel labels those last two "grow split" / "shrink split".
-- **folded into existing maps**: `w Tab` = last window, `w o` = always on top,
-  `d u` = jump to urgent (needs `mshell.appearance.urgency(true)` uncommented, or
-  nothing is ever urgent), `o p` = the built-in launcher. Confirm the launcher
-  takes your typing immediately — the `launch` map is one-shot, so it has
-  already dropped to root by the time the search box is up.
-
 ## Notifications
 
 - A syntax error in `init.lua` while mshell is running shows a red-striped toast
@@ -679,8 +655,21 @@ The built-in box:
   in flight. The windows re-aim from where they are; they must not jump back to
   where the first move started, and the shell must stay responsive.
 - `set_animation(0)` restores instant placement.
-- `set_dim{enabled = true}`: everything but the focused window is dimmed, and
-  the dimming follows the focus.
+- `mshell.appearance.dim_unfocused(true)`: everything but the focused window is
+  dimmed, and the dimming follows the focus.
+- `mshell.appearance.dim_unfocused(60)` and reload: the unfocused windows are
+  clearly darker than at the default.
+  `mshell.appearance.dim_unfocused{ percent = 60 }` looks the same, with no
+  `enabled = true` needed.
+- `mshell.appearance.dim_unfocused(0)` and reload: nothing is dimmed and no
+  scrim is left on screen. `mshell.appearance.dim_unfocused(false)` does the
+  same.
+- A config still calling `mshell.appearance.dim(30)` fails to load, keeps the
+  previous config, and logs `mshell.appearance.dim was removed — use
+  mshell.appearance.dim_unfocused`.
+- With dimming on, unplug the highest-numbered monitor, then drag a remaining
+  display into the space it used in Display settings: no stray dark rectangle
+  covers that part of the display.
 - Dim with a **GPU-accelerated app** focused (a game, a video, a browser playing
   video) and confirm it still renders — this is the failure mode the punched
   scrim exists to avoid.
@@ -813,31 +802,62 @@ tests is what is left behind. Note what Settings › Bluetooth & devices › Mou
 says **before** you start — the checks below are all against that.
 
 - `mshell.mouse.setup{ speed = 4 }` and save. The pointer slows down immediately,
-  and the Settings slider shows 4 if you open it.
-- Delete that line and save again. The pointer goes back to the speed you
-  started with — *not* to Windows' middle notch, and not to 4.
-- `mshell.mouse.setup{ speed = 4, accel = false }`, save, then delete only the
-  `accel` line and save. Acceleration comes back on; the speed stays at 4.
-  (Per-field ownership: giving one back must not give the others back.)
-- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer returns to
-  its original speed.
-- With `speed = 4` applied, sign out and back in **without** quitting cleanly.
-  The pointer is at its original speed: mshell never wrote the change into the
-  user profile, so nothing survives the session.
+  the Settings slider shows 4 if you open it, and
+  `HKCU\Control Panel\Mouse\MouseSensitivity` reads `4`. The log says
+  `mouse: pointer speed N -> 4, saved to the profile`.
+- Save the file again unchanged. The log has **no** new `saved to the profile`
+  line: a reload that asks for what Windows already has writes nothing.
+- Delete that line and save again. The pointer stays at 4 — deleting a line
+  stops mshell asserting the setting, it does not undo it.
+- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer stays at 4.
+- With `speed = 4` applied, sign out and back in, and boot once into Explorer.
+  The pointer is still at 4 both times: the value lives in the user profile.
 - `accel = false`: "Enhance pointer precision" unticks in Settings, and a
   slow-then-fast drag of the same physical distance moves the pointer the same
-  distance both times.
-- `swap_buttons = true`: the right button becomes primary. Set it back to
-  `false` (rather than deleting the line) and it reverts.
+  distance both times. `accel = true` ticks it again.
+- `swap_buttons = true`: the right button becomes primary, and stays primary
+  after quitting mshell. Set it back to `false` and it reverts.
 - A config that mentions **none** of the three: open Settings and confirm speed,
   precision and button order are all untouched after a full mshell run and quit.
-- Crash restore covers an **unhandled exception** (the crash handler in main.c
-  restores the pointer alongside the hidden windows). It cannot be exercised
-  from Task Manager: `End task` is `TerminateProcess`, which bypasses every
-  handler in the process, so nothing runs and nothing is restored. What covers
-  that case instead is the setting never having been persisted — kill mshell
-  with `swap_buttons = true` applied and the buttons stay swapped until you sign
-  out, at which point Windows loads the profile value and they are normal again.
+
+## Windows settings (mouse, keyboard, theme, gaming)
+
+Run these as the shell, with no Explorer, since that is the case they exist
+for. `mshell.exe --settings get` before you start records what you had.
+
+- `mshell.exe --settings list` prints every field with what it takes;
+  `--settings list theme` only the theme ones; `--settings list zzz` says nothing
+  matches and exits 1.
+- `mshell.exe --settings get` prints every field as a config value
+  (`mouse.scroll_by = lines`, never a `SystemSettings_…` key), marking any that
+  are disabled or set by group policy.
+- `--settings set mouse.scroll_lines 0 theme.mode purple mouse.nope 1` prints
+  three FAILED lines naming the range, the accepted words and the unknown name,
+  exits 1, and changes nothing.
+- `--settings set mouse.pointer_shadow true keyboard.repeat_rate 30` changes both
+  (the pointer grows a shadow; `HKCU\Control Panel\Keyboard\KeyboardSpeed` reads
+  30), and running it again prints `already` for both.
+- `--settings set mouse.scroll_by screen mouse.scroll_lines 5`, then
+  `--settings set mouse.scroll_lines 3 mouse.scroll_by lines`: the second works in
+  that order even though lines are disabled while scrolling by screen, because
+  the disabled one is retried after the rest.
+- Put `mshell.theme.setup{ mode = "light" }` in `init.lua` and save. Within a
+  second or two apps turn light, and the log has
+  `settings: theme.mode: dark -> light`. Save again unchanged: no new `->` line
+  (with `log.level("debug")`, an `already light` line instead), and nothing
+  flickers.
+- `mshell.keyboard.setup{ repeat_rate = 99 }` is a config error with the range
+  in the message, and the previous config stays in force.
+- `mshell.keyboard.setup{ repat_rate = 20 }` (misspelt) is a config error naming
+  the field.
+- `--settings set mouse.cursor_size 3` while the config says `cursor_size = 1`,
+  then reload: the pointer goes back to size 1 — the config wins when loaded.
+- On a machine where Game Bar is disabled by policy
+  (`HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR`), `gaming.game_bar = true`
+  logs a FAILED line and raises a notification that a setting could not be
+  applied; the rest of the config's settings still apply.
+- Quit mshell and boot once into Explorer: Settings shows every value the config
+  set.
 
 ## Floating windows stay on top
 

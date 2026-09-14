@@ -43,9 +43,9 @@ tiled, driven entirely from the keyboard and configured in Lua.
   is destroyed. Nothing to declare, up to 32 alive at once.
 - **Desktop rules** (`desktop_rule`) — per-desktop `app` (auto-launch when you
   enter it empty), `float`, `layout`, `master_ratio`, `nmaster` and `monitor`
-  pinning, matched by name or wildcard and layered like window rules. The default
-  config pairs each with a key, so a bare `Win`-tap `g b` lands you on a
-  *running* browser and `m b` throws the focused window at it.
+  pinning, matched by name or wildcard and layered like window rules. Pair each
+  with a key and a bare `Win`-tap `g b` lands you on a *running* browser while
+  `m b` throws the focused window at it.
 - **Leader mode + submaps.** Point `set_leader` at any submap and a bare `Win`
   tap enters it, so you reach everything with bare keys (`w` → window, `r` →
   resize, `g` → go to a desktop, `m` → move a window to one, …); the `Win+key`
@@ -68,6 +68,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   turned off entirely, and `bar.toggle` hides it without a reload.
 - **Focus ring** around the active window and a **solid desktop backdrop**
   (there is no Explorer to paint one).
+- **Unfocused-window dimming** by a percentage
+  (`mshell.appearance.dim_unfocused(30)`), off by default. It is a
+  click-through scrim with the focused window punched out, so no other app's
+  window is ever made layered.
 - **Window rules** matching class, process or full install path as wildcard
   patterns — float, ignore, strip the frame, or park a window fullscreen over
   its monitor. One rule covers a whole game library; tiled windows can't be
@@ -110,13 +114,18 @@ tiled, driven entirely from the keyboard and configured in Lua.
   down, sleep and hibernate, because there is no Start menu to pick them from;
   volume and media keys, because every `Win+*` combo belongs to mshell and a
   keyboard without dedicated media keys would otherwise have no route to volume
-  at all; and screenshots to `Pictures\Screenshots` and the clipboard. The
-  worked config reaches all of them through submaps, so none needs a chord.
+  at all; and screenshots to `Pictures\Screenshots` and the clipboard. Bound in
+  submaps, none of them needs a chord.
   **Pointer speed, acceleration and the left/right button swap** come from the
   same place — `set_mouse{speed=, accel=, swap_buttons=}` is the Settings page
-  you no longer have. They are *borrowed*, not set: mshell notes what the
-  machine had, never writes the change into your user profile, and hands the
-  originals back when it exits. A field you don't mention is left alone.
+  you no longer have. They are *saved*, exactly as that page would save them:
+  the value goes into your user profile, so it survives quitting mshell,
+  signing out and booting into Explorer. mshell only writes a field that differs
+  from what Windows already has, and a field you don't mention is left alone —
+  deleting a line stops mshell asserting it but does not undo it. Scrolling,
+  cursor size, key repeat, the accessibility keys, light and dark theme and Game
+  Mode come the same way, from `mouse.setup`, `keyboard.setup`, `theme.setup` and
+  `gaming.setup`.
 - **Nothing is remembered across a restart**: every start is the one your
   `init.lua` describes. A layout or master ratio you change at runtime lasts as
   long as mshell does, and a config reload keeps it — unless a `desktop_rule`
@@ -192,18 +201,17 @@ Run it again to upgrade: it replaces the installed exe even while that exe is
 your running shell, then restarts mshell so the new build takes over without a
 sign-out. Your `init.lua` is never overwritten.
 
-## Two config files
+## The default config
 
-The release ships two, and they are for different moments:
+The release ships one config, `config/init.lua`. It is small, assumes nothing
+is installed but Windows, and opens `cmd.exe` because that is the one terminal
+every machine has. `install.bat` puts it at `%APPDATA%\mshell\init.lua` only
+when you have no config there yet, and a portable copy with no config falls back
+to it beside `mshell.exe`.
 
-| File | What it is |
-|------|-----------|
-| `config/init.lua` | **The default.** ~130 lines, assumes nothing is installed but Windows, and opens `cmd.exe` because that is the one terminal every machine has. This is what `install.bat` puts at `%APPDATA%\mshell\init.lua`. |
-| `config/init.full.lua` | **The worked example.** Heavily commented: leader menus, per-desktop auto-launch, game rules, which-key layout and styling, event handlers. Installed alongside as reference; copy it over your `init.lua` if you want the lot. |
-
-A default that launched Alacritty, Firefox, Discord and Valorant would greet
-most new users with a log full of launch failures, so it doesn't. Everything
-interesting is one file away and documented.
+It launches nothing at startup: a default that opened a browser, a chat client
+and a game would greet most new users with a log full of launch failures. It is
+a starting point to make your own, not someone else's setup.
 
 ## The launcher
 
@@ -256,54 +264,6 @@ so none of the numbered desktops has to exist in advance.
 | `Win+Shift+Return` | Terminal |
 | `Win+Shift+r` · `Win+Shift+q` | Reload config · quit |
 | `Win+Shift+u` | Install the latest GitHub release (mshell restarts) |
-
-### What `init.full.lua` adds
-
-Everything below comes from the worked example, not the default. Its `desktops`
-table gives each desktop a key *and* a rule — the rule carries the app to open
-when you arrive and it's empty — so the leader gets you there in three
-keystrokes with the app already running:
-
-| Keys | Action |
-|------|--------|
-| **Tap `Win`** then `g b` | Go to the **browser** desktop (opens it if empty) |
-| **Tap `Win`** then `g t` | Go to the **terminal** desktop |
-| **Tap `Win`** then `g d` | Go to the **Discord** desktop |
-| **Tap `Win`** then `g v` | Go to the **Valorant** desktop |
-| **Tap `Win`** then `g 1..9` / `g Tab` | Go to the desktop named `1`..`9` / to the last one |
-| **Tap `Win`** then `g [` / `g ]` | Step through the desktops that exist right now |
-| **Tap `Win`** then `m <key>` | Same keys, but send the focused **window** there |
-
-On top of the core bindings above, it adds four submaps and a game desktop:
-
-| Keys | Action |
-|------|--------|
-| `Win+w` | **window** submap (one-shot; close/kill/float/fullscreen/all 7 layouts, `Tab` = last window, `o` = always on top) |
-| `Win+r` | **resize** submap (persisting; ratio + per-window `cfact`; `Esc` exits) |
-| `Win+d` | **desktop** submap (persisting; cycle focus, `Tab` = last desktop, `u` = jump to urgent) |
-| `Win+o` | **launch** submap (one-shot; terminal, browser, files, `p` = the built-in launcher) |
-| `Win+v` / `Win+Shift+v` | Go to / send window to the `game` desktop (Valorant) |
-| `Win+Alt+f` | Fullscreen: **both** (the minimal config puts this on `Win+F11`) |
-| `Win+Ctrl+i` | A Lua-function binding: logs the current desktop and window |
-
-Everything a shell is expected to have but a tiling WM has no chord left for —
-power, volume, screenshots, manual tiling — lives in five more submaps that are
-deliberately **leader-only**. A tap and two bare keys reaches any of them, so
-nothing needs three keys held at once:
-
-| Keys | Action |
-|------|--------|
-| **Tap `Win`** then `u` | **media** submap (persisting; `k`/`j` volume, `m` mute, `Space` play, `h`/`l` track, `s` stop) |
-| **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `u` update, `x` panic, `i` notify current state) |
-| **Tap `Win`** then `x p` | **power** submap (one-shot; `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `d` shut down) |
-| **Tap `Win`** then `c` | **capture** submap (one-shot; `s` whole screen, `w` focused window) |
-| **Tap `Win`** then `b` | **bsp** submap (persisting; `b` manual layout, `h`/`v` splits, `t`/`s` tabbed/stacked, `n`/`p` cycle, `=`/`-` resize) |
-
-Counts work in the persisting maps, so `u` then `10k` is ten volume steps. The
-destructive power actions are nested a layer deeper on purpose: mshell has no
-confirmation dialog, so `Win` `x` `p` `d` being four deliberate taps — `Esc`
-bailing out at every one — is what stands between you and an accidental
-shutdown.
 
 ## Configuration
 
@@ -378,6 +338,7 @@ mshell.appearance.border(2, 0xffffff)     -- focus ring: width, 0xRRGGBB
 mshell.appearance.border{ accent = "top" }-- move the focus bar; "none" drops it
 mshell.appearance.smart_borders(true)     -- no ring when a monitor shows one window
 mshell.appearance.background(0x000000)    -- desktop backdrop
+mshell.appearance.dim_unfocused(30)       -- darken unfocused windows by 30%
 
 mshell.desktop.rule("1", { default = true })          -- the desktop you land on
 mshell.desktop.rule("web", { app = "firefox.exe" })   -- open it when empty
@@ -413,7 +374,8 @@ and it obeys the same rules — `no_ring` windows, fullscreen windows and
 **API.** Everything is grouped by what it acts on, and every name is a value
 rather than a string: `mshell.window.*`, `mshell.desktop.*`, `mshell.monitor.*`,
 `mshell.display.*`, `mshell.layout.*`, `mshell.bar.*`, `mshell.appearance.*`,
-`mshell.keys.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
+`mshell.keys.*`, `mshell.mouse.*`, `mshell.keyboard.*`, `mshell.theme.*`,
+`mshell.gaming.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
 `mshell.notify`, `mshell.log`, `mshell.config.*`, `mshell.on`.
 
 The full list is not reproduced here, because a list in a README goes stale.
@@ -433,13 +395,43 @@ display gets its own tree, and `Win+Space` deliberately does not cycle into
 **A launcher.** `mshell.launcher.open` opens a filter over your Start-menu
 shortcuts; anything that matches nothing is run as typed, so it is a Run box too.
 It types without ever taking focus, because the keyboard hook hands it keys
-directly. `init.full.lua` puts it on `Win` `o` `p` — in the one-shot `launch`
-submap rather than on the persisting leader, because a map you are still *in*
-would be swallowing keys the moment the launcher closed.
+directly. Bind it in a one-shot submap rather than on a persisting leader,
+because a map you are still *in* would be swallowing keys the moment the
+launcher closed.
 
 **Registry tweaks you can undo.** `mshell.exe --tweaks list` shows what is
 applied and why; `apply` records the previous value before writing, so `revert`
 restores exactly what you had rather than Microsoft's default.
+
+**Windows' own settings, where they belong.** The Settings app needs Explorer,
+but the settings behind it do not: Windows keeps each page's logic in handler
+libraries that work without a shell, and mshell drives those same handlers. Each
+setting is a field on the thing it configures, not a registry path:
+
+```lua
+mshell.mouse.setup{ scroll_lines = 5, scroll_by = "lines", reverse_scroll = false,
+                    cursor_size = 2, hide_while_typing = true }
+mshell.keyboard.setup{ repeat_delay = 0, repeat_rate = 31, sticky_keys_shortcut = false }
+mshell.theme.setup{ mode = "dark", transparency = false, animations = false }
+mshell.gaming.setup{ game_mode = true }
+```
+
+They are saved to your profile exactly as the Settings page would save them, so
+they outlive mshell. On every start and reload mshell hands the lot to a
+separate `mshell.exe` in the background, which writes only the ones that differ
+and logs each change; a handler that hangs or crashes takes that helper down,
+not the shell, and anything that could not be applied raises a notification.
+A wrong name or value is a config error like any other. The same names work
+from a terminal:
+
+    mshell.exe --settings list [pattern]      every field, what it takes, what it does
+    mshell.exe --settings get [name...]       current values, all of them by default
+    mshell.exe --settings set theme.mode light mouse.scroll_by screen
+
+A setting another one disables — `trails_length` while `trails` is off, lines
+while scrolling by screen — is retried after the rest, so the order you write
+them in does not matter. Group policy still wins: a field it locks reports that
+instead of changing.
 
 **Notifications.** There is no Explorer, so there is no toast host and no tray —
 mshell paints its own. A config that fails to reload says so on screen with the
@@ -459,15 +451,15 @@ separate app that provides one: it shows those balloons and gives you a menu of
 tray icons. mshell ships nothing of it and needs no configuration for it —
 `mshell.exec.startup("mnotify.exe")` starts it with the session.
 
-**A panic key.** The `panic` action — `Win` `x` `x` in `init.full.lua` — starts
+**A panic key.** The `panic` action starts
 Explorer alongside mshell and stops the hook binding anything, so a shell that is
 misbehaving does not need Task Manager to escape. It deliberately does not quit —
 exiting as the shell ends the session, which is the thing you were avoiding. Any
 reload undoes it (`mshell.exe --msg reload`, or saving `init.lua`); no keybinding
 can, because not binding keys is the point.
 
-**Updating from a keybinding.** The `update` action — `Win+Shift+u`, and `Win`
-`x` `u` in `init.full.lua` — fetches the latest GitHub release, checks the
+**Updating from a keybinding.** The `update` action — `Win+Shift+u` in the
+default config — fetches the latest GitHub release, checks the
 download against the SHA-256 the release published, unpacks it and runs the
 `install.bat` inside it. That script is the upgrade path either way: it renames
 the running image rather than overwriting it and restarts mshell itself, so the
@@ -749,9 +741,8 @@ mshell.keys.submap("move", move_keys)
 
 Adding a desktop is then one row: it gets both leader keys and its rule at once,
 and the two maps can't drift apart. `app` may be `nil`, so a program you don't
-have loses only its auto-launch — the desktop and its keys stay. The shipped
-`config/init.lua` does exactly this, which is what makes `Win`-tap `g b` land on
-a running browser. Note the table declares nothing: these are just the desktops
+have loses only its auto-launch — the desktop and its keys stay. Note the table
+declares nothing: these are just the desktops
 worth a key and a rule, and you can still switch to any other name at any time.
 
 Apps whose launcher needs **arguments** can't be used directly: `spawn` and a
