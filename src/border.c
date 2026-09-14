@@ -63,6 +63,24 @@ static BorderRect border_rect(const RECT *r) {
     return out;
 }
 
+static bool window_is_topmost(HWND hwnd) {
+    return (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+}
+
+static UINT border_stack_above(HWND focus, HWND *insert_after) {
+    HWND above = GetWindow(focus, GW_HWNDPREV);
+    if (above == g.border_window &&
+        window_is_topmost(g.border_window) == window_is_topmost(focus))
+        return SWP_NOZORDER;
+    if (above == g.border_window) above = GetWindow(above, GW_HWNDPREV);
+
+    if (window_is_topmost(focus))
+        *insert_after = above ? above : HWND_TOPMOST;
+    else
+        *insert_after = above && !window_is_topmost(above) ? above : HWND_NOTOPMOST;
+    return 0;
+}
+
 static HRGN border_region(const BorderGeometry *geo, int w, int h) {
     HRGN rgn = CreateRectRgn(0, 0, 0, 0);
     if (!rgn) return NULL;
@@ -140,8 +158,10 @@ void border_refresh(void) {
     }
     SetWindowRgn(g.border_window, rgn, FALSE);
 
-    SetWindowPos(g.border_window, focus, geo.bounds.left, geo.bounds.top, w, h,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    HWND insert_after = NULL;
+    UINT zorder = border_stack_above(focus, &insert_after);
+    SetWindowPos(g.border_window, insert_after, geo.bounds.left, geo.bounds.top, w, h,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW | zorder);
     InvalidateRect(g.border_window, NULL, TRUE);
 }
 
