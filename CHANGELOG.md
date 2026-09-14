@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.17 — 2026-09-14
+
 - chore: stop shipping `config/init.full.lua`. It was one person's setup (Flow
   Launcher, Discord, Valorant, KovaaK's) rather than an example anyone else could
   run, so the release, the MSI and `install.bat` now carry only the generic
