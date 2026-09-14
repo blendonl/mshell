@@ -5,6 +5,9 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- fix(update): start the new build before exiting instead of waiting for
+  Winlogon to relaunch the shell, which it does not do after a clean exit
+
 ## 0.15.6 — 2026-09-14
 
 - feat(border): add a focus bar on the top or bottom edge of the focused window,
