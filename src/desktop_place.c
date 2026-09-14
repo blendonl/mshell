@@ -7,6 +7,12 @@ int desktop_visible_on(const int *monitor_desktop, int span, int id) {
     return -1;
 }
 
+int desktop_pick_monitor(int pinned, int focused, int span) {
+    if (pinned  >= 0 && pinned  < span) return pinned;
+    if (focused >= 0 && focused < span) return focused;
+    return 0;
+}
+
 int desktop_empty_monitor(const int *monitor_desktop, int span) {
     if (!monitor_desktop) return -1;
     for (int m = 0; m < span; m++)
