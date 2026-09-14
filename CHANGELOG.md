@@ -14,11 +14,16 @@ All notable changes to mshell are documented here. This project adheres to
   a drag-select either
 - test: extract the focus-follows-mouse decision behind a pure seam
 - feat(dim): set how much unfocused windows are dimmed as a percentage.
-  `mshell.appearance.dim(30)` turns dimming on at 30%, and
-  `mshell.appearance.dim{ percent = 30 }` does the same alongside `color`;
-  `opacity` (0–255) still works. Passing a table now turns dimming on unless it
-  says `enabled = false`, and 0% hides the scrim instead of drawing an
-  invisible one
+  `mshell.appearance.dim_unfocused(30)` turns dimming on at 30%, and
+  `mshell.appearance.dim_unfocused{ percent = 30 }` does the same alongside
+  `color`; `opacity` (0–255) still works. Passing a table now turns dimming on
+  unless it says `enabled = false`, and 0% hides the scrim instead of drawing
+  an invisible one
+- **BREAKING:** `mshell.appearance.dim` is now
+  `mshell.appearance.dim_unfocused`, so the name says what gets dimmed. A config
+  still using the old name fails to load with `mshell.appearance.dim was
+  removed — use mshell.appearance.dim_unfocused`; a removed name inside a
+  namespace now says what replaced it, as top-level ones already did
 - fix(dim): hide the scrim of a monitor that was unplugged
 
 ## 0.15.13 — 2026-09-14
