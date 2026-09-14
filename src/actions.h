@@ -1,6 +1,7 @@
 #pragma once
 
 int  resolve_target(Desktop *dt, int from, Action action, bool cycle_prev);
+int  cycle_target(Desktop *dt, int from, bool prev);
 void focus_monitor(int delta);
 void move_focused_to_monitor(int delta);
 bool parse_desktop_monitor(const wchar_t *command, int arg,
