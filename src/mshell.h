@@ -590,6 +590,7 @@ void     update_work_area(void);
 int      monitor_of_window(HWND hwnd);
 
 BOOL     spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param);
+BOOL     spi_set_persistent(UINT action, UINT ui_param, PVOID pv_param);
 
 UINT     monitor_dpi(int mon);
 UINT     monitor_dpi_of(HMONITOR handle);
@@ -845,7 +846,6 @@ void     mouse_sync_hook(void);
 void     mouse_drag_end(HWND hwnd);
 
 void     mouse_sync_pointer(void);
-void     mouse_restore_pointer(void);
 
 bool     bar_init(void);
 void     bar_shutdown(void);
