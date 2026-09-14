@@ -118,7 +118,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   the value goes into your user profile, so it survives quitting mshell,
   signing out and booting into Explorer. mshell only writes a field that differs
   from what Windows already has, and a field you don't mention is left alone —
-  deleting a line stops mshell asserting it but does not undo it.
+  deleting a line stops mshell asserting it but does not undo it. Scrolling,
+  cursor size, key repeat, the accessibility keys, light and dark theme and Game
+  Mode come the same way, from `mouse.setup`, `keyboard.setup`, `theme.setup` and
+  `gaming.setup`.
 - **Nothing is remembered across a restart**: every start is the one your
   `init.lua` describes. A layout or master ratio you change at runtime lasts as
   long as mshell does, and a config reload keeps it — unless a `desktop_rule`
@@ -415,7 +418,8 @@ and it obeys the same rules — `no_ring` windows, fullscreen windows and
 **API.** Everything is grouped by what it acts on, and every name is a value
 rather than a string: `mshell.window.*`, `mshell.desktop.*`, `mshell.monitor.*`,
 `mshell.display.*`, `mshell.layout.*`, `mshell.bar.*`, `mshell.appearance.*`,
-`mshell.keys.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
+`mshell.keys.*`, `mshell.mouse.*`, `mshell.keyboard.*`, `mshell.theme.*`,
+`mshell.gaming.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
 `mshell.notify`, `mshell.log`, `mshell.config.*`, `mshell.on`.
 
 The full list is not reproduced here, because a list in a README goes stale.
@@ -442,6 +446,36 @@ would be swallowing keys the moment the launcher closed.
 **Registry tweaks you can undo.** `mshell.exe --tweaks list` shows what is
 applied and why; `apply` records the previous value before writing, so `revert`
 restores exactly what you had rather than Microsoft's default.
+
+**Windows' own settings, where they belong.** The Settings app needs Explorer,
+but the settings behind it do not: Windows keeps each page's logic in handler
+libraries that work without a shell, and mshell drives those same handlers. Each
+setting is a field on the thing it configures, not a registry path:
+
+```lua
+mshell.mouse.setup{ scroll_lines = 5, scroll_by = "lines", reverse_scroll = false,
+                    cursor_size = 2, hide_while_typing = true }
+mshell.keyboard.setup{ repeat_delay = 0, repeat_rate = 31, sticky_keys_shortcut = false }
+mshell.theme.setup{ mode = "dark", transparency = false, animations = false }
+mshell.gaming.setup{ game_mode = true }
+```
+
+They are saved to your profile exactly as the Settings page would save them, so
+they outlive mshell. On every start and reload mshell hands the lot to a
+separate `mshell.exe` in the background, which writes only the ones that differ
+and logs each change; a handler that hangs or crashes takes that helper down,
+not the shell, and anything that could not be applied raises a notification.
+A wrong name or value is a config error like any other. The same names work
+from a terminal:
+
+    mshell.exe --settings list [pattern]      every field, what it takes, what it does
+    mshell.exe --settings get [name...]       current values, all of them by default
+    mshell.exe --settings set theme.mode light mouse.scroll_by screen
+
+A setting another one disables — `trails_length` while `trails` is off, lines
+while scrolling by screen — is retried after the rest, so the order you write
+them in does not matter. Group policy still wins: a field it locks reports that
+instead of changing.
 
 **Notifications.** There is no Explorer, so there is no toast host and no tray —
 mshell paints its own. A config that fails to reload says so on screen with the
