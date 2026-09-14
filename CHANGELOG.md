@@ -5,6 +5,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.11 — 2026-09-14
+
+- fix(focus): skip windows the app has hidden when moving focus
+
 ## 0.15.10 — 2026-09-14
 
 - fix(window): never adopt child windows, even disabled ones
