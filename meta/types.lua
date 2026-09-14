@@ -210,6 +210,43 @@ function Window:restore() end
 ---@field speed integer? Windows pointer speed, 1 to 20.
 ---@field accel boolean?
 ---@field swap_buttons boolean?
+---@field scroll_lines integer? Lines one notch of the wheel scrolls, 1 to 100.
+---@field scroll_by "lines"|"screen"? Whether a notch scrolls lines or a whole screen.
+---@field scroll_inactive boolean? Scroll the window under the pointer even when it is not focused.
+---@field reverse_scroll boolean? Rolling down moves the content up.
+---@field cursor_size integer? Pointer size, 1 (normal) to 15.
+---@field double_click_speed integer? 1 slowest to 11 fastest.
+---@field hide_while_typing boolean?
+---@field pointer_shadow boolean?
+---@field trails boolean?
+---@field trails_length integer? 2 to 7. Only takes effect with trails on.
+---@field locate_with_ctrl boolean? Pressing Ctrl rings the pointer.
+---@field click_lock boolean? Holding the button briefly locks it down.
+---@field snap_to_default boolean? Move the pointer onto a dialog's default button.
+
+---@class mshell.KeyboardOpts
+---@field repeat_delay integer? Wait before a held key repeats, 0 (about 250 ms) to 3 (about 1 s).
+---@field repeat_rate integer? How fast a held key repeats, 0 slowest to 31 fastest.
+---@field sticky_keys boolean?
+---@field sticky_keys_shortcut boolean? Five Shifts turn Sticky Keys on.
+---@field filter_keys boolean?
+---@field filter_keys_shortcut boolean? Holding right Shift turns Filter Keys on.
+---@field toggle_keys boolean?
+---@field toggle_keys_shortcut boolean? Holding Num Lock turns Toggle Keys on.
+---@field underline_access_keys boolean?
+
+---@class mshell.ThemeOpts
+---@field mode "light"|"dark"|"custom"? custom lets apps and system differ.
+---@field apps "light"|"dark"? Used when mode is custom.
+---@field system "light"|"dark"? Used when mode is custom.
+---@field transparency boolean?
+---@field accent_title_bars boolean? Accent colour on title bars and window borders.
+---@field animations boolean?
+---@field always_show_scrollbars boolean?
+
+---@class mshell.GamingOpts
+---@field game_mode boolean?
+---@field game_bar boolean? A controller's Xbox button opens Game Bar.
 
 ---@class mshell.WhichKeyOpts
 ---@field enabled boolean?

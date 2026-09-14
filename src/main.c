@@ -444,6 +444,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     events_sync_urgency();
     mouse_sync_hook();
     mouse_sync_pointer();
+    settings_sync();
     update_check_async();
 
     window_manage_existing();
