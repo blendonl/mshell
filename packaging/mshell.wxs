@@ -51,9 +51,6 @@
       <Component Id="cmpInitLua" Guid="*">
         <File Id="filInitLua" Source="config/init.lua" KeyPath="yes" />
       </Component>
-      <Component Id="cmpInitFullLua" Guid="*">
-        <File Id="filInitFullLua" Source="config/init.full.lua" KeyPath="yes" />
-      </Component>
     </DirectoryRef>
 
     <Feature Id="Complete" Level="1" Title="mshell">
@@ -65,7 +62,6 @@
       <ComponentRef Id="cmpLicense" />
       <ComponentRef Id="cmpThirdPartyNotices" />
       <ComponentRef Id="cmpInitLua" />
-      <ComponentRef Id="cmpInitFullLua" />
     </Feature>
   </Product>
 </Wix>

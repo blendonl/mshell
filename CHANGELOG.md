@@ -5,6 +5,16 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- chore: stop shipping `config/init.full.lua`. It was one person's setup (Flow
+  Launcher, Discord, Valorant, KovaaK's) rather than an example anyone else could
+  run, so the release, the MSI and `install.bat` now carry only the generic
+  `config/init.lua`, still installed to `%APPDATA%\mshell\init.lua` when no
+  config exists. An `init.full.lua` a previous install left beside your config
+  is not touched
+- chore: drop the vendored Lua tarball and upstream HTML docs; the unpacked
+  source under `vendor/lua/src` is identical and is what the build uses
+- docs: remove a duplicate 0.15.15 heading a re-run release added
+
 ## 0.15.16 — 2026-09-14
 
 - feat(settings): configure Windows' own settings from the domain they belong to
@@ -21,10 +31,6 @@ All notable changes to mshell are documented here. This project adheres to
   way the Settings page does, instead of borrowing them and restoring the
   originals on exit. A reload writes only a field that differs from what Windows
   has; deleting a field stops asserting it without undoing it
-
-## 0.15.15 — 2026-09-14
-
-- Maintenance release.
 
 ## 0.15.15 — 2026-09-14
 
