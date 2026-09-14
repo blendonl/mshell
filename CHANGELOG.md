@@ -5,6 +5,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.12 — 2026-09-14
+
+- fix(zorder): stop the backdrop dropping below hidden windows
+
 ## 0.15.11 — 2026-09-14
 
 - fix(focus): skip windows the app has hidden when moving focus
