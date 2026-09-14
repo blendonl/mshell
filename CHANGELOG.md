@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.13 — 2026-09-14
+
+- fix: serve each mshelld client on its own thread
+- fix: pin mshelld clients to the helper's own Authenticode signer
+
 ## 0.15.12 — 2026-09-14
 
 - fix(zorder): stop the backdrop dropping below hidden windows
