@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.20 — 2026-09-14
+
 ### Removed
 
 - **BREAKING: `mshell.screenshot` is gone.** Screenshots and screen recording
