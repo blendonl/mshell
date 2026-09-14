@@ -76,6 +76,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/hide_policy.c \
               $(SRC_DIR)/desktop_place.c \
               $(SRC_DIR)/border_math.c \
+              $(SRC_DIR)/focus_pick.c \
               $(SRC_DIR)/update.c
 
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
@@ -150,7 +151,7 @@ HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
                api_spec tree_algebra ipc_state hide_policy \
-               desktop_place border_math
+               desktop_place border_math focus_pick
 TEST_SUFFIX =
 HOST_CFLAGS = -O1 -Wall -Wextra
 ASAN_CFLAGS = -O1 -g -Wall -Wextra \
