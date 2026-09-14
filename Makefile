@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.12
+VERSION  = 0.15.13
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
@@ -127,7 +127,7 @@ HELPER        = mshelld.exe
 HELPER_FULL   = mshelld.unstripped.exe
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
-HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
+HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi -lwintrust -lcrypt32
 
 SYMBOLS       = $(TARGET).debug $(HELPER).debug
 
