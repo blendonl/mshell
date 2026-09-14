@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.7 — 2026-09-14
+
 - fix(update): start the new build before exiting instead of waiting for
   Winlogon to relaunch the shell, which it does not do after a clean exit
 
