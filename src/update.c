@@ -294,6 +294,57 @@ static bool prepare_workdir(wchar_t *out, size_t cap) {
            GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
+typedef struct {
+    wchar_t exe[MAX_PATH * 2];
+    wchar_t args[MAX_PATH * 2];
+} RegisteredShell;
+
+static bool read_registered_shell(HKEY hive, RegisteredShell *out) {
+    HKEY k;
+    if (RegOpenKeyExW(hive, WINLOGON_KEY, 0, KEY_READ, &k) != ERROR_SUCCESS)
+        return false;
+
+    wchar_t shell[MAX_PATH * 2];
+    DWORD   sz = sizeof(shell), type = 0;
+    LSTATUS r = RegQueryValueExW(k, L"Shell", NULL, &type,
+                                 (LPBYTE)shell, &sz);
+    RegCloseKey(k);
+    if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
+        return false;
+
+    DWORD chars = sz / sizeof(wchar_t);
+    if (chars >= ARRAYSIZE(shell)) chars = ARRAYSIZE(shell) - 1;
+    shell[chars] = L'\0';
+
+    wchar_t path[MAX_PATH * 2];
+    if (type == REG_EXPAND_SZ) {
+        if (!ExpandEnvironmentStringsW(shell, path, ARRAYSIZE(path)))
+            return false;
+        path[ARRAYSIZE(path) - 1] = L'\0';
+    } else if (!fmt_w(path, ARRAYSIZE(path), L"%ls", shell)) {
+        return false;
+    }
+
+    wchar_t       *p    = path, *endq;
+    const wchar_t *rest = L"";
+    if (*p == L'"' && (endq = wcschr(p + 1, L'"')) != NULL) {
+        *endq = L'\0';
+        p++;
+        rest = endq + 1;
+    } else {
+        wchar_t *arg = wcsstr(p, L" --");
+        if (arg) {
+            *arg = L'\0';
+            rest = arg + 1;
+        }
+    }
+    while (*rest == L' ' || *rest == L'\t') rest++;
+
+    return p[0] &&
+           fmt_w(out->exe,  ARRAYSIZE(out->exe),  L"%ls", p) &&
+           fmt_w(out->args, ARRAYSIZE(out->args), L"%ls", rest);
+}
+
 static bool running_as_installed_shell(void) {
     wchar_t self[MAX_PATH];
     DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
@@ -301,43 +352,46 @@ static bool running_as_installed_shell(void) {
 
     const HKEY hives[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
     for (int i = 0; i < 2; i++) {
-        HKEY k;
-        if (RegOpenKeyExW(hives[i], WINLOGON_KEY, 0, KEY_READ, &k) != ERROR_SUCCESS)
-            continue;
-
-        wchar_t shell[MAX_PATH * 2];
-        DWORD   sz = sizeof(shell), type = 0;
-        LSTATUS r = RegQueryValueExW(k, L"Shell", NULL, &type,
-                                     (LPBYTE)shell, &sz);
-        RegCloseKey(k);
-        if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
-            continue;
-
-        DWORD chars = sz / sizeof(wchar_t);
-        if (chars >= ARRAYSIZE(shell)) chars = ARRAYSIZE(shell) - 1;
-        shell[chars] = L'\0';
-
-        wchar_t path[MAX_PATH * 2];
-        if (type == REG_EXPAND_SZ) {
-            if (!ExpandEnvironmentStringsW(shell, path, ARRAYSIZE(path)))
-                continue;
-            path[ARRAYSIZE(path) - 1] = L'\0';
-        } else if (!fmt_w(path, ARRAYSIZE(path), L"%ls", shell)) {
-            continue;
-        }
-
-        wchar_t *p = path, *endq;
-        if (*p == L'"' && (endq = wcschr(p + 1, L'"')) != NULL) {
-            *endq = L'\0';
-            p++;
-        } else {
-            wchar_t *arg = wcsstr(p, L" --");
-            if (arg) *arg = L'\0';
-        }
-
-        if (_wcsicmp(p, self) == 0) return true;
+        RegisteredShell shell;
+        if (read_registered_shell(hives[i], &shell) &&
+            _wcsicmp(shell.exe, self) == 0)
+            return true;
     }
     return false;
+}
+
+static bool launch_successor(void) {
+    RegisteredShell shell;
+    if (!read_registered_shell(HKEY_CURRENT_USER, &shell) &&
+        !read_registered_shell(HKEY_LOCAL_MACHINE, &shell)) {
+        log_err(L"update: no Winlogon Shell value to relaunch");
+        return false;
+    }
+
+    wchar_t cmd[MAX_PATH * 5];
+    if (!fmt_w(cmd, ARRAYSIZE(cmd), L"\"%ls\" %ls --takeover",
+               shell.exe, shell.args)) {
+        log_err(L"update: the relaunch command for %ls is too long", shell.exe);
+        return false;
+    }
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+
+    if (!CreateProcessW(shell.exe, cmd, NULL, NULL, FALSE, 0,
+                        NULL, NULL, &si, &pi)) {
+        log_err(L"update: could not start %ls: %lu", cmd, GetLastError());
+        return false;
+    }
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    log_msg(LOG_INFO, L"update: started %ls (pid %lu) to take over once this "
+            L"build exits", cmd, pi.dwProcessId);
+    return true;
 }
 
 static bool install_log_path(wchar_t *out, size_t cap) {
@@ -385,6 +439,14 @@ static void update_restart_self(const wchar_t *version) {
                       L"mshell %ls is installed, but AutoRestartShell is off on "
                       L"this machine — stopping the shell would log you out. "
                       L"Sign out and back in to start the new build.", version);
+        return;
+    }
+
+    if (!launch_successor()) {
+        update_notify(NOTIFY_ERROR, 30000,
+                      L"mshell %ls is installed, but the new build could not be "
+                      L"started, so this one keeps running. Sign out and back "
+                      L"in to switch to it.", version);
         return;
     }
 
