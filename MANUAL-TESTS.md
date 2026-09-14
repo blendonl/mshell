@@ -221,6 +221,16 @@ belongs to a desktop instead of sitting on all of them.
   adopted rather than invisible to the WM, and tiles when restored.
 - An `ignore` rule still leaves a window completely alone: on screen across
   every desktop switch, no bindings reaching it.
+- **Right-click menus stay open under `follow = true`.** With
+  `mshell.mouse.setup{ follow = true }`, right-click a page in Chrome and move
+  the pointer down the menu, into a submenu, then click an item: the menu stays
+  up and the item runs. Repeat in Notepad (a Win32 menu) and Windows Terminal (a
+  XAML flyout). With two tiles side by side, open a menu near the shared edge and
+  sweep the pointer across the other tile: focus stays put until the menu
+  closes. Before: the log showed `Tracking: <menu>` followed by
+  `focus -> <menu> FAILED` and the app dismissed the menu the moment the pointer
+  reached it. Owned Open/Save dialogs are tracked too and still take the focus
+  when the pointer moves onto them.
 
 ### Installing it
 
