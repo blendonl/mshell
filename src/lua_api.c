@@ -816,11 +816,21 @@ static int lua_mshell_set_animation(lua_State *L) {
     return 0;
 }
 
-static int lua_mshell_set_dim(lua_State *L) {
+static BYTE dim_alpha_from_percent(lua_Number percent) {
+    return (BYTE)(clamp_f((float)percent, 0.f, 100.f) * 255.f / 100.f + 0.5f);
+}
+
+static int lua_mshell_set_dim_unfocused(lua_State *L) {
+    if (lua_type(L, 1) == LUA_TNUMBER) {
+        g.cfg.dim_enabled = true;
+        g.cfg.dim_alpha   = dim_alpha_from_percent(lua_tonumber(L, 1));
+        return 0;
+    }
     if (!lua_istable(L, 1)) {
         g.cfg.dim_enabled = lua_toboolean(L, 1);
         return 0;
     }
+    g.cfg.dim_enabled = true;
     lua_getfield(L, 1, "enabled");
     if (!lua_isnil(L, -1)) g.cfg.dim_enabled = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
@@ -834,7 +844,83 @@ static int lua_mshell_set_dim(lua_State *L) {
     if (lua_isnumber(L, -1))
         g.cfg.dim_alpha = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
     lua_pop(L, 1);
+
+    lua_getfield(L, 1, "percent");
+    if (lua_isnumber(L, -1))
+        g.cfg.dim_alpha = dim_alpha_from_percent(lua_tonumber(L, -1));
+    lua_pop(L, 1);
     return 0;
+}
+
+static FieldInput field_input_at(lua_State *L, int idx) {
+    FieldInput in = { .tag = FIELD_IN_OTHER };
+    switch (lua_type(L, idx)) {
+    case LUA_TBOOLEAN:
+        in.tag = FIELD_IN_BOOL;
+        in.b   = lua_toboolean(L, idx) != 0;
+        break;
+    case LUA_TNUMBER:
+        if (lua_isinteger(L, idx)) {
+            in.tag = FIELD_IN_INT;
+            in.i   = (long long)lua_tointeger(L, idx);
+        } else {
+            lua_Number n = lua_tonumber(L, idx);
+            bool whole = n >= -1e15 && n <= 1e15 && n == (lua_Number)(long long)n;
+            in.tag = whole ? FIELD_IN_INT : FIELD_IN_NUMBER;
+            in.i   = whole ? (long long)n : 0;
+        }
+        break;
+    case LUA_TSTRING:
+        in.tag = FIELD_IN_STRING;
+        in.s   = lua_tostring(L, idx);
+        break;
+    default:
+        break;
+    }
+    return in;
+}
+
+static void assign_setting(lua_State *L, const SettingField *f, const char *text) {
+    SettingAssign *slot = NULL;
+    for (int k = 0; k < g.cfg.setting_assign_count; k++)
+        if (g.cfg.setting_assigns[k].field == f) slot = &g.cfg.setting_assigns[k];
+
+    if (!slot) {
+        if (g.cfg.setting_assign_count >= MAX_SETTING_ASSIGNS)
+            luaL_error(L, "too many Windows settings in one config (max %d)", MAX_SETTING_ASSIGNS);
+        slot = &g.cfg.setting_assigns[g.cfg.setting_assign_count++];
+    }
+    slot->field = f;
+    snprintf(slot->text, sizeof slot->text, "%s", text);
+}
+
+static void read_setting_fields(lua_State *L, int table, const char *ns, const char *fn) {
+    for (int k = 0; k < settings_catalog_count(); k++) {
+        const SettingField *f = settings_catalog_at(k);
+        if (!settings_field_in_namespace(f, ns)) continue;
+
+        lua_getfield(L, table, settings_field_leaf(f));
+        if (!lua_isnil(L, -1)) {
+            FieldInput in = field_input_at(L, -1);
+            char text[SETTING_ASSIGN_TEXT], err[256];
+            if (!settings_field_from_input(f, &in, text, sizeof text, err, sizeof err))
+                luaL_error(L, "mshell.%s: %s", fn, err);
+            assign_setting(L, f, text);
+        }
+        lua_pop(L, 1);
+    }
+}
+
+static void reject_unknown_setting_fields(lua_State *L, int table, const char *ns, const char *fn) {
+    lua_pushnil(L);
+    while (lua_next(L, table)) {
+        lua_pop(L, 1);
+        const char *key = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : NULL;
+        char path[96];
+        snprintf(path, sizeof path, "%s.%s", ns, key ? key : "");
+        if (!key || !settings_catalog_find(path))
+            luaL_error(L, "mshell.%s: no field '%s'", fn, key ? key : "(not a name)");
+    }
 }
 
 static int lua_mshell_set_mouse_tbl(lua_State *L) {
@@ -871,8 +957,24 @@ static int lua_mshell_set_mouse_tbl(lua_State *L) {
     lua_getfield(L, 1, "swap_buttons");
     if (!lua_isnil(L, -1)) g.cfg.mouse_swap = lua_toboolean(L, -1) ? 1 : 0;
     lua_pop(L, 1);
+
+    read_setting_fields(L, 1, "mouse", "mouse.setup");
     return 0;
 }
+
+static int setup_setting_namespace(lua_State *L, const char *ns) {
+    char fn[48];
+    snprintf(fn, sizeof fn, "%s.setup", ns);
+    reject_at_runtime(L, fn);
+    luaL_checktype(L, 1, LUA_TTABLE);
+    reject_unknown_setting_fields(L, 1, ns, fn);
+    read_setting_fields(L, 1, ns, fn);
+    return 0;
+}
+
+static int lua_mshell_keyboard_setup(lua_State *L) { return setup_setting_namespace(L, "keyboard"); }
+static int lua_mshell_theme_setup(lua_State *L)    { return setup_setting_namespace(L, "theme"); }
+static int lua_mshell_gaming_setup(lua_State *L)   { return setup_setting_namespace(L, "gaming"); }
 
 static int lua_mshell_monitor_rule(lua_State *L) {
     if (g.cfg.monitor_rule_count >= MAX_MONITOR_RULES)
@@ -2151,12 +2253,15 @@ static const ApiImpl api_impl[] = {
     { "bar.setup",                lua_mshell_set_bar },
     { "whichkey.setup",           lua_mshell_set_whichkey },
     { "mouse.setup",              lua_mshell_set_mouse_tbl },
+    { "keyboard.setup",           lua_mshell_keyboard_setup },
+    { "theme.setup",              lua_mshell_theme_setup },
+    { "gaming.setup",             lua_mshell_gaming_setup },
     { "notify",                   lua_mshell_notify },
     { "notify.setup",             lua_mshell_set_notify },
 
     { "appearance.border",        lua_mshell_set_border },
     { "appearance.background",    lua_mshell_set_background },
-    { "appearance.dim",           lua_mshell_set_dim },
+    { "appearance.dim_unfocused", lua_mshell_set_dim_unfocused },
     { "appearance.animation",     lua_mshell_set_animation },
     { "appearance.smart_borders", lua_mshell_set_smart_borders },
     { "appearance.urgency",       lua_mshell_set_urgency },
@@ -2215,6 +2320,25 @@ static void api_push_parent(lua_State *L, int root, const char *path) {
     }
 }
 
+static int lua_mshell_missing(lua_State *L) {
+    const char *k = lua_tostring(L, 2);
+    if (!k) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const char *ns = lua_tostring(L, lua_upvalueindex(1));
+    char path[128];
+    if (ns) snprintf(path, sizeof path, "%s.%s", ns, k);
+    else    snprintf(path, sizeof path, "%s", k);
+
+    const char *now = api_removed_replacement(path);
+    if (now)
+        return luaL_error(L, "mshell.%s was removed — use mshell.%s", path, now);
+    lua_pushnil(L);
+    return 1;
+}
+
 static void api_register_entry(lua_State *L, int root, int index) {
     const ApiEntry *e = api_spec_at(index);
 
@@ -2259,21 +2383,13 @@ static void api_register_entry(lua_State *L, int root, int index) {
         lua_pushcclosure(L, l_call_self, 1);
         lua_setfield(L, -2, "__call");
     }
+    lua_pushstring(L, e->path);
+    lua_pushcclosure(L, lua_mshell_missing, 1);
+    lua_setfield(L, -2, "__index");
     lua_setmetatable(L, -2);
 
     lua_setfield(L, -2, leaf);
     lua_pop(L, 1);
-}
-
-static int lua_mshell_missing(lua_State *L) {
-    const char *k = lua_tostring(L, 2);
-    if (k) {
-        const char *now = api_removed_replacement(k);
-        if (now)
-            return luaL_error(L, "mshell.%s was removed — use mshell.%s", k, now);
-    }
-    lua_pushnil(L);
-    return 1;
 }
 
 void lua_register_api(lua_State *L) {
