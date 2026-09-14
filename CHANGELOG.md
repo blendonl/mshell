@@ -5,6 +5,10 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.10 — 2026-09-14
+
+- fix(window): never adopt child windows, even disabled ones
+
 ## 0.15.9 — 2026-09-14
 
 - fix(desktop): switch to a hidden desktop on the focused monitor instead of the
