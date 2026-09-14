@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.6 — 2026-09-14
+
 - feat(border): add a focus bar on the top or bottom edge of the focused window,
   drawn inside the frame so the screen edge cannot clip it. On by default at
   `accent = "bottom"`, `accent_width = 3`; `accent = "none"` restores the bare ring
