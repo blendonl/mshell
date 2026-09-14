@@ -440,6 +440,16 @@ raises one yourself, and `mshell.exe --msg 'notify hello'` from a script does th
 same. It is deliberately mshell's own messages only: real Windows toasts are
 WinRT/WNS and require being a registered Explorer-class shell.
 
+Other apps' notifications are a different matter, and there are two kinds.
+Toasts — what Discord, Chrome and Outlook send — are discarded by Windows
+itself when Explorer is not running: every app's notifier reports
+`DisabledForUser` and nothing is stored, so no program can show them. Tray
+balloons are what older tray utilities send, and they are only missing a
+`Shell_TrayWnd` to land in. [mnotify](https://github.com/blendonl/mnotify) is a
+separate app that provides one: it shows those balloons and gives you a menu of
+tray icons. mshell ships nothing of it and needs no configuration for it —
+`mshell.exec.startup("mnotify.exe")` starts it with the session.
+
 **A panic key.** The `panic` action starts
 Explorer alongside mshell and stops the hook binding anything, so a shell that is
 misbehaving does not need Task Manager to escape. It deliberately does not quit —

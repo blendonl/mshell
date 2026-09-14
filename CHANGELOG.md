@@ -25,6 +25,10 @@ All notable changes to mshell are documented here. This project adheres to
 
   mshell no longer links `windowscodecs`.
 
+## 0.15.19 — 2026-09-14
+
+- docs(readme): point to mnotify for other apps' tray balloons
+
 ## 0.15.18 — 2026-09-14
 
 ### Removed
