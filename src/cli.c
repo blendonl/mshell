@@ -71,6 +71,24 @@ static int run_tweaks(const char *cmdline) {
     return 1;
 }
 
+static int run_settings(const char *cmdline) {
+    (void)cmdline;
+
+    int     argc = 0;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return 1;
+
+    int code = 1;
+    for (int i = 1; i < argc; i++) {
+        if (wcscmp(argv[i], L"--settings") != 0) continue;
+        code = settings_cli(argc - i - 1, argv + i + 1);
+        break;
+    }
+
+    TerminateProcess(GetCurrentProcess(), (UINT)code);
+    return code;
+}
+
 static int run_check(const char *cmdline) {
     (void)cmdline;
 
@@ -108,6 +126,7 @@ typedef struct {
 static const Subcommand subcommands[] = {
     { "--displays", run_displays },
     { "--tweaks",   run_tweaks   },
+    { "--settings", run_settings },
     { "--check",    run_check    },
 };
 

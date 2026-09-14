@@ -32,8 +32,6 @@ static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
 
     window_restore_all_visibility();
 
-    mouse_restore_pointer();
-
     log_shutdown();
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -150,6 +148,24 @@ void crashloop_mark_healthy(void) {
                    (const BYTE *)&zero, sizeof(zero));
     RegCloseKey(k);
     log_msg(LOG_INFO, L"survived %llus — crash-loop counter reset", CRASHLOOP_WINDOW);
+}
+
+#define TAKEOVER_WAIT_MS  60000
+
+static bool claim_singleton(bool takeover) {
+    HANDLE once = CreateMutexW(NULL, TRUE, L"Local\\mshell_singleton");
+    if (!once) return false;
+    if (GetLastError() != ERROR_ALREADY_EXISTS) return true;
+
+    if (takeover) {
+        log_msg(LOG_INFO, L"takeover: waiting up to %lus for the running mshell "
+                L"to exit", (unsigned long)(TAKEOVER_WAIT_MS / 1000));
+        DWORD w = WaitForSingleObject(once, TAKEOVER_WAIT_MS);
+        if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) return true;
+    }
+
+    CloseHandle(once);
+    return false;
 }
 
 static void warn_if_no_autorestart(void) {
@@ -312,8 +328,6 @@ static void mshell_teardown(int started) {
     spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
                       (PVOID)(UINT_PTR)g_prev_fg_lock_timeout);
 
-    mouse_restore_pointer();
-
     if (g.message_window) {
         WTSUnRegisterSessionNotification(g.message_window);
         DestroyWindow(g.message_window);
@@ -350,20 +364,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     log_init(L"mshell", verbose ? LOG_DEBUG : LOG_INFO);
     log_msg(LOG_INFO, L"=== mshell v%hs starting ===", MSHELL_VERSION);
 
-    update_clear_staged_image();
-
     SetUnhandledExceptionFilter(mshell_crash_handler);
 
-    {
-        HANDLE once = CreateMutexW(NULL, TRUE, L"Local\\mshell_singleton");
-        if (!once || GetLastError() == ERROR_ALREADY_EXISTS) {
-            log_err(L"another mshell is already running in this session — "
-                    L"exiting. Two instances would fight over the keyboard hook "
-                    L"and the window layout.");
-            if (once) CloseHandle(once);
-            return 0;
-        }
+    if (!claim_singleton(cli_has_flag(lpCmdLine, "--takeover"))) {
+        log_err(L"another mshell is already running in this session — "
+                L"exiting. Two instances would fight over the keyboard hook "
+                L"and the window layout.");
+        return 0;
     }
+
+    update_clear_staged_image();
 
     g.elevated = is_elevated();
 
@@ -434,6 +444,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     events_sync_urgency();
     mouse_sync_hook();
     mouse_sync_pointer();
+    settings_sync();
     update_check_async();
 
     window_manage_existing();
