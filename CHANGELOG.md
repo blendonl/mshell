@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.15 — 2026-09-14
+
+- feat(dim): set how much unfocused windows are dimmed as a percentage
+- feat(dim)!: rename appearance.dim to appearance.dim_unfocused
+
 ## 0.15.14 — 2026-09-14
 
 - fix(mouse): stop focus-follows-mouse from closing right-click menus. Moving
