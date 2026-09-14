@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- fix(desktop): switch to a hidden desktop on the focused monitor instead of the
+  monitor holding the foreground window, which differ whenever a focus change
+  is refused and used to send the desktop to the wrong display
+- test: extract the switch target monitor behind a pure seam
+
 ## 0.15.8 — 2026-09-14
 
 - fix(border): stack the focus overlay directly above the focused window instead
