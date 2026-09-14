@@ -31,6 +31,7 @@
 #include "log.h"
 #include "desktop_list.h"
 #include "api_spec.h"
+#include "border_math.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -85,6 +86,8 @@
 #define DEFAULT_INNER_GAP         4
 #define DEFAULT_OUTER_GAP         4
 #define DEFAULT_BORDER_WIDTH      2
+#define DEFAULT_BORDER_ACCENT     BORDER_ACCENT_BOTTOM
+#define DEFAULT_BORDER_ACCENT_W   3
 #define DEFAULT_MASTER_RATIO      0.6f
 #define DEFAULT_NMASTER           1
 #define DEFAULT_START_DESKTOP     L"1"
@@ -434,6 +437,8 @@ typedef struct {
     bool     smart_gaps;
     bool     smart_borders;
     int      border_width;
+    BorderAccentEdge border_accent;
+    int      border_accent_width;
     COLORREF border_color;
     COLORREF border_color_float;
     COLORREF border_color_urgent;
