@@ -497,8 +497,8 @@ function mshell.appearance.border(width, color) end
 ---@param color integer
 function mshell.appearance.background(color) end
 
----Dim everything but the focused window.
----@param opts boolean|mshell.DimOpts
+---Dim everything but the focused window. A number is the percentage.
+---@param opts boolean|number|mshell.DimOpts
 function mshell.appearance.dim(opts) end
 
 ---How long a window takes to move, in milliseconds.

@@ -13,6 +13,13 @@ All notable changes to mshell are documented here. This project adheres to
   captured the mouse, so crossing a neighbouring tile no longer ends a menu or
   a drag-select either
 - test: extract the focus-follows-mouse decision behind a pure seam
+- feat(dim): set how much unfocused windows are dimmed as a percentage.
+  `mshell.appearance.dim(30)` turns dimming on at 30%, and
+  `mshell.appearance.dim{ percent = 30 }` does the same alongside `color`;
+  `opacity` (0–255) still works. Passing a table now turns dimming on unless it
+  says `enabled = false`, and 0% hides the scrim instead of drawing an
+  invisible one
+- fix(dim): hide the scrim of a monitor that was unplugged
 
 ## 0.15.13 — 2026-09-14
 

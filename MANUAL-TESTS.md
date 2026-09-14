@@ -689,8 +689,16 @@ The built-in box:
   in flight. The windows re-aim from where they are; they must not jump back to
   where the first move started, and the shell must stay responsive.
 - `set_animation(0)` restores instant placement.
-- `set_dim{enabled = true}`: everything but the focused window is dimmed, and
-  the dimming follows the focus.
+- `mshell.appearance.dim(true)`: everything but the focused window is dimmed,
+  and the dimming follows the focus.
+- `mshell.appearance.dim(60)` and reload: the unfocused windows are clearly
+  darker than at the default. `mshell.appearance.dim{ percent = 60 }` looks the
+  same, with no `enabled = true` needed.
+- `mshell.appearance.dim(0)` and reload: nothing is dimmed and no scrim is left
+  on screen. `mshell.appearance.dim(false)` does the same.
+- With dimming on, unplug the highest-numbered monitor, then drag a remaining
+  display into the space it used in Display settings: no stray dark rectangle
+  covers that part of the display.
 - Dim with a **GPU-accelerated app** focused (a game, a video, a browser playing
   video) and confirm it still renders — this is the failure mode the punched
   scrim exists to avoid.

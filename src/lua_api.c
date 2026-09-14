@@ -816,11 +816,21 @@ static int lua_mshell_set_animation(lua_State *L) {
     return 0;
 }
 
+static BYTE dim_alpha_from_percent(lua_Number percent) {
+    return (BYTE)(clamp_f((float)percent, 0.f, 100.f) * 255.f / 100.f + 0.5f);
+}
+
 static int lua_mshell_set_dim(lua_State *L) {
+    if (lua_type(L, 1) == LUA_TNUMBER) {
+        g.cfg.dim_enabled = true;
+        g.cfg.dim_alpha   = dim_alpha_from_percent(lua_tonumber(L, 1));
+        return 0;
+    }
     if (!lua_istable(L, 1)) {
         g.cfg.dim_enabled = lua_toboolean(L, 1);
         return 0;
     }
+    g.cfg.dim_enabled = true;
     lua_getfield(L, 1, "enabled");
     if (!lua_isnil(L, -1)) g.cfg.dim_enabled = (bool)lua_toboolean(L, -1);
     lua_pop(L, 1);
@@ -833,6 +843,11 @@ static int lua_mshell_set_dim(lua_State *L) {
     lua_getfield(L, 1, "opacity");
     if (lua_isnumber(L, -1))
         g.cfg.dim_alpha = (BYTE)clamp_i((int)lua_tointeger(L, -1), 0, 255);
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "percent");
+    if (lua_isnumber(L, -1))
+        g.cfg.dim_alpha = dim_alpha_from_percent(lua_tonumber(L, -1));
     lua_pop(L, 1);
     return 0;
 }
