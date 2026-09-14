@@ -16,6 +16,12 @@ static bool lies_toward(long dx, long dy, FocusDirection dir) {
     return false;
 }
 
+bool focus_pick_follows_pointer(const PointerTarget *target) {
+    if (!target || !target->managed || target->tracked_popup) return false;
+    if (target->is_foreground || !target->on_visible_desktop) return false;
+    return !target->foreground_holds_pointer;
+}
+
 int focus_pick_neighbor(const FocusCandidate *cands, int count, int from,
                         FocusDirection dir) {
     if (!cands || from < 0 || from >= count || !reachable(&cands[from]))
