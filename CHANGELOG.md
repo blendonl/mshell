@@ -5,6 +5,14 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Removed
+
+- **The `launcher` action no longer looks for mrun.** It always opens the
+  built-in box. mshell and mrun are fully independent: to use mrun, or any other
+  launcher, bind its executable with `mshell.exec("mrun.exe")`. Its window is a
+  tool window, which mshell never tiles, so dropping `mrun_Window` from the
+  ignore list changes nothing on screen.
+
 ## 0.15.5 — 2026-09-08
 
 - refactor: split keyboard.c into keys, input_hook and actions

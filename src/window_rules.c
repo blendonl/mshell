@@ -106,7 +106,6 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
         L"mshell_WhichKey",
         L"mshell_Notify",
         L"mshell_Launcher",
-        L"mrun_Window",
         L"mshell_Dim",
         NULL
     };
