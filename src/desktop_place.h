@@ -18,6 +18,8 @@ typedef struct {
 
 int desktop_visible_on(const int *monitor_desktop, int span, int id);
 
+int desktop_pick_monitor(int pinned, int focused, int span);
+
 DesktopSwitchPlan desktop_switch_plan(const int *monitor_desktop, int span,
                                       int target_id, int preferred);
 
