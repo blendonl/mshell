@@ -514,6 +514,7 @@ void config_reload(void) {
     monitors_apply_rules();
     mouse_sync_hook();
     mouse_sync_pointer();
+    settings_sync();
     events_sync_urgency();
     desktop_reapply();
 }
