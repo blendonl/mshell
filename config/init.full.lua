@@ -268,11 +268,11 @@ mshell.whichkey.setup({
 --
 -- The last three are WINDOWS' settings, not mshell's, and they are here
 -- because replacing Explorer takes away the Settings page that reached them.
--- Every app on the machine sees them, so mshell BORROWS rather than sets: it
--- notes what you had, never writes the change into your user profile, and
--- puts the originals back when it exits. Delete a line and save and that one
--- setting is handed back on the reload; the others stay. A setting you never
--- mention is never touched at all.
+-- mshell SAVES them the way that page did: the value goes into your user
+-- profile and survives quitting mshell, signing out and booting into Explorer.
+-- A reload writes only a setting that differs from what Windows has. Delete a
+-- line and mshell stops asserting that setting, but it stays as it was last
+-- saved. A setting you never mention is never touched at all.
 --
 --   speed         the pointer-speed slider, 1..20. 10 is Windows' middle
 --                 notch, which is where an untouched machine sits.

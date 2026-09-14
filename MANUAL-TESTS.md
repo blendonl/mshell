@@ -813,31 +813,23 @@ tests is what is left behind. Note what Settings › Bluetooth & devices › Mou
 says **before** you start — the checks below are all against that.
 
 - `mshell.mouse.setup{ speed = 4 }` and save. The pointer slows down immediately,
-  and the Settings slider shows 4 if you open it.
-- Delete that line and save again. The pointer goes back to the speed you
-  started with — *not* to Windows' middle notch, and not to 4.
-- `mshell.mouse.setup{ speed = 4, accel = false }`, save, then delete only the
-  `accel` line and save. Acceleration comes back on; the speed stays at 4.
-  (Per-field ownership: giving one back must not give the others back.)
-- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer returns to
-  its original speed.
-- With `speed = 4` applied, sign out and back in **without** quitting cleanly.
-  The pointer is at its original speed: mshell never wrote the change into the
-  user profile, so nothing survives the session.
+  the Settings slider shows 4 if you open it, and
+  `HKCU\Control Panel\Mouse\MouseSensitivity` reads `4`. The log says
+  `mouse: pointer speed N -> 4, saved to the profile`.
+- Save the file again unchanged. The log has **no** new `saved to the profile`
+  line: a reload that asks for what Windows already has writes nothing.
+- Delete that line and save again. The pointer stays at 4 — deleting a line
+  stops mshell asserting the setting, it does not undo it.
+- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer stays at 4.
+- With `speed = 4` applied, sign out and back in, and boot once into Explorer.
+  The pointer is still at 4 both times: the value lives in the user profile.
 - `accel = false`: "Enhance pointer precision" unticks in Settings, and a
   slow-then-fast drag of the same physical distance moves the pointer the same
-  distance both times.
-- `swap_buttons = true`: the right button becomes primary. Set it back to
-  `false` (rather than deleting the line) and it reverts.
+  distance both times. `accel = true` ticks it again.
+- `swap_buttons = true`: the right button becomes primary, and stays primary
+  after quitting mshell. Set it back to `false` and it reverts.
 - A config that mentions **none** of the three: open Settings and confirm speed,
   precision and button order are all untouched after a full mshell run and quit.
-- Crash restore covers an **unhandled exception** (the crash handler in main.c
-  restores the pointer alongside the hidden windows). It cannot be exercised
-  from Task Manager: `End task` is `TerminateProcess`, which bypasses every
-  handler in the process, so nothing runs and nothing is restored. What covers
-  that case instead is the setting never having been persisted — kill mshell
-  with `swap_buttons = true` applied and the buttons stay swapped until you sign
-  out, at which point Windows loads the profile value and they are normal again.
 
 ## Floating windows stay on top
 

@@ -114,9 +114,11 @@ tiled, driven entirely from the keyboard and configured in Lua.
   worked config reaches all of them through submaps, so none needs a chord.
   **Pointer speed, acceleration and the left/right button swap** come from the
   same place — `set_mouse{speed=, accel=, swap_buttons=}` is the Settings page
-  you no longer have. They are *borrowed*, not set: mshell notes what the
-  machine had, never writes the change into your user profile, and hands the
-  originals back when it exits. A field you don't mention is left alone.
+  you no longer have. They are *saved*, exactly as that page would save them:
+  the value goes into your user profile, so it survives quitting mshell,
+  signing out and booting into Explorer. mshell only writes a field that differs
+  from what Windows already has, and a field you don't mention is left alone —
+  deleting a line stops mshell asserting it but does not undo it.
 - **Nothing is remembered across a restart**: every start is the one your
   `init.lua` describes. A layout or master ratio you change at runtime lasts as
   long as mshell does, and a config reload keeps it — unless a `desktop_rule`

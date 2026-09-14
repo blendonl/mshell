@@ -167,94 +167,43 @@ bool mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held) {
 static const int PTR_ACCEL_ON[3]  = { 6, 10, 1 };
 static const int PTR_ACCEL_OFF[3] = { 0,  0, 0 };
 
-static bool s_ptr_saved;
-static int  s_ptr_prev_speed;
-static int  s_ptr_prev_accel[3];
-static bool s_ptr_prev_swap;
-
-static bool s_ptr_own_speed, s_ptr_own_accel, s_ptr_own_swap;
-
-static void pointer_snapshot(void) {
-    if (s_ptr_saved) return;
-    s_ptr_saved = true;
-
-    if (!SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &s_ptr_prev_speed, 0))
-        s_ptr_prev_speed = 10;
-    if (!SystemParametersInfoW(SPI_GETMOUSE, 0, s_ptr_prev_accel, 0))
-        memcpy(s_ptr_prev_accel, PTR_ACCEL_ON, sizeof s_ptr_prev_accel);
-
-    s_ptr_prev_swap = GetSystemMetrics(SM_SWAPBUTTON) != 0;
-}
-
-static void pointer_set_speed(int speed) {
-    if (!spi_set_broadcast(SPI_SETMOUSESPEED, 0, (PVOID)(UINT_PTR)speed))
+static void pointer_persist_speed(int speed) {
+    int current = 0;
+    if (SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &current, 0) && current == speed)
+        return;
+    if (spi_set_persistent(SPI_SETMOUSESPEED, 0, (PVOID)(UINT_PTR)speed))
+        log_w(L"mouse: pointer speed %d -> %d, saved to the profile", current, speed);
+    else
         log_err(L"mouse: SPI_SETMOUSESPEED(%d) failed: %lu",
                 speed, GetLastError());
 }
 
-static void pointer_set_accel(const int v[3]) {
-    int tmp[3] = { v[0], v[1], v[2] };
-    if (!spi_set_broadcast(SPI_SETMOUSE, 0, tmp))
+static void pointer_persist_accel(bool on) {
+    int current[3] = {0};
+    if (SystemParametersInfoW(SPI_GETMOUSE, 0, current, 0) && (current[2] != 0) == on)
+        return;
+    const int *want = on ? PTR_ACCEL_ON : PTR_ACCEL_OFF;
+    int tmp[3] = { want[0], want[1], want[2] };
+    if (spi_set_persistent(SPI_SETMOUSE, 0, tmp))
+        log_w(L"mouse: pointer precision %ls, saved to the profile", on ? L"on" : L"off");
+    else
         log_err(L"mouse: SPI_SETMOUSE failed: %lu", GetLastError());
 }
 
-static void pointer_set_swap(bool swapped) {
-    if (!spi_set_broadcast(SPI_SETMOUSEBUTTONSWAP, swapped ? 1 : 0, NULL))
+static void pointer_persist_swap(bool swapped) {
+    if ((GetSystemMetrics(SM_SWAPBUTTON) != 0) == swapped) return;
+    if (spi_set_persistent(SPI_SETMOUSEBUTTONSWAP, swapped ? 1 : 0, NULL))
+        log_w(L"mouse: primary button %ls, saved to the profile",
+              swapped ? L"right" : L"left");
+    else
         log_err(L"mouse: SPI_SETMOUSEBUTTONSWAP(%d) failed: %lu",
                 (int)swapped, GetLastError());
 }
 
 void mouse_sync_pointer(void) {
-    bool want_speed = g.cfg.mouse_speed > 0;
-    bool want_accel = g.cfg.mouse_accel >= 0;
-    bool want_swap  = g.cfg.mouse_swap  >= 0;
-
-    if (!want_speed && !want_accel && !want_swap &&
-        !s_ptr_own_speed && !s_ptr_own_accel && !s_ptr_own_swap)
-        return;
-
-    pointer_snapshot();
-
-    if (want_speed) {
-        pointer_set_speed(g.cfg.mouse_speed);
-        s_ptr_own_speed = true;
-    } else if (s_ptr_own_speed) {
-        pointer_set_speed(s_ptr_prev_speed);
-        s_ptr_own_speed = false;
-    }
-
-    if (want_accel) {
-        pointer_set_accel(g.cfg.mouse_accel ? PTR_ACCEL_ON : PTR_ACCEL_OFF);
-        s_ptr_own_accel = true;
-    } else if (s_ptr_own_accel) {
-        pointer_set_accel(s_ptr_prev_accel);
-        s_ptr_own_accel = false;
-    }
-
-    if (want_swap) {
-        pointer_set_swap(g.cfg.mouse_swap != 0);
-        s_ptr_own_swap = true;
-    } else if (s_ptr_own_swap) {
-        pointer_set_swap(s_ptr_prev_swap);
-        s_ptr_own_swap = false;
-    }
-}
-
-void mouse_restore_pointer(void) {
-    if (!s_ptr_saved) return;
-
-    if (s_ptr_own_speed) {
-        pointer_set_speed(s_ptr_prev_speed);
-        s_ptr_own_speed = false;
-    }
-    if (s_ptr_own_accel) {
-        pointer_set_accel(s_ptr_prev_accel);
-        s_ptr_own_accel = false;
-    }
-    if (s_ptr_own_swap) {
-        pointer_set_swap(s_ptr_prev_swap);
-        s_ptr_own_swap = false;
-    }
+    if (g.cfg.mouse_speed > 0) pointer_persist_speed(g.cfg.mouse_speed);
+    if (g.cfg.mouse_accel >= 0) pointer_persist_accel(g.cfg.mouse_accel != 0);
+    if (g.cfg.mouse_swap  >= 0) pointer_persist_swap(g.cfg.mouse_swap != 0);
 }
 
 void mouse_drag_begin(HWND hwnd) {

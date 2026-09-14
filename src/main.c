@@ -32,8 +32,6 @@ static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
 
     window_restore_all_visibility();
 
-    mouse_restore_pointer();
-
     log_shutdown();
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -329,8 +327,6 @@ static void mshell_teardown(int started) {
 
     spi_set_broadcast(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
                       (PVOID)(UINT_PTR)g_prev_fg_lock_timeout);
-
-    mouse_restore_pointer();
 
     if (g.message_window) {
         WTSUnRegisterSessionNotification(g.message_window);
