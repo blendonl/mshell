@@ -6,11 +6,20 @@ static int s_resink_left;
 
 static int s_spi_broadcast_depth;
 
-BOOL spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param) {
+static BOOL spi_set_guarded(UINT action, UINT ui_param, PVOID pv_param, UINT flags) {
     s_spi_broadcast_depth++;
-    BOOL ok = SystemParametersInfoW(action, ui_param, pv_param, SPIF_SENDCHANGE);
+    BOOL ok = SystemParametersInfoW(action, ui_param, pv_param, flags);
     if (s_spi_broadcast_depth > 0) s_spi_broadcast_depth--;
     return ok;
+}
+
+BOOL spi_set_broadcast(UINT action, UINT ui_param, PVOID pv_param) {
+    return spi_set_guarded(action, ui_param, pv_param, SPIF_SENDCHANGE);
+}
+
+BOOL spi_set_persistent(UINT action, UINT ui_param, PVOID pv_param) {
+    return spi_set_guarded(action, ui_param, pv_param,
+                           SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
 }
 
 static bool setting_change_affects_layout(WPARAM wp, LPARAM lp) {
