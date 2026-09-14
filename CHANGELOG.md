@@ -373,7 +373,7 @@ Three shapes changed beyond the rename:
   nested in a table of its own.
 
 
-- **The `launcher` action prefers [mrun](https://github.com/notpc/mrun) when it
+- **The `launcher` action prefers [mrun](https://github.com/blendonl/mrun) when it
   is installed**, falling back to the built-in box when it is not. mrun is a
   separate application — its own binary, its own Lua config, a module system
   where app launching is the first module and clipboard history and emoji are

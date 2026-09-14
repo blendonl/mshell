@@ -130,7 +130,7 @@ tiled, driven entirely from the keyboard and configured in Lua.
   `install.bat`; started by `install.bat /helper` from an administrator prompt.
 - **An optional launcher.** The built-in one (`launcher`) types a name and runs
   a program. If you want modules, Lua configuration and a clipboard/emoji story,
-  [**mrun**](https://github.com/notpc/mrun) is a separate app that does that,
+  [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that,
   and the `launcher` action prefers it automatically when it is installed. See
   [The launcher](#the-launcher).
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
@@ -213,7 +213,7 @@ Start menus, matches subsequences (`fox` finds Firefox), and runs whatever you
 typed when nothing matches — so it is a Run box as well as a menu.
 
 It is deliberately small and has no configuration. When you want more,
-[**mrun**](https://github.com/notpc/mrun) is a **separate application** built
+[**mrun**](https://github.com/blendonl/mrun) is a **separate application** built
 for exactly that: a modular launcher with its own Lua config, where app
 launching is one module and clipboard history, emoji or anything you write
 yourself are the same shape.
