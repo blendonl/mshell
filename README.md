@@ -68,9 +68,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   turned off entirely, and `bar.toggle` hides it without a reload.
 - **Focus ring** around the active window and a **solid desktop backdrop**
   (there is no Explorer to paint one).
-- **Unfocused-window dimming** by a percentage (`mshell.appearance.dim(30)`),
-  off by default. It is a click-through scrim with the focused window punched
-  out, so no other app's window is ever made layered.
+- **Unfocused-window dimming** by a percentage
+  (`mshell.appearance.dim_unfocused(30)`), off by default. It is a
+  click-through scrim with the focused window punched out, so no other app's
+  window is ever made layered.
 - **Window rules** matching class, process or full install path as wildcard
   patterns — float, ignore, strip the frame, or park a window fullscreen over
   its monitor. One rule covers a whole game library; tiled windows can't be
@@ -381,7 +382,7 @@ mshell.appearance.border(2, 0xffffff)     -- focus ring: width, 0xRRGGBB
 mshell.appearance.border{ accent = "top" }-- move the focus bar; "none" drops it
 mshell.appearance.smart_borders(true)     -- no ring when a monitor shows one window
 mshell.appearance.background(0x000000)    -- desktop backdrop
-mshell.appearance.dim(30)                 -- darken unfocused windows by 30%
+mshell.appearance.dim_unfocused(30)       -- darken unfocused windows by 30%
 
 mshell.desktop.rule("1", { default = true })          -- the desktop you land on
 mshell.desktop.rule("web", { app = "firefox.exe" })   -- open it when empty

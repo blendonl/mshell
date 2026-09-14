@@ -192,7 +192,7 @@ function Window:restore() end
 ---@field accent mshell.BorderAccent? Extra bar on one edge, so focus reads at a glance.
 ---@field accent_width integer? Thickness of that bar. 0 turns it off.
 
----@class mshell.DimOpts
+---@class mshell.DimUnfocusedOpts
 ---@field enabled boolean? Defaults to true once a table is passed.
 ---@field color integer?
 ---@field percent number? How dark the unfocused windows get, 0 to 100.

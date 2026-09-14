@@ -531,10 +531,10 @@ const ApiEntry api_spec[] = {
       API_SETTER, 0,
       "The desktop backdrop. There is no wallpaper.",
       "color: integer", NULL },
-    { "appearance.dim", NULL, ACTION_NONE,
+    { "appearance.dim_unfocused", NULL, ACTION_NONE,
       API_SETTER, 0,
-      "Dim everything but the focused window. A number is the percentage.",
-      "opts: boolean|number|mshell.DimOpts", NULL },
+      "Dim every window but the focused one. A number is the percentage.",
+      "opts: boolean|number|mshell.DimUnfocusedOpts", NULL },
     { "appearance.animation", NULL, ACTION_NONE,
       API_SETTER, 0,
       "How long a window takes to move, in milliseconds.",
@@ -751,7 +751,7 @@ const ApiRemoved api_removed[] = {
     { "set_smart_borders", "appearance.smart_borders" },
     { "set_border", "appearance.border" },
     { "set_background", "appearance.background" },
-    { "set_dim", "appearance.dim" },
+    { "set_dim", "appearance.dim_unfocused" },
     { "set_animation", "appearance.animation" },
     { "set_urgency", "appearance.urgency" },
     { "set_bar", "bar.setup" },
@@ -782,6 +782,7 @@ const ApiRemoved api_removed[] = {
     { "get_current_desktop", "desktop.current" },
     { "get_focused_window", "window.get" },
     { "set_start_desktop", "desktop.rule" },
+    { "appearance.dim", "appearance.dim_unfocused" },
     { NULL, NULL }
 };
 

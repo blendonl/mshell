@@ -820,7 +820,7 @@ static BYTE dim_alpha_from_percent(lua_Number percent) {
     return (BYTE)(clamp_f((float)percent, 0.f, 100.f) * 255.f / 100.f + 0.5f);
 }
 
-static int lua_mshell_set_dim(lua_State *L) {
+static int lua_mshell_set_dim_unfocused(lua_State *L) {
     if (lua_type(L, 1) == LUA_TNUMBER) {
         g.cfg.dim_enabled = true;
         g.cfg.dim_alpha   = dim_alpha_from_percent(lua_tonumber(L, 1));
@@ -2171,7 +2171,7 @@ static const ApiImpl api_impl[] = {
 
     { "appearance.border",        lua_mshell_set_border },
     { "appearance.background",    lua_mshell_set_background },
-    { "appearance.dim",           lua_mshell_set_dim },
+    { "appearance.dim_unfocused", lua_mshell_set_dim_unfocused },
     { "appearance.animation",     lua_mshell_set_animation },
     { "appearance.smart_borders", lua_mshell_set_smart_borders },
     { "appearance.urgency",       lua_mshell_set_urgency },
@@ -2230,6 +2230,25 @@ static void api_push_parent(lua_State *L, int root, const char *path) {
     }
 }
 
+static int lua_mshell_missing(lua_State *L) {
+    const char *k = lua_tostring(L, 2);
+    if (!k) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const char *ns = lua_tostring(L, lua_upvalueindex(1));
+    char path[128];
+    if (ns) snprintf(path, sizeof path, "%s.%s", ns, k);
+    else    snprintf(path, sizeof path, "%s", k);
+
+    const char *now = api_removed_replacement(path);
+    if (now)
+        return luaL_error(L, "mshell.%s was removed — use mshell.%s", path, now);
+    lua_pushnil(L);
+    return 1;
+}
+
 static void api_register_entry(lua_State *L, int root, int index) {
     const ApiEntry *e = api_spec_at(index);
 
@@ -2274,21 +2293,13 @@ static void api_register_entry(lua_State *L, int root, int index) {
         lua_pushcclosure(L, l_call_self, 1);
         lua_setfield(L, -2, "__call");
     }
+    lua_pushstring(L, e->path);
+    lua_pushcclosure(L, lua_mshell_missing, 1);
+    lua_setfield(L, -2, "__index");
     lua_setmetatable(L, -2);
 
     lua_setfield(L, -2, leaf);
     lua_pop(L, 1);
-}
-
-static int lua_mshell_missing(lua_State *L) {
-    const char *k = lua_tostring(L, 2);
-    if (k) {
-        const char *now = api_removed_replacement(k);
-        if (now)
-            return luaL_error(L, "mshell.%s was removed — use mshell.%s", k, now);
-    }
-    lua_pushnil(L);
-    return 1;
 }
 
 void lua_register_api(lua_State *L) {
