@@ -854,6 +854,45 @@ says **before** you start — the checks below are all against that.
 - A config that mentions **none** of the three: open Settings and confirm speed,
   precision and button order are all untouched after a full mshell run and quit.
 
+## Windows settings (mouse, keyboard, theme, gaming)
+
+Run these as the shell, with no Explorer, since that is the case they exist
+for. `mshell.exe --settings get` before you start records what you had.
+
+- `mshell.exe --settings list` prints every field with what it takes;
+  `--settings list theme` only the theme ones; `--settings list zzz` says nothing
+  matches and exits 1.
+- `mshell.exe --settings get` prints every field as a config value
+  (`mouse.scroll_by = lines`, never a `SystemSettings_…` key), marking any that
+  are disabled or set by group policy.
+- `--settings set mouse.scroll_lines 0 theme.mode purple mouse.nope 1` prints
+  three FAILED lines naming the range, the accepted words and the unknown name,
+  exits 1, and changes nothing.
+- `--settings set mouse.pointer_shadow true keyboard.repeat_rate 30` changes both
+  (the pointer grows a shadow; `HKCU\Control Panel\Keyboard\KeyboardSpeed` reads
+  30), and running it again prints `already` for both.
+- `--settings set mouse.scroll_by screen mouse.scroll_lines 5`, then
+  `--settings set mouse.scroll_lines 3 mouse.scroll_by lines`: the second works in
+  that order even though lines are disabled while scrolling by screen, because
+  the disabled one is retried after the rest.
+- Put `mshell.theme.setup{ mode = "light" }` in `init.lua` and save. Within a
+  second or two apps turn light, and the log has
+  `settings: theme.mode: dark -> light`. Save again unchanged: no new `->` line
+  (with `log.level("debug")`, an `already light` line instead), and nothing
+  flickers.
+- `mshell.keyboard.setup{ repeat_rate = 99 }` is a config error with the range
+  in the message, and the previous config stays in force.
+- `mshell.keyboard.setup{ repat_rate = 20 }` (misspelt) is a config error naming
+  the field.
+- `--settings set mouse.cursor_size 3` while the config says `cursor_size = 1`,
+  then reload: the pointer goes back to size 1 — the config wins when loaded.
+- On a machine where Game Bar is disabled by policy
+  (`HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR`), `gaming.game_bar = true`
+  logs a FAILED line and raises a notification that a setting could not be
+  applied; the rest of the config's settings still apply.
+- Quit mshell and boot once into Explorer: Settings shows every value the config
+  set.
+
 ## Floating windows stay on top
 
 Open one tiled window and one floating one (`Win+f`), overlapping.

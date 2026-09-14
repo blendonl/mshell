@@ -32,6 +32,7 @@
 #include "desktop_list.h"
 #include "api_spec.h"
 #include "border_math.h"
+#include "settings_catalog.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -350,6 +351,14 @@ typedef struct {
     wchar_t *cwd;
 } StartupCommand;
 
+#define MAX_SETTING_ASSIGNS  128
+#define SETTING_ASSIGN_TEXT  24
+
+typedef struct {
+    const SettingField *field;
+    char                text[SETTING_ASSIGN_TEXT];
+} SettingAssign;
+
 typedef struct {
     HMONITOR handle;
     RECT     full;
@@ -426,6 +435,9 @@ typedef struct {
 
     StartupCommand startup_commands[MAX_STARTUP_COMMANDS];
     int       startup_count;
+
+    SettingAssign setting_assigns[MAX_SETTING_ASSIGNS];
+    int           setting_assign_count;
 
     LuaHook   lua_hooks[MAX_LUA_HOOKS];
     int       lua_hook_count;
@@ -893,6 +905,9 @@ int      tweaks_apply(const wchar_t *group);
 int      tweaks_revert(const wchar_t *group);
 void     tweaks_list(void);
 void     tweaks_emit_reg(const wchar_t *group, bool undo);
+
+int      settings_cli(int argc, wchar_t **argv);
+void     settings_sync(void);
 
 void     update_check_async(void);
 
