@@ -127,7 +127,7 @@ HELPER        = mshelld.exe
 HELPER_FULL   = mshelld.unstripped.exe
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
-HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
+HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi -lwintrust -lcrypt32
 
 SYMBOLS       = $(TARGET).debug $(HELPER).debug
 
