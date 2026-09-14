@@ -66,9 +66,9 @@ static AdoptTier window_adopt_tier(HWND hwnd, const WindowRule **rule_out) {
 
     if (!IsWindowVisible(hwnd))   return ADOPT_NO;
 
-    if (!IsWindowEnabled(hwnd))   return ADOPT_TRACK;
-
     if (GetAncestor(hwnd, GA_ROOT) != hwnd) return ADOPT_NO;
+
+    if (!IsWindowEnabled(hwnd))   return ADOPT_TRACK;
 
     if (!g.cfg.manage_owned && GetWindow(hwnd, GW_OWNER) != NULL) {
         if (!any_dialog_rule()) return ADOPT_TRACK;
