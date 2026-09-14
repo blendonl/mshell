@@ -103,6 +103,69 @@ static void test_cycling_with_nothing_else_to_focus_finds_nothing(void) {
           "no candidates finds nothing");
 }
 
+static PointerTarget other_tile(void) {
+    PointerTarget t = { true, false, true, false, false };
+    return t;
+}
+
+static void test_the_pointer_moves_focus_onto_another_tile(void) {
+    PointerTarget t = other_tile();
+
+    CHECK(focus_pick_follows_pointer(&t),
+          "a managed window on screen that is not focused takes the focus");
+}
+
+static void test_the_pointer_over_a_popup_menu_leaves_focus_alone(void) {
+    PointerTarget menu = other_tile();
+    menu.tracked_popup = true;
+
+    CHECK(!focus_pick_follows_pointer(&menu),
+          "a right-click menu is an owned popup mshell only tracks; focusing "
+          "it takes the activation away from the app that opened it and the "
+          "app closes the menu under the pointer");
+}
+
+static void test_the_pointer_still_reaches_a_tracked_dialog(void) {
+    PointerTarget dialog = other_tile();
+
+    CHECK(focus_pick_follows_pointer(&dialog),
+          "an owned Open/Save dialog is tracked too, but it has a caption "
+          "and takes focus like any window — only captionless popups are "
+          "skipped");
+}
+
+static void test_the_pointer_leaving_an_open_menu_leaves_focus_alone(void) {
+    PointerTarget t = other_tile();
+    t.foreground_holds_pointer = true;
+
+    CHECK(!focus_pick_follows_pointer(&t),
+          "while the focused app is in a menu or has captured the mouse, "
+          "crossing a neighbouring tile must not end that menu or drag");
+}
+
+static void test_the_pointer_over_nothing_mshell_manages_leaves_focus_alone(void) {
+    PointerTarget t = other_tile();
+    t.managed = false;
+
+    CHECK(!focus_pick_follows_pointer(&t),
+          "the bar, the backdrop and unmanaged popups are not focus targets");
+    CHECK(!focus_pick_follows_pointer(NULL), "no target is not a target");
+}
+
+static void test_the_pointer_over_the_focused_or_a_hidden_window_does_nothing(void) {
+    PointerTarget focused = other_tile();
+    focused.is_foreground = true;
+
+    CHECK(!focus_pick_follows_pointer(&focused),
+          "the window already in the foreground is not focused again");
+
+    PointerTarget elsewhere = other_tile();
+    elsewhere.on_visible_desktop = false;
+
+    CHECK(!focus_pick_follows_pointer(&elsewhere),
+          "a window on a desktop that is not shown is never pulled forward");
+}
+
 int main(void) {
     test_the_nearest_window_in_the_direction_wins();
     test_a_window_the_app_hid_is_never_a_neighbour();
@@ -112,5 +175,11 @@ int main(void) {
     test_cycling_steps_over_hidden_windows();
     test_cycling_keeps_windows_that_are_only_off_screen();
     test_cycling_with_nothing_else_to_focus_finds_nothing();
+    test_the_pointer_moves_focus_onto_another_tile();
+    test_the_pointer_over_a_popup_menu_leaves_focus_alone();
+    test_the_pointer_still_reaches_a_tracked_dialog();
+    test_the_pointer_leaving_an_open_menu_leaves_focus_alone();
+    test_the_pointer_over_nothing_mshell_manages_leaves_focus_alone();
+    test_the_pointer_over_the_focused_or_a_hidden_window_does_nothing();
     return tests_report("focus_pick");
 }
