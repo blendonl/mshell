@@ -89,14 +89,8 @@ int desktop_monitor_of_window(const ManagedWindow *mw) {
 }
 
 int desktop_target_monitor(const Desktop *dt) {
-    if (dt && dt->monitor >= 0 && dt->monitor < g.monitor_count)
-        return dt->monitor;
-
-    const ManagedWindow *fg = window_find(GetForegroundWindow());
-    int mon = fg ? desktop_monitor_showing(fg->desktop_id) : -1;
-    if (mon < 0) mon = g.focused_monitor;
-    if (mon < 0 || mon >= desktop_monitor_span()) mon = 0;
-    return mon;
+    return desktop_pick_monitor(dt ? dt->monitor : -1, g.focused_monitor,
+                                desktop_monitor_span());
 }
 
 void desktop_place_on_monitor(int id, int mon) {
