@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.18 — 2026-09-14
+
 ### Removed
 
 - **The `launcher` action no longer looks for mrun.** It always opens the
