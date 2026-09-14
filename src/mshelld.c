@@ -8,6 +8,8 @@
 
 #include <windows.h>
 #include <dwmapi.h>
+#include <wincrypt.h>
+#include <wintrust.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -26,6 +28,7 @@
 #define MSHELLD_HANDSHAKE_MS   5000
 #define MSHELLD_WRITE_MS       5000
 #define MSHELLD_MAX_CLIENTS    4
+#define SIGNER_HASH_LEN        32
 
 #define logf_w(...)    log_msg(LOG_INFO, __VA_ARGS__)
 #define logf_warn(...) log_msg(LOG_WARN, __VA_ARGS__)
@@ -38,6 +41,8 @@ typedef struct {
 
 static wchar_t g_client_path[MAX_PATH];
 static LONG    g_client_count;
+static bool    g_signer_pinned;
+static BYTE    g_signer_hash[SIGNER_HASH_LEN];
 
 static void pipe_name(wchar_t *out, size_t cap) {
     DWORD sid = 0;
@@ -54,10 +59,101 @@ static void canonical_path(const wchar_t *in, wchar_t *out, DWORD cap) {
     }
 }
 
+static bool self_path(wchar_t *out, DWORD cap) {
+    DWORD n = GetModuleFileNameW(NULL, out, cap);
+    return n > 0 && n < cap;
+}
+
+static LONG authenticode_signer(const wchar_t *path, BYTE *hash) {
+    GUID verify_v2 = { 0x00aac56b, 0xcd44, 0x11d0,
+                       { 0x8c, 0xc2, 0x00, 0xc0, 0x4f, 0xc2, 0x95, 0xee } };
+
+    WINTRUST_FILE_INFO file = {
+        .cbStruct      = sizeof file,
+        .pcwszFilePath = path,
+    };
+    WINTRUST_DATA data = {
+        .cbStruct            = sizeof data,
+        .dwUIChoice          = WTD_UI_NONE,
+        .fdwRevocationChecks = WTD_REVOKE_NONE,
+        .dwUnionChoice       = WTD_CHOICE_FILE,
+        .pFile               = &file,
+        .dwStateAction       = WTD_STATEACTION_VERIFY,
+        .dwProvFlags         = WTD_CACHE_ONLY_URL_RETRIEVAL,
+    };
+    HWND no_ui = (HWND)INVALID_HANDLE_VALUE;
+
+    LONG status = WinVerifyTrust(no_ui, &verify_v2, &data);
+
+    if (status == ERROR_SUCCESS) {
+        CRYPT_PROVIDER_DATA *prov   =
+            WTHelperProvDataFromStateData(data.hWVTStateData);
+        CRYPT_PROVIDER_SGNR *signer =
+            prov ? WTHelperGetProvSignerFromChain(prov, 0, FALSE, 0) : NULL;
+        CRYPT_PROVIDER_CERT *leaf   =
+            signer ? WTHelperGetProvCertFromChain(signer, 0) : NULL;
+        DWORD len = SIGNER_HASH_LEN;
+
+        if (!leaf || !leaf->pCert ||
+            !CertGetCertificateContextProperty(leaf->pCert,
+                                               CERT_SHA256_HASH_PROP_ID,
+                                               hash, &len) ||
+            len != SIGNER_HASH_LEN)
+            status = TRUST_E_NO_SIGNER_CERT;
+    }
+
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(no_ui, &verify_v2, &data);
+    return status;
+}
+
+static void pin_signer(void) {
+    wchar_t self[MAX_PATH];
+    if (!self_path(self, MAX_PATH)) {
+        logf_warn(L"could not find mshelld.exe's own path, so clients are "
+                  L"identified by path only");
+        return;
+    }
+
+    LONG status = authenticode_signer(self, g_signer_hash);
+    if (status == ERROR_SUCCESS) {
+        g_signer_pinned = true;
+        logf_w(L"mshelld.exe is signed — clients must be signed by the same "
+               L"certificate");
+    } else if (status == TRUST_E_NOSIGNATURE) {
+        logf_w(L"mshelld.exe is not Authenticode-signed, so clients are "
+               L"identified by path only");
+    } else {
+        logf_warn(L"mshelld.exe's signature did not verify (0x%08lX), so "
+                  L"clients are identified by path only",
+                  (unsigned long)status);
+    }
+}
+
+static bool client_signed_like_helper(DWORD pid, const wchar_t *image) {
+    if (!g_signer_pinned) return true;
+
+    BYTE hash[SIGNER_HASH_LEN];
+    LONG status = authenticode_signer(image, hash);
+    if (status != ERROR_SUCCESS) {
+        logf_warn(L"refusing client pid %lu: %ls has no valid signature "
+                  L"(0x%08lX) and mshelld.exe is signed",
+                  (unsigned long)pid, image, (unsigned long)status);
+        return false;
+    }
+
+    if (memcmp(hash, g_signer_hash, SIGNER_HASH_LEN) != 0) {
+        logf_warn(L"refusing client pid %lu: %ls is signed by a different "
+                  L"certificate than mshelld.exe", (unsigned long)pid, image);
+        return false;
+    }
+
+    return true;
+}
+
 static bool resolve_client_path(wchar_t *out, size_t cap) {
     wchar_t self[MAX_PATH];
-    DWORD   n = GetModuleFileNameW(NULL, self, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return false;
+    if (!self_path(self, MAX_PATH)) return false;
 
     wchar_t *slash = wcsrchr(self, L'\\');
     if (!slash) return false;
@@ -111,7 +207,7 @@ static bool client_is_mshell(HANDLE pipe, DWORD *pid_out) {
         return false;
     }
 
-    return true;
+    return client_signed_like_helper(pid, resolved);
 }
 
 static bool connect_client(HANDLE pipe, HANDLE event) {
@@ -337,6 +433,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
         return 1;
     }
     logf_w(L"only %ls may connect", g_client_path);
+    pin_signer();
 
     wchar_t sid[256];
     PSECURITY_DESCRIPTOR sd = pipe_sd_for_current_user(sid, 256);
