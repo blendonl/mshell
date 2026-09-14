@@ -13,7 +13,7 @@ SinkOrderPlan sink_order_plan(const SinkSlot *bottom_up, int count) {
     int top_sunk = -1, backdrop = -1;
     for (int i = 0; i < count; i++) {
         if (bottom_up[i] == SINK_SLOT_BACKDROP) backdrop = i;
-        if (bottom_up[i] == SINK_SLOT_SUNK && i < lowest_shown) top_sunk = i;
+        if (i < lowest_shown && bottom_up[i] == SINK_SLOT_SUNK) top_sunk = i;
     }
 
     plan.surfaced_from = lowest_shown;

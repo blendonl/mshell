@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.13
+VERSION  = 0.15.16
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
@@ -23,7 +23,8 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
            -DVER_PATCH=$(VER_PATCH)
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lbcrypt -lm
+           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lbcrypt \
+           -lruntimeobject -lm
 
 SRC_DIR  = src
 LUA_DIR  = vendor/lua/src
@@ -69,6 +70,10 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/layout_tree.c \
               $(SRC_DIR)/anim.c \
               $(SRC_DIR)/tweaks.c \
+              $(SRC_DIR)/settings.c \
+              $(SRC_DIR)/settings_parse.c \
+              $(SRC_DIR)/settings_catalog.c \
+              $(SRC_DIR)/settings_sync.c \
               $(SRC_DIR)/display.c \
               $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/tree_algebra.c \
@@ -152,7 +157,8 @@ HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
                api_spec tree_algebra ipc_state hide_policy \
-               desktop_place border_math focus_pick sink_order
+               desktop_place border_math focus_pick sink_order \
+               settings_parse settings_catalog
 TEST_SUFFIX =
 HOST_CFLAGS = -O1 -Wall -Wextra
 ASAN_CFLAGS = -O1 -g -Wall -Wextra \
