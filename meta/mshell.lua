@@ -497,9 +497,9 @@ function mshell.appearance.border(width, color) end
 ---@param color integer
 function mshell.appearance.background(color) end
 
----Dim everything but the focused window.
----@param opts boolean|mshell.DimOpts
-function mshell.appearance.dim(opts) end
+---Dim every window but the focused one. A number is the percentage.
+---@param opts boolean|number|mshell.DimUnfocusedOpts
+function mshell.appearance.dim_unfocused(opts) end
 
 ---How long a window takes to move, in milliseconds.
 ---@param ms integer
@@ -637,10 +637,37 @@ function mshell.whichkey.setup(opts) end
 ---@class mshell.mouse
 mshell.mouse = {}
 
----Configure the pointer.
+---Configure the pointer. Windows' own mouse settings are saved to your profile.
 ---Only while the config is loading.
 ---@param opts boolean|mshell.MouseOpts
 function mshell.mouse.setup(opts) end
+
+---Windows' keyboard settings: key repeat and the accessibility keys.
+---@class mshell.keyboard
+mshell.keyboard = {}
+
+---Configure the keyboard. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.KeyboardOpts
+function mshell.keyboard.setup(opts) end
+
+---Windows' light and dark theme and its colour effects.
+---@class mshell.theme
+mshell.theme = {}
+
+---Configure the theme. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.ThemeOpts
+function mshell.theme.setup(opts) end
+
+---Windows' Game Mode and Game Bar.
+---@class mshell.gaming
+mshell.gaming = {}
+
+---Configure gaming. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.GamingOpts
+function mshell.gaming.setup(opts) end
 
 ---Write a line to the mshell log.
 ---@class mshell.log

@@ -5,11 +5,6 @@
     Everything here works on a bare machine; change the terminal on the first
     line below and you have your setup.
 
-    A much larger, heavily commented example lives beside this file as
-    init.full.lua — leader menus, per-desktop auto-launch, game rules,
-    which-key styling, event handlers. Read it when you want more; copy it over
-    this file if you want all of it.
-
     Location:  %APPDATA%\mshell\init.lua
     Reload:    save the file (auto-reload), or press Win+Shift+R.
     Safety:    a syntax error keeps the PREVIOUS config running and writes the
