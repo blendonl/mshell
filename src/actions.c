@@ -376,7 +376,7 @@ static void act_notify(const ActionCtx *c) {
 }
 
 static void act_launcher(const ActionCtx *c) {
-    if (!launcher_spawn_mrun()) launcher_open();
+    launcher_open();
 }
 
 static void act_jump_urgent(const ActionCtx *c) {
