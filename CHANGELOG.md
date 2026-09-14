@@ -13,6 +13,14 @@ All notable changes to mshell are documented here. This project adheres to
   captured the mouse, so crossing a neighbouring tile no longer ends a menu or
   a drag-select either
 - test: extract the focus-follows-mouse decision behind a pure seam
+- chore: stop shipping `config/init.full.lua`. It was one person's setup (Flow
+  Launcher, Discord, Valorant, KovaaK's) rather than an example anyone else could
+  run, so the release, the MSI and `install.bat` now carry only the generic
+  `config/init.lua`, still installed to `%APPDATA%\mshell\init.lua` when no
+  config exists. An `init.full.lua` a previous install left beside your config
+  is not touched
+- chore: drop the vendored Lua tarball and upstream HTML docs; the unpacked
+  source under `vendor/lua/src` is identical and is what the build uses
 
 ## 0.15.13 — 2026-09-14
 
