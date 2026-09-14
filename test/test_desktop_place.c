@@ -25,6 +25,31 @@ static void test_visible_on(void) {
     CHECK(desktop_visible_on(NULL, 4, 3) == -1, "a NULL table finds nothing");
 }
 
+static void test_pick_monitor(void) {
+    CHECK(desktop_pick_monitor(1, 0, 2) == 1,
+          "a pinned desktop goes to its monitor, not the focused one");
+    CHECK(desktop_pick_monitor(-1, 1, 2) == 1,
+          "an unpinned desktop goes to the focused monitor");
+    CHECK(desktop_pick_monitor(3, 1, 2) == 1,
+          "a pin to a monitor that is gone falls back to the focused monitor");
+    CHECK(desktop_pick_monitor(-1, 5, 2) == 0,
+          "a focused monitor past the span falls back to 0");
+    CHECK(desktop_pick_monitor(-1, -1, 2) == 0,
+          "no pin and no focused monitor falls back to 0");
+}
+
+static void test_hidden_desktop_lands_on_the_focused_monitor(void) {
+    int md[2] = {5, 6};
+
+    int preferred = desktop_pick_monitor(-1, 1, 2);
+    DesktopSwitchPlan p = desktop_switch_plan(md, 2, 9, preferred);
+    desktop_switch_apply(md, 2, &p, 9);
+
+    CHECK(p.prev_id == 6, "the desktop on the focused monitor is the one displaced");
+    CHECK(md[0] == 5, "the other monitor keeps its desktop");
+    CHECK(md[1] == 9, "the target replaces the focused monitor's desktop");
+}
+
 static void test_empty_monitor(void) {
     int none[3] = {1, 2, 3};
     int some[3] = {1, 0, 3};
@@ -206,6 +231,8 @@ static void test_apply_never_loses_a_desktop(void) {
 
 int main(void) {
     test_visible_on();
+    test_pick_monitor();
+    test_hidden_desktop_lands_on_the_focused_monitor();
     test_empty_monitor();
     test_switch_to_the_desktop_already_here();
     test_switch_to_a_hidden_desktop_replaces();

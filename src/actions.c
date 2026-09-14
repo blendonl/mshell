@@ -32,7 +32,12 @@ static void focus_dir(const ActionCtx *c, Action action) {
         return;
     }
     bool prev = (action == ACTION_FOCUS_LEFT || action == ACTION_FOCUS_UP);
-    dt->focused = resolve_target(dt, c->fi, action, prev);
+    int target = resolve_target(dt, c->fi, action, prev);
+    if (target < 0) {
+        log_w(L"  focus: no visible window to move to");
+        return;
+    }
+    dt->focused = target;
     window_focus(dt->windows[dt->focused]);
     if (dt->layout == LAYOUT_MONOCLE) tile_current();
 }
@@ -45,8 +50,9 @@ static void act_focus_right(const ActionCtx *c) { focus_dir(c, ACTION_FOCUS_RIGH
 static void focus_cycle(const ActionCtx *c, bool prev) {
     Desktop *dt = c->dt;
     if (dt->count < 2) return;
-    dt->focused = prev ? (c->fi - 1 + dt->count) % dt->count
-                       : (c->fi + 1) % dt->count;
+    int target = cycle_target(dt, c->fi, prev);
+    if (target < 0) return;
+    dt->focused = target;
     window_focus(dt->windows[dt->focused]);
     if (dt->layout == LAYOUT_MONOCLE) tile_current();
 }
@@ -64,6 +70,7 @@ static void move_dir(const ActionCtx *c, Action action) {
     if (dt->layout != LAYOUT_MONOCLE && dt->count > 1 && c->focus) {
         bool prev = (action == ACTION_MOVE_LEFT || action == ACTION_MOVE_UP);
         int target = resolve_target(dt, c->fi, action, prev);
+        if (target < 0) return;
         hwnd_swap(&dt->windows[c->fi], &dt->windows[target]);
         dt->focused = target;
         tile_current();
