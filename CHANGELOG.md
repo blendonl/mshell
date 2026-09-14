@@ -15,11 +15,30 @@ All notable changes to mshell are documented here. This project adheres to
   each start and reload, so a hung handler cannot stall the shell
 - feat(cli): `mshell.exe --settings list|get|set` reads and writes the same
   fields by their config names
-
 - feat(mouse): save `speed`, `accel` and `swap_buttons` to the user profile the
   way the Settings page does, instead of borrowing them and restoring the
   originals on exit. A reload writes only a field that differs from what Windows
   has; deleting a field stops asserting it without undoing it
+
+## 0.15.14 — 2026-09-14
+
+- fix(mouse): stop focus-follows-mouse from closing right-click menus. Moving
+  the pointer onto a Chrome (or any app's) context menu focused the menu itself,
+  since mshell tracks owned popups; that took the activation away from the app
+  and it dismissed the menu. The pointer now skips captionless tracked popups,
+  and does not move focus at all while the focused app is in a menu or has
+  captured the mouse, so crossing a neighbouring tile no longer ends a menu or
+  a drag-select either
+- test: extract the focus-follows-mouse decision behind a pure seam
+
+## 0.15.13 — 2026-09-14
+
+- fix: serve each mshelld client on its own thread
+- fix: pin mshelld clients to the helper's own Authenticode signer
+
+## 0.15.12 — 2026-09-14
+
+- fix(zorder): stop the backdrop dropping below hidden windows
 
 ## 0.15.11 — 2026-09-14
 

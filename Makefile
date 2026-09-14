@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.11
+VERSION  = 0.15.14
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
@@ -82,6 +82,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/desktop_place.c \
               $(SRC_DIR)/border_math.c \
               $(SRC_DIR)/focus_pick.c \
+              $(SRC_DIR)/sink_order.c \
               $(SRC_DIR)/update.c
 
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
@@ -131,7 +132,7 @@ HELPER        = mshelld.exe
 HELPER_FULL   = mshelld.unstripped.exe
 HELPER_SRCS   = $(SRC_DIR)/mshelld.c $(SRC_DIR)/log.c $(SRC_DIR)/pipe_sd.c
 HELPER_OBJS   = $(HELPER_SRCS:.c=.o)
-HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi
+HELPER_LDLIBS = -luser32 -ladvapi32 -ldwmapi -lwintrust -lcrypt32
 
 SYMBOLS       = $(TARGET).debug $(HELPER).debug
 
@@ -156,8 +157,8 @@ HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
                api_spec tree_algebra ipc_state hide_policy \
-               desktop_place border_math focus_pick settings_parse \
-               settings_catalog
+               desktop_place border_math focus_pick sink_order \
+               settings_parse settings_catalog
 TEST_SUFFIX =
 HOST_CFLAGS = -O1 -Wall -Wextra
 ASAN_CFLAGS = -O1 -g -Wall -Wextra \
