@@ -536,6 +536,10 @@ below asks for two keys held at once, and any sequence can be abandoned with
 
 - `set_border{ width = 2, focused = 0xffffff, floating = 0x89b4fa }` — the ring
   changes colour when the focused window is floating.
+- `set_border{ accent = "bottom", accent_width = 3 }` — a 3px bar runs along
+  the bottom edge of the focused window, over its content, and follows focus.
+  Put a float over a tiled window and focus the tiled one: the float still
+  covers the bar. `accent = "top"` moves it; `"none"` removes it.
 - `set_border{ corners = "round" }` rounds managed windows' corners; `"square"`
   is the default.
 - `set_smart_borders(true)` — with one window on a monitor there is no ring.
