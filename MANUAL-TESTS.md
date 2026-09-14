@@ -836,31 +836,62 @@ tests is what is left behind. Note what Settings › Bluetooth & devices › Mou
 says **before** you start — the checks below are all against that.
 
 - `mshell.mouse.setup{ speed = 4 }` and save. The pointer slows down immediately,
-  and the Settings slider shows 4 if you open it.
-- Delete that line and save again. The pointer goes back to the speed you
-  started with — *not* to Windows' middle notch, and not to 4.
-- `mshell.mouse.setup{ speed = 4, accel = false }`, save, then delete only the
-  `accel` line and save. Acceleration comes back on; the speed stays at 4.
-  (Per-field ownership: giving one back must not give the others back.)
-- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer returns to
-  its original speed.
-- With `speed = 4` applied, sign out and back in **without** quitting cleanly.
-  The pointer is at its original speed: mshell never wrote the change into the
-  user profile, so nothing survives the session.
+  the Settings slider shows 4 if you open it, and
+  `HKCU\Control Panel\Mouse\MouseSensitivity` reads `4`. The log says
+  `mouse: pointer speed N -> 4, saved to the profile`.
+- Save the file again unchanged. The log has **no** new `saved to the profile`
+  line: a reload that asks for what Windows already has writes nothing.
+- Delete that line and save again. The pointer stays at 4 — deleting a line
+  stops mshell asserting the setting, it does not undo it.
+- With `speed = 4` applied, quit mshell (`Win+Shift+Q`). The pointer stays at 4.
+- With `speed = 4` applied, sign out and back in, and boot once into Explorer.
+  The pointer is still at 4 both times: the value lives in the user profile.
 - `accel = false`: "Enhance pointer precision" unticks in Settings, and a
   slow-then-fast drag of the same physical distance moves the pointer the same
-  distance both times.
-- `swap_buttons = true`: the right button becomes primary. Set it back to
-  `false` (rather than deleting the line) and it reverts.
+  distance both times. `accel = true` ticks it again.
+- `swap_buttons = true`: the right button becomes primary, and stays primary
+  after quitting mshell. Set it back to `false` and it reverts.
 - A config that mentions **none** of the three: open Settings and confirm speed,
   precision and button order are all untouched after a full mshell run and quit.
-- Crash restore covers an **unhandled exception** (the crash handler in main.c
-  restores the pointer alongside the hidden windows). It cannot be exercised
-  from Task Manager: `End task` is `TerminateProcess`, which bypasses every
-  handler in the process, so nothing runs and nothing is restored. What covers
-  that case instead is the setting never having been persisted — kill mshell
-  with `swap_buttons = true` applied and the buttons stay swapped until you sign
-  out, at which point Windows loads the profile value and they are normal again.
+
+## Windows settings (mouse, keyboard, theme, gaming)
+
+Run these as the shell, with no Explorer, since that is the case they exist
+for. `mshell.exe --settings get` before you start records what you had.
+
+- `mshell.exe --settings list` prints every field with what it takes;
+  `--settings list theme` only the theme ones; `--settings list zzz` says nothing
+  matches and exits 1.
+- `mshell.exe --settings get` prints every field as a config value
+  (`mouse.scroll_by = lines`, never a `SystemSettings_…` key), marking any that
+  are disabled or set by group policy.
+- `--settings set mouse.scroll_lines 0 theme.mode purple mouse.nope 1` prints
+  three FAILED lines naming the range, the accepted words and the unknown name,
+  exits 1, and changes nothing.
+- `--settings set mouse.pointer_shadow true keyboard.repeat_rate 30` changes both
+  (the pointer grows a shadow; `HKCU\Control Panel\Keyboard\KeyboardSpeed` reads
+  30), and running it again prints `already` for both.
+- `--settings set mouse.scroll_by screen mouse.scroll_lines 5`, then
+  `--settings set mouse.scroll_lines 3 mouse.scroll_by lines`: the second works in
+  that order even though lines are disabled while scrolling by screen, because
+  the disabled one is retried after the rest.
+- Put `mshell.theme.setup{ mode = "light" }` in `init.lua` and save. Within a
+  second or two apps turn light, and the log has
+  `settings: theme.mode: dark -> light`. Save again unchanged: no new `->` line
+  (with `log.level("debug")`, an `already light` line instead), and nothing
+  flickers.
+- `mshell.keyboard.setup{ repeat_rate = 99 }` is a config error with the range
+  in the message, and the previous config stays in force.
+- `mshell.keyboard.setup{ repat_rate = 20 }` (misspelt) is a config error naming
+  the field.
+- `--settings set mouse.cursor_size 3` while the config says `cursor_size = 1`,
+  then reload: the pointer goes back to size 1 — the config wins when loaded.
+- On a machine where Game Bar is disabled by policy
+  (`HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR`), `gaming.game_bar = true`
+  logs a FAILED line and raises a notification that a setting could not be
+  applied; the rest of the config's settings still apply.
+- Quit mshell and boot once into Explorer: Settings shows every value the config
+  set.
 
 ## Floating windows stay on top
 
