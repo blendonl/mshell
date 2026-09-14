@@ -625,18 +625,6 @@ and whether it is still readable.
 
 ## Launcher
 
-Handing off to mrun, when it is installed (its own checklist lives in that
-repo):
-
-- With `mrun.exe` beside `mshell.exe`, `launcher.open` opens **mrun**, not the box
-  below.
-- With `mrun.exe` only on `PATH`, it still opens mrun.
-- With `mrun.exe` neither beside mshell nor on `PATH`, it falls back to the
-  built-in box below and nothing errors.
-- mshell does not tile mrun's window, ring it, or count it as a window.
-
-The built-in box:
-
 - `launcher.open` opens it; type "fire" and Firefox is selected.
 - Up/Down move the selection, Return runs it, Escape closes.
 - Backspace edits the query; the list refilters.

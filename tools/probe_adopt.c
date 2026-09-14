@@ -8,7 +8,7 @@ static const wchar_t *ignore_classes[] = {
     L"ForegroundStaging", L"MultitaskingViewFrame", L"XamlExplorerHostIslandWindow",
     L"mshell_Background", L"mshell_FocusBorder", L"mshell_MessageWindow",
     L"mshell_Bar", L"mshell_WhichKey", L"mshell_Notify", L"mshell_Launcher",
-    L"mrun_Window", L"mshell_Dim", NULL };
+    L"mshell_Dim", NULL };
 
 static const wchar_t *verdict(HWND h, int min_w, int min_h) {
     if (!IsWindowVisible(h))                  return L"NO   invisible";
