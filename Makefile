@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.5
+VERSION  = 0.15.6
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
@@ -75,6 +75,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/ipc_state.c \
               $(SRC_DIR)/hide_policy.c \
               $(SRC_DIR)/desktop_place.c \
+              $(SRC_DIR)/border_math.c \
               $(SRC_DIR)/update.c
 
 LUA_SRCS  = $(LUA_DIR)/lapi.c       \
@@ -136,7 +137,8 @@ DIST_FILES = install.bat uninstall.bat \
              harden.reg harden-undo.reg \
              debloat.reg debloat-undo.reg \
              services.reg services-undo.reg \
-             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md LICENSE
+             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md \
+             LICENSE THIRD-PARTY-NOTICES.md
 
 CPPCHECK       = cppcheck
 CPPCHECK_DIR   = .github/cppcheck
@@ -148,7 +150,7 @@ HOST_CC     = cc
 TEST_DIR    = test
 TEST_MODULES = match layout_math whichkey_math update_parse desktop_list \
                api_spec tree_algebra ipc_state hide_policy \
-               desktop_place
+               desktop_place border_math
 TEST_SUFFIX =
 HOST_CFLAGS = -O1 -Wall -Wextra
 ASAN_CFLAGS = -O1 -g -Wall -Wextra \
