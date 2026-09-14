@@ -5,6 +5,14 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Removed
+
+- **The `launcher` action no longer looks for mrun.** It always opens the
+  built-in box. mshell and mrun are fully independent: to use mrun, or any other
+  launcher, bind its executable with `mshell.exec("mrun.exe")`. Its window is a
+  tool window, which mshell never tiles, so dropping `mrun_Window` from the
+  ignore list changes nothing on screen.
+
 ## 0.15.17 — 2026-09-14
 
 - chore: stop shipping `config/init.full.lua`. It was one person's setup (Flow
@@ -472,7 +480,7 @@ Three shapes changed beyond the rename:
   nested in a table of its own.
 
 
-- **The `launcher` action prefers [mrun](https://github.com/notpc/mrun) when it
+- **The `launcher` action prefers [mrun](https://github.com/blendonl/mrun) when it
   is installed**, falling back to the built-in box when it is not. mrun is a
   separate application — its own binary, its own Lua config, a module system
   where app launching is the first module and clipboard history and emoji are

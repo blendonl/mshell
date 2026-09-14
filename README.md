@@ -137,10 +137,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   `init.lua` ever becoming administrator-level code. No config, no Lua, no
   scripting: it moves, cloaks and closes windows, and nothing else. Installed by
   `install.bat`; started by `install.bat /helper` from an administrator prompt.
-- **An optional launcher.** The built-in one (`launcher`) types a name and runs
-  a program. If you want modules, Lua configuration and a clipboard/emoji story,
-  **mrun** is a separate app that does that, and the `launcher` action prefers
-  it automatically when it is installed. See [The launcher](#the-launcher).
+- **A built-in launcher.** `launcher` types a name and runs a program. If you
+  want modules, Lua configuration and a clipboard/emoji story,
+  [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that.
+  See [The launcher](#the-launcher).
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 
@@ -220,23 +220,18 @@ Start menus, matches subsequences (`fox` finds Firefox), and runs whatever you
 typed when nothing matches — so it is a Run box as well as a menu.
 
 It is deliberately small and has no configuration. When you want more,
-**mrun** is a **separate application** built for exactly that: a modular
-launcher with its own Lua config, where app launching is one module and
-clipboard history, emoji or anything you write yourself are the same shape.
+[**mrun**](https://github.com/blendonl/mrun) is a **separate application** built
+for exactly that: a modular launcher with its own Lua config, where app
+launching is one module and clipboard history, emoji or anything you write
+yourself are the same shape.
 
-mshell ships nothing of it and depends on nothing in it, and using it needs no
-configuration: the `launcher` action looks for `mrun.exe` beside `mshell.exe`,
-then on `PATH`, and falls back to the built-in box when neither has it. Install
-`mrun.exe` and the binding you already have starts using it. To bind it
-explicitly instead:
+mshell and mrun are independent — neither needs the other. To use mrun, or any
+other launcher, bind its executable:
 
 ```lua
 mshell.keys.bind({"LWin"}, "Space",
     function() mshell.exec("mrun.exe") end, { desc = "run" })
 ```
-
-mshell knows not to tile it — `mrun_Window` is in the ignore list — so it floats
-over whatever it covers.
 
 ## Default keybindings
 

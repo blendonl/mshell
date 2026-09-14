@@ -805,7 +805,6 @@ void     launcher_shutdown(void);
 void     launcher_open(void);
 void     launcher_close(void);
 void     launcher_key(DWORD vk, wchar_t ch);
-bool     launcher_spawn_mrun(void);
 #define NOTIFY_TEXT_CAP 512
 
 void     desktop_gc(int slot);
