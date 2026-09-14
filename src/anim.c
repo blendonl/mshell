@@ -160,10 +160,14 @@ void anim_dim_shutdown(void) {
     UnregisterClassW(DIM_CLASS, g.hinst);
 }
 
+static void dim_hide_from(int first) {
+    for (int i = first; i < MAX_MONITORS; i++)
+        if (s_dim[i]) ShowWindow(s_dim[i], SW_HIDE);
+}
+
 void anim_dim_refresh(void) {
-    if (!g.cfg.dim_enabled) {
-        for (int i = 0; i < MAX_MONITORS; i++)
-            if (s_dim[i]) ShowWindow(s_dim[i], SW_HIDE);
+    if (!g.cfg.dim_enabled || g.cfg.dim_alpha == 0) {
+        dim_hide_from(0);
         return;
     }
 
@@ -199,6 +203,7 @@ void anim_dim_refresh(void) {
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(d, NULL, TRUE);
     }
+    dim_hide_from(g.monitor_count);
 
     overlay_raise_all();
 }
