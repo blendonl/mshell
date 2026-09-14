@@ -110,8 +110,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
   down, sleep and hibernate, because there is no Start menu to pick them from;
   volume and media keys, because every `Win+*` combo belongs to mshell and a
   keyboard without dedicated media keys would otherwise have no route to volume
-  at all; and screenshots to `Pictures\Screenshots` and the clipboard. The
-  worked config reaches all of them through submaps, so none needs a chord.
+  at all. The worked config reaches all of them through submaps, so none needs
+  a chord.
   **Pointer speed, acceleration and the left/right button swap** come from the
   same place — `set_mouse{speed=, accel=, swap_buttons=}` is the Settings page
   you no longer have. They are *borrowed*, not set: mshell notes what the
@@ -132,6 +132,11 @@ tiled, driven entirely from the keyboard and configured in Lua.
   a program. If you want modules, Lua configuration and a clipboard/emoji story,
   **mrun** is a separate app that does that, and the `launcher` action prefers
   it automatically when it is installed. See [The launcher](#the-launcher).
+- **Screenshots and screen recording are separate apps.**
+  [mcapture](https://github.com/blendonl/mcapture) takes a dragged region, a
+  window, a monitor or an exact rectangle; [mrecord](https://github.com/blendonl/mrecord)
+  records one to MP4. mshell ships neither and depends on neither — the worked
+  config's capture submap runs them with `mshell.exec`.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 
@@ -287,7 +292,7 @@ On top of the core bindings above, it adds four submaps and a game desktop:
 | `Win+Ctrl+i` | A Lua-function binding: logs the current desktop and window |
 
 Everything a shell is expected to have but a tiling WM has no chord left for —
-power, volume, screenshots, manual tiling — lives in five more submaps that are
+power, volume, capture, manual tiling — lives in five more submaps that are
 deliberately **leader-only**. A tap and two bare keys reaches any of them, so
 nothing needs three keys held at once:
 
@@ -296,7 +301,7 @@ nothing needs three keys held at once:
 | **Tap `Win`** then `u` | **media** submap (persisting; `k`/`j` volume, `m` mute, `Space` play, `h`/`l` track, `s` stop) |
 | **Tap `Win`** then `x` | **system** submap (one-shot; `r` reload, `q` quit, `u` update, `x` panic, `i` notify current state) |
 | **Tap `Win`** then `x p` | **power** submap (one-shot; `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `d` shut down) |
-| **Tap `Win`** then `c` | **capture** submap (one-shot; `s` whole screen, `w` focused window) |
+| **Tap `Win`** then `c` | **capture** submap (one-shot; mcapture `s` region, `f` screen, `w` window; mrecord `r` region, `v` monitor — again to stop) |
 | **Tap `Win`** then `b` | **bsp** submap (persisting; `b` manual layout, `h`/`v` splits, `t`/`s` tabbed/stacked, `n`/`p` cycle, `=`/`-` resize) |
 
 Counts work in the persisting maps, so `u` then `10k` is ten volume steps. The

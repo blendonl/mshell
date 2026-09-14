@@ -609,16 +609,6 @@ function mshell.media.volume.down() end
 ---Mute, or unmute.
 function mshell.media.volume.mute() end
 
----Capture the screen.
----@class mshell.screenshot
-mshell.screenshot = {}
-
----Capture the whole virtual screen.
-function mshell.screenshot.screen() end
-
----Capture just the focused window.
-function mshell.screenshot.window() end
-
 ---Show a message. There is no systray, so this is how mshell talks to you.
 ---@class mshell.notify
 ---@overload fun(text: string, kind?: mshell.NotifyKind, ms?: integer)

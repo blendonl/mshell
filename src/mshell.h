@@ -769,8 +769,6 @@ void     system_sleep(void);
 void     system_hibernate(void);
 void     system_media_key(Action action);
 
-void     screenshot_screen(void);
-void     screenshot_window(void);
 
 bool     notify_init(void);
 void     notify_shutdown(void);

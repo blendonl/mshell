@@ -464,10 +464,9 @@ labels come out right.
   you mean it — they do exactly what they say.
 - **media**: `media.volume.up`/`media.volume.down`/`media.volume.mute` move the volume and show
   Windows' own indicator. `media.play` controls a playing track.
-- **screenshot**: `screenshot.screen` writes a PNG to `Pictures\Screenshots` and puts
-  the image on the clipboard (paste it somewhere to confirm).
-  `screenshot.window` captures only the focused window, at the same bounds the
-  focus ring hugs. A layered/translucent window is captured, not a hole.
+- **screenshot removed**: a config that reads `mshell.screenshot.screen` fails to
+  load with `mshell.screenshot was removed — use mshell.exec`, and the previous
+  config keeps running.
 - **counts**: in the leader map, `3j` focuses down three times. `3q` quits ONCE
   (counts do not repeat non-motion actions). In the `go` map, `1` still switches
   to desktop 1 rather than starting a count.
@@ -498,8 +497,12 @@ below asks for two keys held at once, and any sequence can be abandoned with
   and shut down — test those only if you mean it. Confirm an unbound key inside
   the map (say `z`) drops back to root having done nothing, and that `Esc` at
   any depth returns to root rather than to the parent map.
-- **capture** (`c`, one-shot): `c s` for the whole virtual screen, `c w` for the
-  focused window; both land in `Pictures\Screenshots` and on the clipboard.
+- **capture** (`c`, one-shot, needs `mcapture.exe` and `mrecord.exe` on `PATH`):
+  `c s` opens mcapture's region picker, `c f` takes every monitor, `c w` the
+  focused window. `c r` starts mrecord's region picker and `c v` records the
+  monitor under the cursor; either key again stops the recording. With the
+  programs missing, the key logs `FAILED to launch 'mcapture.exe'` and nothing
+  else happens.
 - **bsp** (`b`, persisting): `b b` puts the desktop in the manual layout, then
   `h`/`v` set the next split's direction, `r` rotates, `t`/`s` make the split a
   tabbed/stacked container, `n`/`p` cycle its children, `=`/`-` resize it. The

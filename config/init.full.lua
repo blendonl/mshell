@@ -801,11 +801,14 @@ mshell.keys.submap("system", {
 })
 
 -- Capture sub-map (one-shot — take one, then back to root).
--- Both write a PNG to Pictures\Screenshots AND put the image on the clipboard,
--- so it can be pasted straight into whatever asked for it.
+-- mcapture and mrecord are separate programs on your PATH (see the README);
+-- r or v a second time stops the recording that is running.
 mshell.keys.submap("capture", {
-    s = mshell.screenshot.screen,   -- the whole virtual screen, every monitor
-    w = mshell.screenshot.window,   -- just the focused window
+    s = { function() mshell.exec("mcapture.exe", "--select") end,          desc = "region" },
+    f = { function() mshell.exec("mcapture.exe", "--screen") end,          desc = "screen" },
+    w = { function() mshell.exec("mcapture.exe", "--window") end,          desc = "window" },
+    r = { function() mshell.exec("mrecord.exe", "--toggle --select") end,  desc = "record region" },
+    v = { function() mshell.exec("mrecord.exe", "--toggle --monitor") end, desc = "record monitor" },
 })
 
 -- Manual tiling sub-map (persisting — building a layout is several decisions in
@@ -874,7 +877,7 @@ mshell.keys.submap("normal", {
     m = "move",     -- send a window to one  (m b, m t, m v, …)
     u = "media",    -- volume and track      (u k, u j, u m, …)
     x = "system",   -- reload/quit/panic, and x p for power
-    c = "capture",  -- screenshots           (c s, c w)
+    c = "capture",  -- mcapture / mrecord    (c s, c r, …)
     b = "bsp",      -- manual tiling         (b h, b v, b t, …)
     -- quick one-key actions
     Return = mshell.layout.master.promote,
