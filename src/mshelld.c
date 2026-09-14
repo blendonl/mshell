@@ -10,6 +10,7 @@
 #include <dwmapi.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -24,12 +25,19 @@
 #define MSHELLD_CLIENT_EXE     L"mshell.exe"
 #define MSHELLD_HANDSHAKE_MS   5000
 #define MSHELLD_WRITE_MS       5000
+#define MSHELLD_MAX_CLIENTS    4
 
 #define logf_w(...)    log_msg(LOG_INFO, __VA_ARGS__)
 #define logf_warn(...) log_msg(LOG_WARN, __VA_ARGS__)
 
-static HANDLE  g_io_event;
+typedef struct {
+    HANDLE pipe;
+    HANDLE io_event;
+    DWORD  pid;
+} Client;
+
 static wchar_t g_client_path[MAX_PATH];
+static LONG    g_client_count;
 
 static void pipe_name(wchar_t *out, size_t cap) {
     DWORD sid = 0;
@@ -65,13 +73,14 @@ static bool resolve_client_path(wchar_t *out, size_t cap) {
     return true;
 }
 
-static bool client_is_mshell(HANDLE pipe) {
+static bool client_is_mshell(HANDLE pipe, DWORD *pid_out) {
     ULONG pid = 0;
     if (!GetNamedPipeClientProcessId(pipe, &pid)) {
         logf_warn(L"refusing client: GetNamedPipeClientProcessId failed: %lu",
                   GetLastError());
         return false;
     }
+    *pid_out = pid;
 
     HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!proc) {
@@ -105,10 +114,10 @@ static bool client_is_mshell(HANDLE pipe) {
     return true;
 }
 
-static bool connect_client(HANDLE pipe) {
+static bool connect_client(HANDLE pipe, HANDLE event) {
     OVERLAPPED ov = {0};
-    ov.hEvent = g_io_event;
-    ResetEvent(g_io_event);
+    ov.hEvent = event;
+    ResetEvent(event);
 
     if (ConnectNamedPipe(pipe, &ov)) return true;
 
@@ -119,29 +128,30 @@ static bool connect_client(HANDLE pipe) {
         return false;
     }
 
-    if (WaitForSingleObject(g_io_event, INFINITE) != WAIT_OBJECT_0) return false;
+    if (WaitForSingleObject(event, INFINITE) != WAIT_OBJECT_0) return false;
 
     DWORD n = 0;
     return GetOverlappedResult(pipe, &ov, &n, FALSE) != 0;
 }
 
-static int pipe_io(HANDLE pipe, void *buf, DWORD len, bool write, DWORD wait_ms) {
+static int pipe_io(const Client *c, void *buf, DWORD len, bool write,
+                   DWORD wait_ms) {
     OVERLAPPED ov = {0};
-    ov.hEvent = g_io_event;
-    ResetEvent(g_io_event);
+    ov.hEvent = c->io_event;
+    ResetEvent(c->io_event);
 
-    BOOL ok = write ? WriteFile(pipe, buf, len, NULL, &ov)
-                    : ReadFile(pipe, buf, len, NULL, &ov);
+    BOOL ok = write ? WriteFile(c->pipe, buf, len, NULL, &ov)
+                    : ReadFile(c->pipe, buf, len, NULL, &ov);
     if (!ok && GetLastError() != ERROR_IO_PENDING) return 0;
 
     DWORD n = 0;
-    if (WaitForSingleObject(g_io_event, wait_ms) != WAIT_OBJECT_0) {
-        CancelIoEx(pipe, &ov);
-        GetOverlappedResult(pipe, &ov, &n, TRUE);
+    if (WaitForSingleObject(c->io_event, wait_ms) != WAIT_OBJECT_0) {
+        CancelIoEx(c->pipe, &ov);
+        GetOverlappedResult(c->pipe, &ov, &n, TRUE);
         return -1;
     }
 
-    if (!GetOverlappedResult(pipe, &ov, &n, FALSE)) return 0;
+    if (!GetOverlappedResult(c->pipe, &ov, &n, FALSE)) return 0;
     return (n == len) ? 1 : 0;
 }
 
@@ -180,17 +190,18 @@ static bool do_close(const ProtoMsg *m) {
     return PostMessageW(h, WM_CLOSE, 0, 0) != 0;
 }
 
-static void serve(HANDLE pipe) {
+static void serve(const Client *c) {
     bool greeted = false;
 
     for (;;) {
         ProtoMsg in = {0};
 
-        int r = pipe_io(pipe, &in, sizeof in, false,
+        int r = pipe_io(c, &in, sizeof in, false,
                         greeted ? INFINITE : MSHELLD_HANDSHAKE_MS);
         if (r < 0) {
-            logf_warn(L"dropping client: it connected but sent no handshake "
-                      L"within %u ms", (unsigned)MSHELLD_HANDSHAKE_MS);
+            logf_warn(L"dropping client pid %lu: it connected but sent no "
+                      L"handshake within %u ms", (unsigned long)c->pid,
+                      (unsigned)MSHELLD_HANDSHAKE_MS);
             return;
         }
         if (r != 1) return;
@@ -207,7 +218,7 @@ static void serve(HANDLE pipe) {
         switch (in.type) {
         case PROTO_HELLO:
             greeted = true;
-            logf_w(L"client connected");
+            logf_w(L"client pid %lu connected", (unsigned long)c->pid);
             break;
 
         case PROTO_SETPOS:
@@ -235,8 +246,71 @@ static void serve(HANDLE pipe) {
             break;
         }
 
-        if (pipe_io(pipe, &out, sizeof out, true, MSHELLD_WRITE_MS) != 1) return;
+        if (pipe_io(c, &out, sizeof out, true, MSHELLD_WRITE_MS) != 1) return;
     }
+}
+
+static DWORD WINAPI client_thread(LPVOID param) {
+    Client *c = (Client *)param;
+
+    serve(c);
+
+    DisconnectNamedPipe(c->pipe);
+    CloseHandle(c->pipe);
+    CloseHandle(c->io_event);
+    free(c);
+
+    InterlockedDecrement(&g_client_count);
+    return 0;
+}
+
+static bool admit_client(HANDLE pipe, DWORD pid) {
+    if (InterlockedIncrement(&g_client_count) > MSHELLD_MAX_CLIENTS) {
+        logf_warn(L"refusing client pid %lu: %d clients are already connected",
+                  (unsigned long)pid, MSHELLD_MAX_CLIENTS);
+        InterlockedDecrement(&g_client_count);
+        return false;
+    }
+
+    Client *c = (Client *)calloc(1, sizeof *c);
+    HANDLE  ev = CreateEventW(NULL, TRUE, FALSE, NULL);
+    HANDLE  t  = NULL;
+
+    if (c && ev) {
+        c->pipe     = pipe;
+        c->io_event = ev;
+        c->pid      = pid;
+        t = CreateThread(NULL, 0, client_thread, c, 0, NULL);
+    }
+
+    if (!t) {
+        logf_warn(L"refusing client pid %lu: could not start a thread for it: "
+                  L"%lu", (unsigned long)pid, GetLastError());
+        if (ev) CloseHandle(ev);
+        free(c);
+        InterlockedDecrement(&g_client_count);
+        return false;
+    }
+
+    CloseHandle(t);
+    return true;
+}
+
+static HANDLE create_instance(const wchar_t *name, SECURITY_ATTRIBUTES *sa,
+                              bool first) {
+    DWORD open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
+    if (first) open_mode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
+
+    HANDLE pipe = CreateNamedPipeW(
+        name, open_mode,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
+        PIPE_REJECT_REMOTE_CLIENTS,
+        PIPE_UNLIMITED_INSTANCES,
+        sizeof(ProtoMsg), sizeof(ProtoMsg), 0, sa);
+
+    if (pipe == INVALID_HANDLE_VALUE)
+        logf_w(L"CreateNamedPipe failed: %lu", GetLastError());
+    return pipe;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
@@ -251,11 +325,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
         return 0;
     }
 
-    g_io_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!g_io_event) {
-        logf_w(L"FATAL: CreateEvent failed: %lu — without a way to time client "
-               L"I/O out, one silent client would wedge the helper",
-               GetLastError());
+    HANDLE listen_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!listen_event) {
+        logf_w(L"FATAL: CreateEvent failed: %lu", GetLastError());
         return 1;
     }
 
@@ -281,27 +353,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR cmd, int show) {
     pipe_name(name, MAX_PATH);
     logf_w(L"listening on %ls", name);
 
-    for (;;) {
-        HANDLE pipe = CreateNamedPipeW(
-            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE |
-                  FILE_FLAG_OVERLAPPED,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
-            PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_UNLIMITED_INSTANCES,
-            sizeof(ProtoMsg), sizeof(ProtoMsg), 0, &sa);
+    HANDLE listening = create_instance(name, &sa, true);
 
-        if (pipe == INVALID_HANDLE_VALUE) {
-            logf_w(L"CreateNamedPipe failed: %lu", GetLastError());
-            break;
+    while (listening != INVALID_HANDLE_VALUE) {
+        bool   connected = connect_client(listening, listen_event);
+        HANDLE next      = create_instance(name, &sa, false);
+        DWORD  pid       = 0;
+
+        bool admitted = connected && next != INVALID_HANDLE_VALUE &&
+                        client_is_mshell(listening, &pid) &&
+                        admit_client(listening, pid);
+
+        if (!admitted) {
+            DisconnectNamedPipe(listening);
+            CloseHandle(listening);
         }
-
-        if (connect_client(pipe) && client_is_mshell(pipe))
-            serve(pipe);
-
-        DisconnectNamedPipe(pipe);
-        CloseHandle(pipe);
+        listening = next;
     }
 
+    CloseHandle(listen_event);
     LocalFree(sd);
     log_shutdown();
     return 0;
