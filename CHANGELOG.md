@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.8 — 2026-09-14
+
 - fix(border): stack the focus overlay directly above the focused window instead
   of just below it, so the accent bar drawn inside the frame is no longer
   hidden by the window it marks
