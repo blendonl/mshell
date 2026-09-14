@@ -647,10 +647,37 @@ function mshell.whichkey.setup(opts) end
 ---@class mshell.mouse
 mshell.mouse = {}
 
----Configure the pointer.
+---Configure the pointer. Windows' own mouse settings are saved to your profile.
 ---Only while the config is loading.
 ---@param opts boolean|mshell.MouseOpts
 function mshell.mouse.setup(opts) end
+
+---Windows' keyboard settings: key repeat and the accessibility keys.
+---@class mshell.keyboard
+mshell.keyboard = {}
+
+---Configure the keyboard. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.KeyboardOpts
+function mshell.keyboard.setup(opts) end
+
+---Windows' light and dark theme and its colour effects.
+---@class mshell.theme
+mshell.theme = {}
+
+---Configure the theme. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.ThemeOpts
+function mshell.theme.setup(opts) end
+
+---Windows' Game Mode and Game Bar.
+---@class mshell.gaming
+mshell.gaming = {}
+
+---Configure gaming. Saved to your profile.
+---Only while the config is loading.
+---@param opts mshell.GamingOpts
+function mshell.gaming.setup(opts) end
 
 ---Write a line to the mshell log.
 ---@class mshell.log

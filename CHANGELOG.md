@@ -5,6 +5,21 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- feat(settings): configure Windows' own settings from the domain they belong to
+  — `mouse.setup` gains scrolling, cursor size, trails, click lock and friends;
+  new `keyboard.setup` (key repeat, Sticky/Filter/Toggle Keys and their
+  shortcuts), `theme.setup` (light, dark or custom, transparency, animations,
+  scrollbars, accent title bars) and `gaming.setup` (Game Mode, Game Bar). They
+  drive the Settings app's own handlers, which work without Explorer, and are
+  saved to the profile; a background `mshell.exe` applies only what differs on
+  each start and reload, so a hung handler cannot stall the shell
+- feat(cli): `mshell.exe --settings list|get|set` reads and writes the same
+  fields by their config names
+- feat(mouse): save `speed`, `accel` and `swap_buttons` to the user profile the
+  way the Settings page does, instead of borrowing them and restoring the
+  originals on exit. A reload writes only a field that differs from what Windows
+  has; deleting a field stops asserting it without undoing it
+
 ## 0.15.15 — 2026-09-14
 
 - Maintenance release.
