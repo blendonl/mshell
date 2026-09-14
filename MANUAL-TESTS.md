@@ -474,10 +474,9 @@ labels come out right.
   you mean it — they do exactly what they say.
 - **media**: `media.volume.up`/`media.volume.down`/`media.volume.mute` move the volume and show
   Windows' own indicator. `media.play` controls a playing track.
-- **screenshot**: `screenshot.screen` writes a PNG to `Pictures\Screenshots` and puts
-  the image on the clipboard (paste it somewhere to confirm).
-  `screenshot.window` captures only the focused window, at the same bounds the
-  focus ring hugs. A layered/translucent window is captured, not a hole.
+- **screenshot removed**: a config that reads `mshell.screenshot.screen` fails to
+  load with `mshell.screenshot was removed — use mshell.exec`, and the previous
+  config keeps running.
 - **counts**: in the leader map, `3j` focuses down three times. `3q` quits ONCE
   (counts do not repeat non-motion actions). In the `go` map, `1` still switches
   to desktop 1 rather than starting a count.

@@ -114,8 +114,7 @@ tiled, driven entirely from the keyboard and configured in Lua.
   down, sleep and hibernate, because there is no Start menu to pick them from;
   volume and media keys, because every `Win+*` combo belongs to mshell and a
   keyboard without dedicated media keys would otherwise have no route to volume
-  at all; and screenshots to `Pictures\Screenshots` and the clipboard. Bound in
-  submaps, none of them needs a chord.
+  at all. Bound in submaps, none of them needs a chord.
   **Pointer speed, acceleration and the left/right button swap** come from the
   same place — `set_mouse{speed=, accel=, swap_buttons=}` is the Settings page
   you no longer have. They are *saved*, exactly as that page would save them:
@@ -141,6 +140,11 @@ tiled, driven entirely from the keyboard and configured in Lua.
   want modules, Lua configuration and a clipboard/emoji story,
   [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that.
   See [The launcher](#the-launcher).
+- **Screenshots and screen recording are separate apps.**
+  [**mcapture**](https://github.com/blendonl/mcapture) takes a dragged region, a
+  window, a monitor or an exact rectangle; [**mrecord**](https://github.com/blendonl/mrecord)
+  records one to MP4. mshell ships neither and depends on neither — bind them
+  with `mshell.exec("mcapture.exe", "--select")` like any other program.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
 

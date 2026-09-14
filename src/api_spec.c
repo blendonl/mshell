@@ -643,18 +643,6 @@ const ApiEntry api_spec[] = {
       API_ACTION, 0,
       "Mute, or unmute.",
       "", NULL },
-    { "screenshot", NULL, ACTION_NONE,
-      API_NAMESPACE, 0,
-      "Capture the screen.",
-      "", NULL },
-    { "screenshot.screen", "screenshot", ACTION_SCREENSHOT,
-      API_ACTION, 0,
-      "Capture the whole virtual screen.",
-      "", NULL },
-    { "screenshot.window", "screenshot_window", ACTION_SCREENSHOT_WINDOW,
-      API_ACTION, 0,
-      "Capture just the focused window.",
-      "", NULL },
     { "notify", "notify", ACTION_NOTIFY,
       API_ACTION, API_PAYLOAD_STR | API_CALLABLE,
       "Show a message. There is no systray, so this is how mshell talks to you.",
@@ -763,6 +751,7 @@ const ApiEntry api_spec[] = {
 };
 
 const ApiRemoved api_removed[] = {
+    { "screenshot", "exec" },
     { "bind", "keys.bind" },
     { "submap", "keys.submap" },
     { "set_leader", "keys.leader" },

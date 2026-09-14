@@ -94,8 +94,6 @@
     X(ACTION_MEDIA_PREV,             act_media_prev)                       \
     X(ACTION_MEDIA_STOP,             act_media_stop)                       \
                                                                            \
-    X(ACTION_SCREENSHOT,             act_screenshot)                       \
-    X(ACTION_SCREENSHOT_WINDOW,      act_screenshot_window)                \
     X(ACTION_NOTIFY,                 act_notify)                           \
     X(ACTION_LAUNCHER,               act_launcher)                         \
     X(ACTION_JUMP_URGENT,            act_jump_urgent)                      \

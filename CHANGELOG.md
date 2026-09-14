@@ -5,6 +5,26 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING: `mshell.screenshot` is gone.** Screenshots and screen recording
+  moved to two separate programs, [mcapture](https://github.com/blendonl/mcapture)
+  (a dragged region, a window, a monitor or an exact rectangle — the size the
+  built-in action could never take) and [mrecord](https://github.com/blendonl/mrecord)
+  (the same regions to MP4). A config that still reads `mshell.screenshot.screen`
+  or `.window` is told `mshell.screenshot was removed — use mshell.exec`, and
+  the previous config keeps running. Bind the programs instead:
+
+  ```lua
+  mshell.keys.submap("capture", {
+      s = { function() mshell.exec("mcapture.exe", "--select") end, desc = "region" },
+      w = { function() mshell.exec("mcapture.exe", "--window") end, desc = "window" },
+      r = { function() mshell.exec("mrecord.exe", "--toggle --select") end, desc = "record" },
+  })
+  ```
+
+  mshell no longer links `windowscodecs`.
+
 ## 0.15.19 — 2026-09-14
 
 - docs(readme): point to mnotify for other apps' tray balloons

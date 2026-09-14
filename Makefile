@@ -23,7 +23,7 @@ RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
            -DVER_PATCH=$(VER_PATCH)
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
-           -ladvapi32 -lpowrprof -lwindowscodecs -lwinhttp -lbcrypt \
+           -ladvapi32 -lpowrprof -lwinhttp -lbcrypt \
            -lruntimeobject -lm
 
 SRC_DIR  = src
@@ -63,7 +63,6 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/pipe_sd.c \
               $(SRC_DIR)/overlay.c \
               $(SRC_DIR)/system.c \
-              $(SRC_DIR)/screenshot.c \
               $(SRC_DIR)/notify.c \
               $(SRC_DIR)/mouse.c \
               $(SRC_DIR)/launcher.c \
