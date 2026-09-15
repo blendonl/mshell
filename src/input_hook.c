@@ -307,8 +307,10 @@ static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     MSLLHOOKSTRUCT *ms = (MSLLHOOKSTRUCT *)lParam;
-    if (mouse_mod_drag_event(wParam, ms->pt, mod_lwin))
+    if (mouse_mod_drag_event(wParam, ms->pt, mod_lwin)) {
+        if (mod_lwin) win_used = true;
         return 1;
+    }
 
     return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
