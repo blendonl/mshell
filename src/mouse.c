@@ -182,7 +182,8 @@ bool mouse_mod_drag_event(WPARAM msg, POINT pt, bool mod_held) {
     }
 
     case WM_MOUSEMOVE:
-        return drag_post_move(pt, false);
+        drag_post_move(pt, false);
+        return false;
 
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
