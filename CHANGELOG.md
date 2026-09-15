@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.21 — 2026-09-15
+
+- fix(mouse): let the pointer move during Win+drag
+- fix(input): a Win+drag no longer opens the leader map on release
+
 ## 0.15.20 — 2026-09-14
 
 ### Removed
