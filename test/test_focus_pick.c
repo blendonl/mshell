@@ -143,6 +143,16 @@ static void test_the_pointer_leaving_an_open_menu_leaves_focus_alone(void) {
           "crossing a neighbouring tile must not end that menu or drag");
 }
 
+static void test_the_pointer_leaving_a_fullscreen_game_leaves_focus_alone(void) {
+    PointerTarget t = other_tile();
+    t.foreground_is_fullscreen = true;
+
+    CHECK(!focus_pick_follows_pointer(&t),
+          "a fullscreen game minimizes the moment it loses the foreground, so "
+          "the pointer crossing onto another monitor must not take it away — "
+          "only a click or a key does");
+}
+
 static void test_the_pointer_over_nothing_mshell_manages_leaves_focus_alone(void) {
     PointerTarget t = other_tile();
     t.managed = false;
@@ -179,6 +189,7 @@ int main(void) {
     test_the_pointer_over_a_popup_menu_leaves_focus_alone();
     test_the_pointer_still_reaches_a_tracked_dialog();
     test_the_pointer_leaving_an_open_menu_leaves_focus_alone();
+    test_the_pointer_leaving_a_fullscreen_game_leaves_focus_alone();
     test_the_pointer_over_nothing_mshell_manages_leaves_focus_alone();
     test_the_pointer_over_the_focused_or_a_hidden_window_does_nothing();
     return tests_report("focus_pick");
