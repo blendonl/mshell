@@ -437,18 +437,20 @@ mshell paints its own. A config that fails to reload says so on screen with the
 Lua error, which matters because the atomic rollback that keeps your previous
 config running is otherwise completely silent. `mshell.notify("text", "warn")`
 raises one yourself, and `mshell.exe --msg 'notify hello'` from a script does the
-same. It is deliberately mshell's own messages only: real Windows toasts are
-WinRT/WNS and require being a registered Explorer-class shell.
+same. It is deliberately mshell's own messages only.
 
 Other apps' notifications are a different matter, and there are two kinds.
-Toasts — what Discord, Chrome and Outlook send — are discarded by Windows
-itself when Explorer is not running: every app's notifier reports
-`DisabledForUser` and nothing is stored, so no program can show them. Tray
-balloons are what older tray utilities send, and they are only missing a
-`Shell_TrayWnd` to land in. [mnotify](https://github.com/blendonl/mnotify) is a
-separate app that provides one: it shows those balloons and gives you a menu of
-tray icons. mshell ships nothing of it and needs no configuration for it —
-`mshell.exec.startup("mnotify.exe")` starts it with the session.
+Toasts — what Discord, Chrome, WhatsApp and Outlook send — are still accepted
+and stored by Windows when Explorer is not running; it is Explorer that draws
+them, so they never appear. Tray balloons are what older tray utilities send,
+and they are only missing a `Shell_TrayWnd` to land in.
+[mnotify](https://github.com/blendonl/mnotify) is a separate app that shows
+both: it reads new toasts from Windows' notification store, stands in for the
+tray, and gives you a menu of tray icons. mshell ships nothing of it and needs
+no configuration for it — `mshell.exec.startup("mnotify.exe")` starts it with
+the session. Toasts need Windows notifications left on: `ToastEnabled` under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications` must not
+be `0`.
 
 **A panic key.** The `panic` action starts
 Explorer alongside mshell and stops the hook binding anything, so a shell that is

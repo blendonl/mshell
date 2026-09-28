@@ -62,9 +62,6 @@ static const Tweak s_tweaks[] = {
       L"NativeWindowOcclusionEnabled", TW_DWORD, 0, NULL,
       L"the same, for Edge" },
 
-    { L"quiet", L"Software\\Microsoft\\Windows\\CurrentVersion\\PushNotifications",
-      L"ToastEnabled", TW_DWORD, 0, NULL,
-      L"there is no tray to show a toast in" },
     { L"quiet", L"Control Panel\\Sound",
       L"Beep", TW_SZ, 0, L"no",
       L"a shell that swallows keys would beep on every unbound Win+key" },
