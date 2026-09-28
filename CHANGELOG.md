@@ -5,6 +5,11 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.22 — 2026-09-28
+
+- fix(mouse): focus-follows-mouse no longer steals focus from a fullscreen window
+- fix(tweaks): stop turning Windows toasts off
+
 ## 0.15.21 — 2026-09-15
 
 - fix(mouse): let the pointer move during Win+drag
