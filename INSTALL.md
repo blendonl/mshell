@@ -313,9 +313,17 @@ into three importable files by blast radius:
 
 - **`debloat.reg`** — the visual layer: window/menu/tooltip animations and
   fades, Aero Snap / Snap Assist / Aero Shake / Aero Peek, transparency,
-  accent colour on borders, toasts and "suggested content", the error beep.
-  All per-user (HKCU), no admin, fully reversible with `debloat-undo.reg`.
-  Double-click to apply, then sign out and back in for everything to settle.
+  accent colour on borders, Notification Center and "suggested content", the
+  error beep. All per-user (HKCU), no admin, fully reversible with
+  `debloat-undo.reg`. Double-click to apply, then sign out and back in for
+  everything to settle.
+
+  It leaves Windows notifications on. Earlier copies also set `ToastEnabled`
+  to `0` under `HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications`,
+  and so did `mshell --tweaks apply quiet`. That makes Windows drop every
+  app's toast before [mnotify](https://github.com/blendonl/mnotify) can show
+  it. If you applied either, delete that value (or run `debloat-undo.reg`),
+  then sign out and back in.
 
 - **`services.reg`** — machine-wide (HKLM), needs **admin + a reboot**. Turns
   off the lock screen and startup sound and disables background services a

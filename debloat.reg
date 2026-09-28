@@ -2,7 +2,7 @@ Windows Registry Editor Version 5.00
 
 ; ============================================================================
 ;  mshell debloat.reg — turns off the visual chrome, animations, snap
-;  behaviour, notifications and sounds that Windows layers on top of a
+;  behaviour, Notification Center and sounds that Windows layers on top of a
 ;  session. Everything here is per-user (HKCU): no admin, affects only this
 ;  account, and every value is reverted by debloat-undo.reg.
 ;
@@ -59,11 +59,8 @@ Windows Registry Editor Version 5.00
 "EnableTransparency"=dword:00000000
 
 ; ---------------------------------------------------------------------------
-;  Notifications, toasts and "suggested content"
+;  Notification Center and "suggested content"
 ; ---------------------------------------------------------------------------
-[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\PushNotifications]
-"ToastEnabled"=dword:00000000
-
 [HKEY_CURRENT_USER\Software\Policies\Microsoft\Windows\Explorer]
 "DisableNotificationCenter"=dword:00000001
 
