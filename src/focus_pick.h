@@ -21,6 +21,7 @@ typedef struct {
     bool on_visible_desktop;
     bool is_foreground;
     bool foreground_holds_pointer;
+    bool foreground_is_fullscreen;
 } PointerTarget;
 
 bool focus_pick_follows_pointer(const PointerTarget *target);

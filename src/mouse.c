@@ -19,6 +19,19 @@ static bool foreground_holds_pointer(HWND fg) {
     return (gti.flags & menu_modes) != 0 || gti.hwndCapture != NULL;
 }
 
+static bool foreground_is_fullscreen(HWND fg) {
+    ManagedWindow *mw = window_find(fg);
+    if (!mw) return false;
+    if (window_is_screen_fullscreen(mw)) return true;
+
+    RECT        r;
+    MONITORINFO mi  = { .cbSize = sizeof mi };
+    HMONITOR    mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
+    if (!mon || !GetMonitorInfoW(mon, &mi) || !GetWindowRect(fg, &r))
+        return false;
+    return !IsIconic(fg) && EqualRect(&r, &mi.rcMonitor);
+}
+
 static bool drag_in_progress(void) {
     kb_lock();
     bool dragging = (g.drag_hwnd != NULL || g.mod_drag_hwnd != NULL);
@@ -86,6 +99,7 @@ void mouse_poll_focus(void) {
         .on_visible_desktop       = mw && desktop_is_visible(mw->desktop_id),
         .is_foreground            = top == fg,
         .foreground_holds_pointer = foreground_holds_pointer(fg),
+        .foreground_is_fullscreen = foreground_is_fullscreen(fg),
     };
     if (!focus_pick_follows_pointer(&target)) return;
 
