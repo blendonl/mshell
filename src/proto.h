@@ -2,17 +2,16 @@
 
 #include <stdint.h>
 
-#define MSHELLD_PROTO_VERSION  3u
+#define MSHELLD_PROTO_VERSION  4u
 #define MSHELLD_PIPE_PREFIX    L"\\\\.\\pipe\\mshelld-"
 
 typedef enum {
-    PROTO_HELLO = 1,
-    PROTO_SETPOS,
-    PROTO_ZORDER,
-    PROTO_CLOAK,
-    PROTO_CLOSE,
-    PROTO_OK,
-    PROTO_FAIL,
+    PROTO_HELLO  = 1,
+    PROTO_SETPOS = 2,
+    PROTO_ZORDER = 3,
+    PROTO_CLOSE  = 5,
+    PROTO_OK     = 6,
+    PROTO_FAIL   = 7,
 } ProtoType;
 
 typedef struct {

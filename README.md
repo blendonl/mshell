@@ -137,8 +137,9 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
   still tile, hide and close windows owned by elevated processes — without your
   `init.lua` ever becoming administrator-level code. No config, no Lua, no
-  scripting: it moves, cloaks and closes windows, and nothing else. Installed by
-  `install.bat`; started by `install.bat /helper` from an administrator prompt.
+  scripting: it moves, restacks and closes windows, and nothing else. Installed by
+  `install.bat`, and registered to start at sign-in whenever `install.bat` runs
+  from an administrator prompt (`/nohelper` skips it).
 - **A built-in launcher.** `launcher` types a name and runs a program. If you
   want modules, Lua configuration and a clipboard/emoji story,
   [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that.
@@ -621,9 +622,15 @@ made on the fly and never bound a key to.
 
 **How a desktop is taken off the screen (`set_hide_policy`).** A desktop you are
 not on is a set of windows that have been removed from view, and *how* they are
-removed decides whether they come back looking right. mshell **cloaks** them
-through DWM — the window keeps rendering and DWM simply stops compositing it,
-which is exactly the mechanism Windows' own virtual desktops use.
+removed decides whether they come back looking right. By default mshell
+**sinks** them: each window drops below the desktop backdrop in the z-order, so
+Windows still considers it visible and it keeps rendering, but nothing on
+screen shows it. A window that can't be sunk — always-on-top, or owned by an
+elevated process — is parked off every display instead (through `mshelld.exe`
+for an elevated one), and `ShowWindow(SW_HIDE)` is the last resort. The policy
+is still called `"cloak"` from when it meant DWM cloaking, which mshell can't
+use: DWM only lets a window's owner cloak it, and the shell cloak Windows' own
+virtual desktops use lives inside explorer.exe.
 
 The obvious alternative, `ShowWindow(SW_HIDE)`, is what mshell did before 0.13.0
 and it has a visible failure mode: clearing a window's visible bit makes DWM
@@ -640,9 +647,9 @@ mshell.window.policy.hide("cloak")   -- default
 mshell.window.policy.hide("hide")    -- pre-0.13.0 ShowWindow(SW_HIDE)
 ```
 
-Cloaking alone is **not** what fixes the blackness, though — an app stops
-presenting whether it learns it is invisible from the hide or from its own
-occlusion tracking noticing the cloak. What fixes it is that a window coming
+Keeping the window visible is **not** what fixes the blackness on its own,
+though — an app can still stop presenting when its own occlusion tracking
+decides nobody can see it. What fixes it is that a window coming
 back is always *asked to draw*: `RedrawWindow` over it and its children, plus a
 forced re-placement carrying `SWP_FRAMECHANGED` and `SWP_NOCOPYBITS` so the
 tiler cannot skip it for already being in the right place. That applies to both

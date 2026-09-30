@@ -4,11 +4,14 @@ set DEST=C:\mshell
 set CFGDIR=%APPDATA%\mshell
 
 set "WANTHELPERTASK="
+set "NOHELPERTASK="
 set "MACHINEWIDE="
 set "NORESTART="
 for %%a in (%*) do (
     if /I "%%~a"=="/helper"    set "WANTHELPERTASK=1"
     if /I "%%~a"=="--helper"   set "WANTHELPERTASK=1"
+    if /I "%%~a"=="/nohelper"  set "NOHELPERTASK=1"
+    if /I "%%~a"=="--nohelper" set "NOHELPERTASK=1"
     if /I "%%~a"=="/machine"   set "MACHINEWIDE=1"
     if /I "%%~a"=="--machine"  set "MACHINEWIDE=1"
     if /I "%%~a"=="/norestart" set "NORESTART=1"
@@ -171,9 +174,9 @@ if defined HELPERHINT (
     echo  Windows owned by elevated processes ^(Task Manager, regedit^) will
     echo  float rather than tile: that needs the privileged helper, which is
     echo  installed at %DEST%\mshelld.exe but not started. To run it at every
-    echo  sign-in, re-run this script from an administrator prompt:
-    echo    install.bat /helper
-    echo  It is optional - see INSTALL.md, "The privileged helper".
+    echo  sign-in, re-run this script from an administrator prompt - it
+    echo  registers the helper whenever it can. See INSTALL.md,
+    echo  "The privileged helper"; /nohelper skips it.
     echo.
 )
 echo  RECOVERY if something goes wrong:
@@ -196,8 +199,14 @@ set "HELPERTASK="
 schtasks /query /tn "mshelld" >nul 2>&1 && set "HELPERTASK=1"
 
 if defined HELPERTASK     goto :helper_refresh
-if defined WANTHELPERTASK goto :helper_create
+if defined NOHELPERTASK   goto :helper_skip
+call :iselevated &&       goto :helper_create
+if defined WANTHELPERTASK goto :helper_needadmin
 set "HELPERHINT=1"
+goto :eof
+
+:helper_skip
+echo  /nohelper: the mshelld logon task was not registered.
 goto :eof
 
 :helper_create
@@ -232,7 +241,7 @@ goto :eof
 :helper_needadmin
 set "HELPERHINT=1"
 echo  /helper needs an administrator prompt ^(the task is /rl highest^).
-echo  mshelld.exe IS installed - re-run  install.bat /helper  as administrator.
+echo  mshelld.exe IS installed - re-run  install.bat  as administrator.
 goto :eof
 
 :helper_createfail

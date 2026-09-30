@@ -142,26 +142,22 @@ elevated. In order of preference:
 
 `mshelld.exe` ships alongside mshell and exists to make elevating mshell
 unnecessary. It is elevated; mshell is not. It has **no config file, no Lua, no
-scripting, no window rules and no keyboard hook** — it accepts four requests:
+scripting, no window rules and no keyboard hook** — it accepts three requests:
 "put this window at this rectangle", "put this window in or out of the
-always-on-top band", "cloak or uncloak this window" and "post this window a
-WM_CLOSE". Every decision stays in the unelevated shell.
+always-on-top band" and "post this window a WM_CLOSE". Every decision stays in
+the unelevated shell.
 
 With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
-and, just as importantly, *hides* them when you switch desktops: cloaking a
-window is blocked by the same integrity check as moving it, so without the
+and, just as importantly, *hides* them when you switch desktops: an elevated
+window can't be sunk under the backdrop, so it is parked off every display
+instead, and that move meets the same integrity check as tiling it. Without the
 helper an elevated window is visible on every desktop at once.
 
-**And cloaking is not only about elevated windows.** DWM refuses
-`DWMWA_CLOAK` on *any* window an unelevated process does not own, ordinary
-same-user windows included, so with no helper running the default `"cloak"`
-hide policy is not what actually happens: every desktop switch falls back to
-`ShowWindow(SW_HIDE)`. Chromium-based apps (Chrome, Edge, Electron) rebuild
-their compositor in the wrong place after that — the page walks further into
-the window on every switch, with the app's own frame colour filling the gap,
-until the app is restarted. If you switch desktops with a browser open, install
-the helper.
+The helper does not cloak anything. DWM only lets a window's owner cloak it, so
+no other process can — elevated or not. Ordinary windows don't need the helper
+to be hidden: they are sunk under the desktop backdrop (see "How a desktop is
+taken off the screen" in the README).
 
 It is also what
 lets `float_on_top` hold for such a window: floats are kept above the grid by
@@ -175,19 +171,20 @@ code.
 and always replaces it in step with the shell — the two shake hands on a
 protocol version and refuse a mismatch, so upgrading one without the other is a
 supported way to break the helper. Installing the file is not the same as
-running it, though: that part is opt-in, because it needs a logon task with
-administrator rights.
-
-To register that task, re-run the installer **from an administrator prompt**:
+running it, though: that needs a logon task with administrator rights, so it
+happens whenever `install.bat` runs **from an administrator prompt**:
 
 ```
-install.bat /helper
+install.bat
 ```
 
-It creates the task below, and starts the helper straight away rather than
-making you sign out. On later upgrades you do not need the flag again — once the
-task exists, `install.bat` restarts the helper so the build you just installed
-is the one running.
+Run elevated, it creates the task below and starts the helper straight away
+rather than making you sign out. Run unelevated, it installs everything else,
+leaves the task alone and says how to add it later. On upgrades, once the task
+exists, `install.bat` restarts the helper so the build you just installed is the
+one running (unelevated, the new build takes over at your next sign-in).
+`install.bat /nohelper` skips registering the task; `/helper` still works and
+insists on an administrator prompt.
 
 If you would rather do it by hand, this is the same command. A logon task is
 what gives the helper a full token without weakening UAC:
@@ -199,8 +196,9 @@ schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
 
 mshell finds it automatically; nothing needs configuring. If it is not running,
 mshell behaves exactly as it always has — those windows float and stay visible
-on every desktop — so this is entirely opt-in. `%TEMP%\mshelld.log` is the
-helper's own log if you need to see whether it started.
+on every desktop — so leaving it out (`/nohelper`, or an unelevated install) is
+safe. `%TEMP%\mshelld.log` is the helper's own log if you need to see whether it
+started.
 
 **Do not add `/ru SYSTEM` to that task.** The helper's pipe is restricted to the
 user it runs as, and the command above has no `/ru`, so it runs as *you* —
@@ -211,7 +209,7 @@ all. The log says which identity it granted on the line above `listening on`, so
 if mshell is not connecting, start there.
 
 **What running it trusts.** The helper is elevated and does what it is asked —
-place a window, band it topmost, cloak it, close it — for any window, including
+place a window, band it topmost, close it — for any window, including
 ones owned by elevated processes. That is the whole point of it: tiling an
 administrator's window means being able to move an administrator's window.
 mshelld only accepts requests from the `mshell.exe` sitting in its own
