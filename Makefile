@@ -309,7 +309,7 @@ meta: $(GEN_META)
 	@./$(GEN_META) meta/mshell.lua
 
 PROBE = tools/probe_shellcloak.exe tools/probe_dpiband.exe \
-       tools/probe_frame.exe
+       tools/probe_frame.exe tools/probe_uipi.exe
 
 probe: $(PROBE)
 
@@ -327,6 +327,11 @@ tools/probe_frame.exe: tools/probe_frame.c
 	@echo "  CC     $@"
 	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
 	      -o $@ $< -ldwmapi -luser32 -lgdi32
+
+tools/probe_uipi.exe: tools/probe_uipi.c
+	@echo "  CC     $@"
+	$(CC) -O1 -municode -DUNICODE -D_UNICODE -Wall -Wextra \
+	      -o $@ $< -luser32 -ladvapi32
 
 HOST_LUA = $(TEST_DIR)/lua
 
