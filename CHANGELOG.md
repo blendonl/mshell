@@ -5,6 +5,13 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.24 — 2026-09-30
+
+- build: add probe_uipi under make probe
+- refactor(helper)!: drop the cloak request
+- feat(install): register the helper task by default
+- fix(input): recover from keys the hook could not see
+
 ## 0.15.23 — 2026-09-30
 
 ### Removed
