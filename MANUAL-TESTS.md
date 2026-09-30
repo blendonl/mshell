@@ -203,6 +203,28 @@ With `mshelld.exe` running:
 - Same three with an *admin* terminal or regedit, and with an app run
   explicitly as administrator (right-click → Run as administrator).
 
+### Keys released where the hook can't see them
+
+mshell's keyboard hook is not called while an elevated window has focus, or
+while the UAC or lock screen is up, so it can miss the release of a key it saw
+go down. The log says `input: the foreground window belongs to a
+higher-integrity process` when focus moves onto such a window.
+
+- In Notepad, hold `Win`, click Task Manager, release `Win` there, then click
+  back into Notepad and type `hjkl`. The letters appear in Notepad — no focus
+  moves, nothing is swallowed. Before this fix every key acted as `Win+key`.
+- Same with `Shift`: hold it in Notepad, click Task Manager, release it there,
+  click back and press `Win+h`. It focuses left; it does not run the
+  `Win+Shift+h` binding.
+- Trigger a UAC prompt while holding `Win` (a binding that runs something as
+  administrator), release `Win` on the secure desktop, cancel. Keys typed
+  afterwards are plain keys.
+- With a leader set: focus Task Manager, hold `Win`, click Notepad, release
+  `Win`. The leader map does **not** open — a `Win` release whose press mshell
+  never saw is not a tap.
+- With `mouse_mod_drag` on, after the first check: a plain click in Notepad is a
+  click, not the start of a `Win`+drag.
+
 ## Tracked windows — desktop-bound without tiling
 
 Every window is adopted now: anything mshell does not fully manage still

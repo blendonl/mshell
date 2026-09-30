@@ -281,6 +281,13 @@ void CALLBACK events_win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     (void)idEventThread;
     (void)dwmsEventTime;
 
+    if (event == EVENT_SYSTEM_DESKTOPSWITCH) {
+        kb_mark_mods_stale();
+        return;
+    }
+    if (event == EVENT_SYSTEM_FOREGROUND && idObject == OBJID_WINDOW)
+        kb_note_foreground(hwnd);
+
     if (events_suppressed()) return;
 
     if (idObject != OBJID_WINDOW) return;
@@ -317,6 +324,10 @@ static const EventHookSpec event_hooks[] = {
 
     { EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, &g.movesize_hook,
       L"MOVESIZE", L"dragging a tiled window will not swap it" },
+
+    { EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_DESKTOPSWITCH,
+      &g.desktopswitch_hook, L"DESKTOPSWITCH",
+      L"a Win key released on the UAC or lock screen may stay held down" },
 };
 
 bool events_init(void) {

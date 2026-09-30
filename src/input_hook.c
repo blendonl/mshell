@@ -23,6 +23,46 @@ static int s_count;
 
 static bool win_used;
 
+static volatile LONG s_mods_stale;
+
+void kb_mark_mods_stale(void) {
+    InterlockedExchange(&s_mods_stale, 1);
+}
+
+static bool key_held(int vk) {
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+
+static void resync_mods_if_stale(void) {
+    if (!InterlockedExchange(&s_mods_stale, 0)) return;
+
+    mod_lwin   = false;
+    win_used   = true;
+    mod_lshift = key_held(VK_LSHIFT);
+    mod_rshift = key_held(VK_RSHIFT);
+    mod_lctrl  = key_held(VK_LCONTROL);
+    mod_rctrl  = key_held(VK_RCONTROL);
+    mod_lalt   = key_held(VK_LMENU);
+    mod_ralt   = key_held(VK_RMENU);
+    mod_shift  = mod_lshift || mod_rshift;
+    mod_ctrl   = mod_lctrl  || mod_rctrl;
+    mod_alt    = mod_lalt   || mod_ralt;
+}
+
+void kb_note_foreground(HWND hwnd) {
+    static bool blind;
+
+    bool now = hwnd && input_blind_to(hwnd);
+    if (now == blind) return;
+    blind = now;
+
+    kb_mark_mods_stale();
+    log_msg(LOG_INFO, now
+            ? L"input: the foreground window belongs to a higher-integrity "
+              L"process — keybinds can't see keys until it loses focus"
+            : L"input: keybinds can see keys again");
+}
+
 static DWORD current_mods(void) {
     DWORD m = 0;
     if (mod_lwin)  m |= MOD_LWIN;
@@ -43,10 +83,7 @@ static void notify_submap(void) {
 }
 
 void kb_reset_state(void) {
-    mod_lwin = mod_shift = mod_ctrl = mod_alt = false;
-    mod_lshift = mod_rshift = mod_lctrl = mod_rctrl = false;
-    mod_lalt = mod_ralt = false;
-    win_used = false;
+    kb_mark_mods_stale();
     kb_lock();
     s_count = 0;
     g.current_map = g.active_keymaps->root;
@@ -136,6 +173,8 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode != HC_ACTION)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
+    resync_mods_if_stale();
+
     KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lParam;
     DWORD vk = kb->vkCode;
 
@@ -182,9 +221,10 @@ LRESULT CALLBACK kb_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
             mod_lwin = true;
             return 1;
         }
+        bool seen = mod_lwin;
         mod_lwin = false;
         kb_lock();
-        if (!win_used) {
+        if (seen && !win_used) {
             if (g.current_map == g.active_keymaps->root) {
                 if (g.active_keymaps->leader)
                     g.current_map = g.active_keymaps->leader;
@@ -302,6 +342,8 @@ done:
 static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode != HC_ACTION)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+    resync_mods_if_stale();
 
     if (!g.mod_drag_hwnd && !mod_lwin)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
