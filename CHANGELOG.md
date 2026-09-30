@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.23 — 2026-09-30
+
 ### Removed
 
 - **BREAKING: windows can no longer be minimized.** There is no taskbar under
