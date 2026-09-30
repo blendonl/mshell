@@ -225,18 +225,6 @@ bool helper_set_topmost(HWND hwnd, bool on) {
                           &warned);
 }
 
-bool helper_set_cloak(HWND hwnd, bool on) {
-    static bool warned;
-
-    ProtoMsg req = {
-        .type    = PROTO_CLOAK,
-        .version = MSHELLD_PROTO_VERSION,
-        .hwnd    = (uint64_t)(uintptr_t)hwnd,
-        .flags   = on ? 1u : 0u,
-    };
-    return helper_request(&req, L"a window could not be hidden", &warned);
-}
-
 bool helper_close_window(HWND hwnd) {
     static bool warned;
 

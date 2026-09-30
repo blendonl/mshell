@@ -7,7 +7,6 @@
 #endif
 
 #include <windows.h>
-#include <dwmapi.h>
 #include <wincrypt.h>
 #include <wintrust.h>
 #include <stdio.h>
@@ -19,10 +18,6 @@
 #include "proto.h"
 #include "log.h"
 #include "pipe_sd.h"
-
-#ifndef DWMWA_CLOAK
-#define DWMWA_CLOAK 13
-#endif
 
 #define MSHELLD_CLIENT_EXE     L"mshell.exe"
 #define MSHELLD_HANDSHAKE_MS   5000
@@ -271,14 +266,6 @@ static bool do_zorder(const ProtoMsg *m) {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) != 0;
 }
 
-static bool do_cloak(const ProtoMsg *m) {
-    HWND h = (HWND)(uintptr_t)m->hwnd;
-    if (!h || !IsWindow(h)) return false;
-
-    BOOL v = (m->flags & 1u) ? TRUE : FALSE;
-    return SUCCEEDED(DwmSetWindowAttribute(h, DWMWA_CLOAK, &v, sizeof(v)));
-}
-
 static bool do_close(const ProtoMsg *m) {
     HWND h = (HWND)(uintptr_t)m->hwnd;
     if (!h || !IsWindow(h)) return false;
@@ -325,11 +312,6 @@ static void serve(const Client *c) {
         case PROTO_ZORDER:
             if (!greeted)                 out.type = PROTO_FAIL;
             else if (!do_zorder(&in))     out.type = PROTO_FAIL;
-            break;
-
-        case PROTO_CLOAK:
-            if (!greeted)                 out.type = PROTO_FAIL;
-            else if (!do_cloak(&in))      out.type = PROTO_FAIL;
             break;
 
         case PROTO_CLOSE:

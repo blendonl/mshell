@@ -829,7 +829,6 @@ void     helper_restart_async(void);
 bool     helper_available(void);
 bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
 bool     helper_set_topmost(HWND hwnd, bool on);
-bool     helper_set_cloak(HWND hwnd, bool on);
 bool     helper_close_window(HWND hwnd);
 
 typedef enum {

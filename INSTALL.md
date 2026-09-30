@@ -142,26 +142,22 @@ elevated. In order of preference:
 
 `mshelld.exe` ships alongside mshell and exists to make elevating mshell
 unnecessary. It is elevated; mshell is not. It has **no config file, no Lua, no
-scripting, no window rules and no keyboard hook** — it accepts four requests:
+scripting, no window rules and no keyboard hook** — it accepts three requests:
 "put this window at this rectangle", "put this window in or out of the
-always-on-top band", "cloak or uncloak this window" and "post this window a
-WM_CLOSE". Every decision stays in the unelevated shell.
+always-on-top band" and "post this window a WM_CLOSE". Every decision stays in
+the unelevated shell.
 
 With it running, an unelevated mshell tiles windows owned by elevated processes
 (Task Manager, regedit, an admin terminal) instead of leaving them floating —
-and, just as importantly, *hides* them when you switch desktops: cloaking a
-window is blocked by the same integrity check as moving it, so without the
+and, just as importantly, *hides* them when you switch desktops: an elevated
+window can't be sunk under the backdrop, so it is parked off every display
+instead, and that move meets the same integrity check as tiling it. Without the
 helper an elevated window is visible on every desktop at once.
 
-**And cloaking is not only about elevated windows.** DWM refuses
-`DWMWA_CLOAK` on *any* window an unelevated process does not own, ordinary
-same-user windows included, so with no helper running the default `"cloak"`
-hide policy is not what actually happens: every desktop switch falls back to
-`ShowWindow(SW_HIDE)`. Chromium-based apps (Chrome, Edge, Electron) rebuild
-their compositor in the wrong place after that — the page walks further into
-the window on every switch, with the app's own frame colour filling the gap,
-until the app is restarted. If you switch desktops with a browser open, install
-the helper.
+The helper does not cloak anything. DWM only lets a window's owner cloak it, so
+no other process can — elevated or not. Ordinary windows don't need the helper
+to be hidden: they are sunk under the desktop backdrop (see "How a desktop is
+taken off the screen" in the README).
 
 It is also what
 lets `float_on_top` hold for such a window: floats are kept above the grid by
@@ -211,7 +207,7 @@ all. The log says which identity it granted on the line above `listening on`, so
 if mshell is not connecting, start there.
 
 **What running it trusts.** The helper is elevated and does what it is asked —
-place a window, band it topmost, cloak it, close it — for any window, including
+place a window, band it topmost, close it — for any window, including
 ones owned by elevated processes. That is the whole point of it: tiling an
 administrator's window means being able to move an administrator's window.
 mshelld only accepts requests from the `mshell.exe` sitting in its own

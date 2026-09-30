@@ -188,7 +188,8 @@ something off-screen being handed the keyboard.
   `\\.\pipe\mshelld-<your session id>`. The helper's log names the SID it
   granted the pipe to, which should be yours.
 - Mismatched builds (an old `mshelld.exe` against a new `mshell.exe`) refuse
-  each other with a logged protocol-version message.
+  each other with a logged protocol-version message. Protocol 3 → 4 in
+  particular: no window is closed or moved while they disagree.
 
 ### Hiding and closing elevated windows (protocol v2)
 
@@ -198,7 +199,7 @@ With `mshelld.exe` running:
   is back, drawn correctly (not black). Before v2 it stayed on every desktop.
 - With Task Manager hidden on a background desktop, quit mshell
   (`Win+Shift+Q`): it is visible afterwards — an elevated window must not be
-  stranded cloaked on exit.
+  stranded off-screen on exit.
 - Focus Task Manager and press the close binding (`Win+Shift+c`): it closes.
 - Same three with an *admin* terminal or regedit, and with an app run
   explicitly as administrator (right-click → Run as administrator).
@@ -913,8 +914,8 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
   and usable afterwards — a cloaked window that outlives mshell keeps a taskbar
   button that does nothing, so this is the check that matters most.
 - Kill `mshell.exe` from Task Manager with windows on three desktops (shell mode
-  — Winlogon restarts it). The restarted mshell uncloaks what the dead one left
-  behind; the log says `uncloaked N window(s)`.
+  — Winlogon restarts it). The restarted mshell recovers what the dead one left
+  behind; the log says `recovered N window(s)`.
 - `mshell.window.policy.hide("hide")`, save, then switch desktops. Desktops still
   work. Windows may flicker and a GPU-heavy app may briefly blank — that is the
   mechanism, and it is why `"cloak"` is the default.

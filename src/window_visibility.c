@@ -17,7 +17,6 @@ static HRESULT dwm_set_cloaked(HWND hwnd, bool on) {
 static bool window_set_cloaked(HWND hwnd, bool on) {
     HRESULT hr = dwm_set_cloaked(hwnd, on);
     if (SUCCEEDED(hr)) return true;
-    if (helper_set_cloak(hwnd, on)) return true;
 
     static bool warned;
     if (!warned) {
