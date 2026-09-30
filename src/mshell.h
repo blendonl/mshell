@@ -557,6 +557,7 @@ typedef struct {
     HWINEVENTHOOK foreground_hook;
     HWINEVENTHOOK minimize_hook;
     HWINEVENTHOOK movesize_hook;
+    HWINEVENTHOOK desktopswitch_hook;
 
     HWND     mod_drag_hwnd;
     HWND     drag_hwnd;
@@ -633,6 +634,8 @@ void     kb_locks_init(void);
 void     kb_lock(void);
 void     kb_unlock(void);
 void     kb_reset_state(void);
+void     kb_mark_mods_stale(void);
+void     kb_note_foreground(HWND hwnd);
 
 DWORD    key_name_to_vk(const char *name);
 const char *vk_to_key_name(DWORD vk);
@@ -781,6 +784,7 @@ void     system_shutdown(void);
 void     system_sleep(void);
 void     system_hibernate(void);
 void     system_media_key(Action action);
+bool     input_blind_to(HWND hwnd);
 
 
 bool     notify_init(void);

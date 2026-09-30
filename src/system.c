@@ -69,6 +69,45 @@ static void tap_vk(WORD vk) {
     SendInput(2, in, sizeof(INPUT));
 }
 
+static bool token_integrity(HANDLE process, DWORD *rid) {
+    HANDLE tok;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &tok)) return false;
+
+    BYTE  buf[64];
+    DWORD len = 0;
+    bool  ok  = GetTokenInformation(tok, TokenIntegrityLevel, buf, sizeof buf,
+                                    &len) != 0;
+    if (ok) {
+        PSID  sid = ((TOKEN_MANDATORY_LABEL *)buf)->Label.Sid;
+        UCHAR n   = *GetSidSubAuthorityCount(sid);
+        ok = n > 0;
+        if (ok) *rid = *GetSidSubAuthority(sid, n - 1u);
+    }
+    CloseHandle(tok);
+    return ok;
+}
+
+bool input_blind_to(HWND hwnd) {
+    static DWORD self_rid;
+    if (!self_rid && !token_integrity(GetCurrentProcess(), &self_rid))
+        self_rid = SECURITY_MANDATORY_MEDIUM_RID;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid || pid == GetCurrentProcessId()) return false;
+
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return GetLastError() == ERROR_ACCESS_DENIED;
+
+    DWORD rid     = 0;
+    bool  known   = token_integrity(h, &rid);
+    DWORD err     = known ? 0 : GetLastError();
+    CloseHandle(h);
+
+    if (!known) return err == ERROR_ACCESS_DENIED;
+    return rid > self_rid;
+}
+
 void system_media_key(Action action) {
     switch (action) {
     case ACTION_VOLUME_UP:     tap_vk(VK_VOLUME_UP);        break;
