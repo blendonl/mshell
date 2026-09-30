@@ -238,13 +238,19 @@ belongs to a desktop instead of sitting on all of them.
 The mismatch case above is the one the installer exists to prevent, so check
 that the pair really does move together.
 
-- **Plain `install.bat`**: `C:\mshell\mshelld.exe` exists afterwards, no
-  `mshelld` task is registered (`schtasks /query /tn mshelld` finds nothing),
-  and the closing summary points at `install.bat /helper`.
+- **Plain `install.bat` unelevated, no task yet**: `C:\mshell\mshelld.exe`
+  exists afterwards, no `mshelld` task is registered (`schtasks /query /tn
+  mshelld` finds nothing), the closing summary says to re-run it as
+  administrator, and the exit code is 0 (the in-app updater depends on that).
+- **Plain `install.bat` as administrator, no task yet**: the task is
+  registered, the helper is running immediately (no sign-out), and Task Manager
+  tiles.
+- **`install.bat /nohelper` as administrator, no task yet**: no task is
+  registered, one line says so, and there is no "re-run as administrator" hint.
 - **`install.bat /helper` unelevated**: refuses with the "needs an administrator
   prompt" message, and `mshelld.exe` is still installed.
-- **`install.bat /helper` as administrator**: the task is registered, the helper
-  is running immediately (no sign-out), and Task Manager tiles.
+- **In-app update (`Win+Shift+U`) with no task**: the update succeeds; the
+  unelevated installer run it does registers nothing and prompts for nothing.
 - **Upgrade with the helper already running**: re-run plain `install.bat` (no
   flag) from a build with a different `MSHELLD_PROTO_VERSION`. Both binaries are
   replaced, the helper is restarted, and mshell connects — no handshake failure

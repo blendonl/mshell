@@ -134,8 +134,8 @@ static void helper_open(void) {
     if (!helper_connect())
         log_w(L"helper: mshelld.exe is not running. Windows owned by elevated "
               L"processes will float instead of tiling and will stay on every "
-              L"desktop. Run `install.bat /helper` from an administrator "
-              L"prompt to change that. Cloaking is NOT among the things the "
+              L"desktop. Re-run install.bat from an administrator prompt to "
+              L"change that. Cloaking is NOT among the things the "
               L"helper fixes: DWMWA_CLOAK is owner-only for every process, and "
               L"the shell cloak needs an immersive shell that only explorer.exe "
               L"provides, so hiding sinks the window under the backdrop "
@@ -297,7 +297,8 @@ static DWORD WINAPI helper_restart_thread(LPVOID unused) {
     if (!helper_schtasks(L"end", &rc))
         helper_notify(NOTIFY_ERROR, L"could not run schtasks to stop the "
                                     L"helper — is the mshelld task registered? "
-                                    L"`install.bat /helper` creates it.");
+                                    L"install.bat creates it when run as "
+                                    L"administrator.");
     Sleep(HELPER_SETTLE_MS);
 
     rc = 1;

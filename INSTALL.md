@@ -171,19 +171,20 @@ code.
 and always replaces it in step with the shell — the two shake hands on a
 protocol version and refuse a mismatch, so upgrading one without the other is a
 supported way to break the helper. Installing the file is not the same as
-running it, though: that part is opt-in, because it needs a logon task with
-administrator rights.
-
-To register that task, re-run the installer **from an administrator prompt**:
+running it, though: that needs a logon task with administrator rights, so it
+happens whenever `install.bat` runs **from an administrator prompt**:
 
 ```
-install.bat /helper
+install.bat
 ```
 
-It creates the task below, and starts the helper straight away rather than
-making you sign out. On later upgrades you do not need the flag again — once the
-task exists, `install.bat` restarts the helper so the build you just installed
-is the one running.
+Run elevated, it creates the task below and starts the helper straight away
+rather than making you sign out. Run unelevated, it installs everything else,
+leaves the task alone and says how to add it later. On upgrades, once the task
+exists, `install.bat` restarts the helper so the build you just installed is the
+one running (unelevated, the new build takes over at your next sign-in).
+`install.bat /nohelper` skips registering the task; `/helper` still works and
+insists on an administrator prompt.
 
 If you would rather do it by hand, this is the same command. A logon task is
 what gives the helper a full token without weakening UAC:
@@ -195,8 +196,9 @@ schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
 
 mshell finds it automatically; nothing needs configuring. If it is not running,
 mshell behaves exactly as it always has — those windows float and stay visible
-on every desktop — so this is entirely opt-in. `%TEMP%\mshelld.log` is the
-helper's own log if you need to see whether it started.
+on every desktop — so leaving it out (`/nohelper`, or an unelevated install) is
+safe. `%TEMP%\mshelld.log` is the helper's own log if you need to see whether it
+started.
 
 **Do not add `/ru SYSTEM` to that task.** The helper's pipe is restricted to the
 user it runs as, and the command above has no `/ru`, so it runs as *you* —

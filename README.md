@@ -135,7 +135,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
   still tile, hide and close windows owned by elevated processes — without your
   `init.lua` ever becoming administrator-level code. No config, no Lua, no
   scripting: it moves, restacks and closes windows, and nothing else. Installed by
-  `install.bat`; started by `install.bat /helper` from an administrator prompt.
+  `install.bat`, and registered to start at sign-in whenever `install.bat` runs
+  from an administrator prompt (`/nohelper` skips it).
 - **A built-in launcher.** `launcher` types a name and runs a program. If you
   want modules, Lua configuration and a clipboard/emoji story,
   [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that.

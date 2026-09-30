@@ -251,8 +251,8 @@ void window_hide(ManagedWindow *mw) {
             log_err(L"hide: %p could not be taken off the screen by any "
                     L"means — not sunk, not cloaked, not stashed, and "
                     L"SW_HIDE was refused. It will be visible on every "
-                    L"desktop. This is what mshelld.exe exists for: run "
-                    L"`install.bat /helper` from an administrator prompt "
+                    L"desktop. This is what mshelld.exe exists for: re-run "
+                    L"install.bat from an administrator prompt "
                     L"(see INSTALL.md).", (void *)mw->hwnd);
         }
         return;

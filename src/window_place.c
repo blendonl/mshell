@@ -85,7 +85,7 @@ static void window_placement_refused(ManagedWindow *mw) {
 
     if (!mw->is_floating) {
         log_err(L"%p belongs to a higher-integrity process and cannot be placed "
-                L"— floating it. Run `install.bat /helper` from an administrator "
+                L"— floating it. Re-run install.bat from an administrator "
                 L"prompt to tile it instead (see INSTALL.md).", (void *)mw->hwnd);
         window_set_floating(mw->hwnd, true);
     }
