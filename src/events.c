@@ -1,4 +1,5 @@
 #include "mshell.h"
+#include "focus_pick.h"
 #include "snap.h"
 
 #define FG_BOUNCE_WINDOW_MS   2000
@@ -104,28 +105,49 @@ static void on_minimize_end(HWND hwnd) {
     }
 }
 
-static void on_minimize_start(HWND hwnd) {
-    if (g.cfg.minimize_never) {
-        ManagedWindow *mw = window_find(hwnd);
-        if (mw && !mw->app_hidden) {
-            static HWND      last;
-            static ULONGLONG first_at;
-            static int       tries;
+static bool minimize_keeps_coming_back(HWND hwnd) {
+    static HWND      last;
+    static ULONGLONG first_at;
+    static int       tries;
 
-            ULONGLONG now = GetTickCount64();
-            if (hwnd != last || now - first_at > 1000) {
-                last = hwnd; first_at = now; tries = 0;
-            }
-            if (++tries <= 3) {
-                events_suppress_begin();
-                ShowWindow(hwnd, SW_RESTORE);
-                events_suppress_end();
-                mw->has_applied = false;
-            } else if (tries == 4) {
-                log_msg(LOG_WARN, L"minimize policy: a window keeps "
-                                  L"minimizing itself — letting it");
-            }
-        }
+    ULONGLONG now = GetTickCount64();
+    if (hwnd != last || now - first_at > 1000) {
+        last = hwnd; first_at = now; tries = 0;
+    }
+    if (++tries == 4)
+        log_msg(LOG_WARN, L"minimize: %p keeps minimizing itself — letting "
+                          L"it until something focuses it", (void *)hwnd);
+    return tries > 3;
+}
+
+static bool window_had_focus(const ManagedWindow *mw) {
+    const Desktop *dt = desktop_current();
+    return dt && dt->id == mw->desktop_id &&
+           dt->focused >= 0 && dt->focused < dt->count &&
+           dt->windows[dt->focused] == mw->hwnd;
+}
+
+static bool foreground_elsewhere(HWND hwnd) {
+    HWND fg = GetForegroundWindow();
+    return fg && fg != hwnd && fg != g.background_window &&
+           window_index_of(fg) < 0;
+}
+
+static bool window_meant_on_screen(const ManagedWindow *mw) {
+    return !mw->app_hidden && !mw->user_hidden && !mw->wm_hidden &&
+           desktop_is_visible(mw->desktop_id);
+}
+
+static void on_minimize_start(HWND hwnd) {
+    ManagedWindow *mw = window_find(hwnd);
+    if (mw && window_meant_on_screen(mw) &&
+        !minimize_keeps_coming_back(hwnd)) {
+        MinimizedWindow w = {
+            .had_focus            = window_had_focus(mw),
+            .foreground_elsewhere = foreground_elsewhere(hwnd),
+        };
+        window_unminimize(mw);
+        if (focus_pick_unminimize_refocuses(&w)) window_focus(hwnd);
     }
 
     on_minimize_end(hwnd);
@@ -313,7 +335,7 @@ static const EventHookSpec event_hooks[] = {
       L"focus tracking is degraded (mouse-driven focus won't be seen)" },
 
     { EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, &g.minimize_hook,
-      L"MINIMIZE", L"minimized windows will keep an empty tile" },
+      L"MINIMIZE", L"windows will be able to minimize, leaving an empty tile" },
 
     { EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, &g.movesize_hook,
       L"MOVESIZE", L"dragging a tiled window will not swap it" },

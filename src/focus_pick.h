@@ -24,7 +24,14 @@ typedef struct {
     bool foreground_is_fullscreen;
 } PointerTarget;
 
+typedef struct {
+    bool had_focus;
+    bool foreground_elsewhere;
+} MinimizedWindow;
+
 bool focus_pick_follows_pointer(const PointerTarget *target);
+
+bool focus_pick_unminimize_refocuses(const MinimizedWindow *w);
 
 int focus_pick_neighbor(const FocusCandidate *cands, int count, int from,
                         FocusDirection dir);

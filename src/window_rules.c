@@ -280,6 +280,8 @@ void window_manage(HWND hwnd) {
         events_suppress_begin();
         window_hide(mw);
         events_suppress_end();
+    } else {
+        window_unminimize(mw);
     }
 
     tile_current();

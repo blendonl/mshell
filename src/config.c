@@ -41,7 +41,6 @@ static void config_apply_defaults(MShellConfig *c, Keymaps *keys) {
     c->dim_color        = RGB(0x00, 0x00, 0x00);
     c->dim_alpha        = 90;
     c->update_check     = false;
-    c->minimize_never   = false;
     c->urgency_enabled  = false;
     c->notify_enabled   = true;
     c->notify_desktop   = false;

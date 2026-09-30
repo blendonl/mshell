@@ -29,6 +29,9 @@ tiled, driven entirely from the keyboard and configured in Lua.
   (`desktop.to_monitor`) whether or not a rule pinned it there.
 - **Force-tiled mode** (`set_float_policy("never")`) so *every* window joins the
   grid and nothing is ever stacked on top of another window.
+- **Nothing minimizes.** With no taskbar to bring a window back from, a window
+  that minimizes — its own button, or a game losing focus — is put straight
+  back, and one that opens minimized opens normally.
 - **Floating windows are centred** on their monitor rather than left wherever
   the app opened them — `set_float_placement` and a per-rule `center` decide.
 - **Flicker-free placement**: a whole layout pass is applied in one
@@ -258,7 +261,6 @@ so none of the numbered desktops has to exist in advance.
 | `Win+f` · `Win+Return` | Toggle floating · promote to master |
 | `Win+Ctrl+h/l` · `Win+Ctrl+j/k` | Master ratio · master count |
 | `Win+Shift+f` · `Win+Ctrl+f` · `Win+F11` | Fullscreen: window · inside the tile · both |
-| `Win+n` · `Win+Shift+n` | Minimize · restore (there is no taskbar to click) |
 | `Win+Shift+c` · `Win+Shift+x` | Close · kill |
 | `Win+Shift+Return` | Terminal |
 | `Win+Shift+r` · `Win+Shift+q` | Reload config · quit |

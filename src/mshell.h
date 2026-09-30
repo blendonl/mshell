@@ -469,7 +469,6 @@ typedef struct {
     COLORREF dim_color;
     BYTE     dim_alpha;
     bool     update_check;
-    bool     minimize_never;
     bool     urgency_enabled;
     bool     notify_enabled;
     bool     notify_desktop;
@@ -697,6 +696,7 @@ void     window_restore_all_visibility(void);
 
 void     window_hide(ManagedWindow *mw);
 void     window_show(ManagedWindow *mw);
+void     window_unminimize(ManagedWindow *mw);
 
 bool     window_on_screen(const ManagedWindow *mw);
 void     window_set_floating(HWND hwnd, bool floating);

@@ -71,9 +71,6 @@ function Window:close() end
 ---Terminate its process.
 function Window:kill() end
 
-function Window:minimize() end
-function Window:restore() end
-
 ---@class mshell.Desktop
 ---@field name string
 ---@field current boolean

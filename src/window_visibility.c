@@ -265,6 +265,16 @@ void window_hide(ManagedWindow *mw) {
             hide_strategy_name(mw));
 }
 
+void window_unminimize(ManagedWindow *mw) {
+    if (!IsIconic(mw->hwnd) || !IsWindowVisible(mw->hwnd)) return;
+    if (IsHungAppWindow(mw->hwnd)) return;
+
+    events_suppress_begin();
+    ShowWindow(mw->hwnd, SW_SHOWNOACTIVATE);
+    events_suppress_end();
+    mw->has_applied = false;
+}
+
 void window_show(ManagedWindow *mw) {
     if (!mw || !IsWindow(mw->hwnd)) return;
     if (mw->app_hidden) return;
@@ -279,6 +289,7 @@ void window_show(ManagedWindow *mw) {
     hide_undo_all(mw, false);
 
     hide_strategies[HIDE_BY_SW_HIDE].try_show(mw, false);
+    window_unminimize(mw);
 
     if (was_off_screen) {
         RedrawWindow(mw->hwnd, NULL, NULL,

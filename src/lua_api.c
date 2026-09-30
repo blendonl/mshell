@@ -1161,15 +1161,6 @@ static int lua_mshell_monitor_rule(lua_State *L) {
     return 0;
 }
 
-static int lua_mshell_set_minimize_policy(lua_State *L) {
-    const char *p = luaL_checkstring(L, 1);
-    if      (!strcmp(p, "allow")) g.cfg.minimize_never = false;
-    else if (!strcmp(p, "never")) g.cfg.minimize_never = true;
-    else return luaL_error(L, "set_minimize_policy: expected \"allow\" or "
-                              "\"never\", got '%s'", p);
-    return 0;
-}
-
 static int lua_mshell_set_urgency(lua_State *L) {
     g.cfg.urgency_enabled = lua_toboolean(L, 1);
     return 0;
@@ -2149,8 +2140,6 @@ static int window_method_action(lua_State *L, Action a) {
 
 static int lua_window_close(lua_State *L)    { return window_method_action(L, ACTION_CLOSE); }
 static int lua_window_kill(lua_State *L)     { return window_method_action(L, ACTION_KILL); }
-static int lua_window_minimize(lua_State *L) { return window_method_action(L, ACTION_MINIMIZE); }
-static int lua_window_restore(lua_State *L)  { return window_method_action(L, ACTION_RESTORE); }
 
 static const luaL_Reg window_methods[] = {
     { "focus",      lua_mshell_window_focus },
@@ -2162,8 +2151,6 @@ static const luaL_Reg window_methods[] = {
     { "promote",    lua_mshell_window_promote },
     { "close",      lua_window_close },
     { "kill",       lua_window_kill },
-    { "minimize",   lua_window_minimize },
-    { "restore",    lua_window_restore },
     { NULL, NULL }
 };
 
@@ -2222,7 +2209,6 @@ static const ApiImpl api_impl[] = {
     { "window.policy.hide",       lua_mshell_set_hide_policy },
     { "window.policy.fullscreen", lua_mshell_set_fullscreen_policy },
     { "window.policy.placement",  lua_mshell_set_float_placement },
-    { "window.policy.minimize",   lua_mshell_set_minimize_policy },
     { "window.min_size",          lua_mshell_set_min_window_size },
     { "window.manage_owned",      lua_mshell_set_manage_owned },
     { "window.float_on_top",      lua_mshell_set_float_on_top },

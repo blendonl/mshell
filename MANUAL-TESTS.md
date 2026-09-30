@@ -20,11 +20,11 @@ exists, so they are worth re-running before any release.
 | 1 | Open windows on 3 desktops, then quit (`Win+Shift+Q`). | Every window is visible afterwards. On 0.7.0 the two background desktops' windows stayed hidden forever — no taskbar button, no Alt+Tab entry. |
 | 2 | Hold an autorepeating bound key (e.g. `Win+j`) while pressing `Win+Shift+R`. Then save `init.lua` repeatedly while typing in another window. | No crash. On 0.7.0 the reload freed a keybinding that a queued message was about to dereference. |
 | 3 | Close Discord (or Slack/Telegram/Steam) to the tray. | It stays hidden. On 0.7.0 it reappeared immediately. Then click its tray icon: it comes back and rejoins the layout. |
-| 4 | Minimize a tiled window. | The others reflow to fill the space. Press the `window.restore` binding: it comes back. On 0.7.0 the tile stayed empty and there was no way back without a taskbar. |
+| 4 | Click a tiled window's minimize button. | It comes straight back into its tile and keeps the focus. On 0.7.0 the tile stayed empty and there was no way back without a taskbar. |
 | 5 | Send a window to another desktop, then switch there. | The window is visible. (Guards against the app-hidden detection misreading mshell's own hide.) |
 | 6 | Launch a second `mshell.exe`. | It exits immediately and logs why; the first keeps working. |
 | 7 | Run elevated. | The log says so and names the config path; editing `init.lua` does **not** auto-reload. `Win+Shift+R` still works. |
-| 8 | Minimize a window, switch desktops, come back. | It is still minimized — not silently restored. |
+| 8 | Put a fullscreen game that minimizes when it loses focus on a desktop, switch away, come back. | The game is on screen again, not stranded minimized. |
 
 ## Status bar (0.10.0)
 
@@ -99,7 +99,7 @@ something off-screen being handed the keyboard.
 | 1 | `window.scratchpad.mark` a terminal on `1`, go to `2`, `window.scratchpad.toggle` to summon it, then close it. Make sure `1` has no other windows. | `1` disappears from the bar. Before: summoning set `desktop_id` without unlinking the window from `1`, so closing it left a dead handle behind — `1` never emptied and never went away. |
 | 2 | `window.scratchpad.mark` on `1`, `window.scratchpad.toggle` to stow it, go to `2`, come back to `1`. | Still stowed. Before: the switch-in show loop revealed every window on the desktop, and nothing re-hid a float. |
 | 3 | Stow the scratchpad, then `window.scratchpad.mark` a *different* window. | The old scratchpad reappears rather than being stranded invisible — nothing else could ever show it once it lost the role. |
-| 4 | Minimize the **only** window on `1`, go to `2`, come back. | Still minimized, and nothing is focused. Strengthens test #8 above, which passes today only because it never uses a single-window desktop. |
+| 4 | Make the **only** window on `1` a game that minimizes when it loses focus, go to `2`, come back. | It is back on screen and focused. Strengthens test #8 above with a single-window desktop. |
 | 5 | Tray an app (Discord/Slack) that is the focused window on `1`, go to `2`, come back. | Still in the tray. Before: `window_focus` fell back to `SwitchToThisWindow`, which un-hides. |
 | 6 | Pin a desktop with `monitor = 1`, put a **floating** window on it, reload the config. | The float is on display 1. Before: only its recorded monitor changed — the tiler never places floats, so it stayed on display 0. |
 | 7 | `window.sticky.toggle` a window, then switch to a desktop pinned to another display. | It arrives on that display, not the one it was already on. |
@@ -218,7 +218,7 @@ belongs to a desktop instead of sitting on all of them.
   window appears): the main window stays on the desktop it opened on instead
   of appearing on all of them, and `Win+f` tiles it once the modal is gone.
 - Launch an app that starts minimized (e.g. `start /min notepad`): it is
-  adopted rather than invisible to the WM, and tiles when restored.
+  adopted and opens straight into its tile, not minimized.
 - An `ignore` rule still leaves a window completely alone: on screen across
   every desktop switch, no bindings reaching it.
 - **Right-click menus stay open under `follow = true`.** With
@@ -554,8 +554,7 @@ labels come out right.
 - A rule with `geometry = {x, y, w, h}` still lands on that exact rect, and one
   with `fullscreen = true` still covers the monitor.
 - Maximise a floating window (its own button, or `Win+Up`): it stays maximised
-  rather than being shrunk to a centred rect. Same for a minimised one — it does
-  not pop back open to be centred.
+  rather than being shrunk to a centred rect.
 - `desktop_rule("video", { gaps = 0 })` — that desktop tiles edge to edge while
   the others keep the global gaps.
 
@@ -871,7 +870,7 @@ Open one tiled window and one floating one (`Win+f`), overlapping.
 - `mshell.window.float_on_top(false)` and reload: the old behaviour is back — the
   float sinks behind whatever you focus. Un-floating with `Win+f` takes the
   window back out of the band immediately, without waiting for a re-tile.
-- A float minimized and restored is still on top; one moved to another desktop
+- A float whose minimize button is clicked comes straight back, still on top; one moved to another desktop
   does not raise itself over the desktop you are looking at.
 - **Elevated float, helper running**: open Task Manager (high integrity),
   `Win+f` it, then click a tiled window — it stays on top like any other float.

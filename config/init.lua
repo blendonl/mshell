@@ -154,12 +154,9 @@ mshell.keys.bind({mod, shft}, "f",   mshell.window.fullscreen.window)   -- cover
 mshell.keys.bind({mod, ctrl}, "f",   mshell.window.fullscreen.content)  -- stays in the tile
 mshell.keys.bind({mod},       "F11", mshell.window.fullscreen.both)     -- covers the display
 
--- windows. Note restore: there is no taskbar under mshell, so it is the only
--- way to bring a minimized window back.
+-- windows.
 mshell.keys.bind({mod, shft}, "c", mshell.window.close)
 mshell.keys.bind({mod, shft}, "x", mshell.window.kill)
-mshell.keys.bind({mod},       "n", mshell.window.minimize)
-mshell.keys.bind({mod, shft}, "n", mshell.window.restore)
 mshell.keys.bind({mod},       "s", mshell.window.sticky.toggle) -- to every desktop
 mshell.keys.bind({mod},       "z", mshell.layout.master.zoom)   -- swap with master
 
