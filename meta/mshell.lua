@@ -92,12 +92,6 @@ function mshell.window.close() end
 ---Terminate the window's process.
 function mshell.window.kill() end
 
----Minimize the window.
-function mshell.window.minimize() end
-
----Un-minimize a window. With no taskbar this is the only way back.
-function mshell.window.restore() end
-
 ---Center a floating window on its monitor.
 ---@param win? mshell.Window
 function mshell.window.center(win) end
@@ -194,10 +188,6 @@ function mshell.window.policy.fullscreen(policy) end
 ---Where a new floating window lands.
 ---@param policy "center"|"none"
 function mshell.window.policy.placement(policy) end
-
----Whether windows may minimize at all.
----@param policy "allow"|"never"
-function mshell.window.policy.minimize(policy) end
 
 ---Smallest size the layout will give a window.
 ---@param width integer

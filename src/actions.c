@@ -158,37 +158,6 @@ static void act_desktop_to_monitor(const ActionCtx *c) {
 static void act_close(const ActionCtx *c) { if (c->focus) window_close(c->focus); }
 static void act_kill (const ActionCtx *c) { if (c->focus) window_kill(c->focus);  }
 
-static void act_minimize(const ActionCtx *c) {
-    Desktop *dt = c->dt;
-    if (!c->focus || dt->count <= 0) return;
-
-    ShowWindow(c->focus, SW_MINIMIZE);
-    for (int i = 1; i <= dt->count; i++) {
-        int  j = (c->fi + i) % dt->count;
-        HWND h = dt->windows[j];
-        if (h && IsWindow(h) && !IsIconic(h)) {
-            dt->focused = j;
-            window_focus(h);
-            break;
-        }
-    }
-    tile_current();
-}
-
-static void act_restore(const ActionCtx *c) {
-    Desktop *dt = c->dt;
-    for (int i = 0; i < dt->count; i++) {
-        HWND h = dt->windows[i];
-        if (h && IsWindow(h) && IsIconic(h)) {
-            ShowWindow(h, SW_RESTORE);
-            dt->focused = i;
-            tile_current();
-            window_focus(h);
-            break;
-        }
-    }
-}
-
 static void act_toggle_sticky(const ActionCtx *c) {
     ManagedWindow *mw = window_find(c->focus);
     if (!mw) return;

@@ -5,6 +5,25 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING: windows can no longer be minimized.** There is no taskbar under
+  mshell to bring a minimized window back from, so a managed window that
+  minimizes — its title-bar button, or a fullscreen game losing focus — is put
+  straight back. The window you were using keeps the focus; a game that
+  minimized because you focused something else comes back behind it. An app
+  that opens minimized opens normally, and one that minimized on a desktop you
+  were not looking at is back when you return. An app that keeps re-minimizing
+  itself is let be after three tries and returns when something focuses it.
+  Trays are unaffected.
+
+  `mshell.window.minimize`, `mshell.window.restore`, `Window:minimize()`,
+  `Window:restore()` and `mshell.window.policy.minimize` are gone, along with
+  the `Win+n` / `Win+Shift+n` bindings in the default config. A config that
+  still binds one fails to reload with `keys.bind: expected an action, a
+  function, or a submap name; got nil`, and the previous config keeps running
+  — delete the line.
+
 ## 0.15.22 — 2026-09-28
 
 - fix(mouse): focus-follows-mouse no longer steals focus from a fullscreen window

@@ -38,8 +38,6 @@
                                                                            \
     X(ACTION_CLOSE,                  act_close)                            \
     X(ACTION_KILL,                   act_kill)                             \
-    X(ACTION_MINIMIZE,               act_minimize)                         \
-    X(ACTION_RESTORE,                act_restore)                          \
     X(ACTION_TOGGLE_STICKY,          act_toggle_sticky)                    \
     X(ACTION_MARK_SCRATCHPAD,        act_mark_scratchpad)                  \
     X(ACTION_TOGGLE_SCRATCHPAD,      act_toggle_scratchpad)                \

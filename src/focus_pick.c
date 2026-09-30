@@ -23,6 +23,10 @@ bool focus_pick_follows_pointer(const PointerTarget *target) {
            !target->foreground_is_fullscreen;
 }
 
+bool focus_pick_unminimize_refocuses(const MinimizedWindow *w) {
+    return w && w->had_focus && !w->foreground_elsewhere;
+}
+
 int focus_pick_neighbor(const FocusCandidate *cands, int count, int from,
                         FocusDirection dir) {
     if (!cands || from < 0 || from >= count || !reachable(&cands[from]))

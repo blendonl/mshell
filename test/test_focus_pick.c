@@ -176,6 +176,30 @@ static void test_the_pointer_over_the_focused_or_a_hidden_window_does_nothing(vo
           "a window on a desktop that is not shown is never pulled forward");
 }
 
+static void test_a_window_minimized_from_its_title_bar_comes_back_focused(void) {
+    MinimizedWindow w = { .had_focus = true, .foreground_elsewhere = false };
+
+    CHECK(focus_pick_unminimize_refocuses(&w),
+          "Windows hands the foreground to the next window the moment one "
+          "minimizes, so the window you were using must take it back");
+}
+
+static void test_a_game_minimizing_behind_the_window_you_picked_stays_unfocused(void) {
+    MinimizedWindow w = { .had_focus = false, .foreground_elsewhere = false };
+
+    CHECK(!focus_pick_unminimize_refocuses(&w),
+          "a fullscreen game minimizes after you focus something else; "
+          "putting it back must not pull you back into it");
+}
+
+static void test_a_prompt_that_took_the_foreground_keeps_it(void) {
+    MinimizedWindow w = { .had_focus = true, .foreground_elsewhere = true };
+
+    CHECK(!focus_pick_unminimize_refocuses(&w),
+          "a game that minimizes for the launcher or a prompt mshell does not "
+          "manage comes back behind it, not over it");
+}
+
 int main(void) {
     test_the_nearest_window_in_the_direction_wins();
     test_a_window_the_app_hid_is_never_a_neighbour();
@@ -192,5 +216,8 @@ int main(void) {
     test_the_pointer_leaving_a_fullscreen_game_leaves_focus_alone();
     test_the_pointer_over_nothing_mshell_manages_leaves_focus_alone();
     test_the_pointer_over_the_focused_or_a_hidden_window_does_nothing();
+    test_a_window_minimized_from_its_title_bar_comes_back_focused();
+    test_a_game_minimizing_behind_the_window_you_picked_stays_unfocused();
+    test_a_prompt_that_took_the_foreground_keeps_it();
     return tests_report("focus_pick");
 }
