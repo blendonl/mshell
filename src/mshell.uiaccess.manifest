@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+
+<!--
+  uiAccess variant of the manifest. Build it with `make UIACCESS=1`.
+
+  uiAccess="true" lets an unelevated mshell drive windows owned by higher-
+  integrity (elevated) processes WITHOUT the mshelld.exe helper, and keeps the
+  keyboard hook working while such a window has focus. The cost is strict:
+
+    * Windows will only grant the flag to a binary that is Authenticode-signed
+      by a trusted certificate AND installed under a protected path
+      (C:\Program Files\...  or  C:\Windows\System32\...). An unsigned or
+      wrongly-located uiAccess binary will FAIL to launch, or launch without
+      the flag — so this is NOT the default build, and never ship it unsigned.
+    * Being started as the Winlogon shell is an untested launch path for the
+      flag; verify with `mshell.exe --version` / the startup log line that says
+      whether uiAccess was actually granted before relying on it.
+
+  See INSTALL.md, "uiAccess".
+-->
+
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <assemblyIdentity type="win32" name="mshell.mshell" version="1.0.0.0"
+                    processorArchitecture="amd64"/>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="true"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor, system</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+</assembly>

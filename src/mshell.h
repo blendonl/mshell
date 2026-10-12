@@ -272,6 +272,7 @@ typedef struct {
     bool      fs_has_prev;
     bool      needs_helper;
     bool      place_refused;
+    bool      unminimize_refused;
     bool      always_on_top;
     bool      layout_hidden;
     bool      urgent;
@@ -584,6 +585,7 @@ typedef struct {
     bool     panicked;
     bool     safe_mode;
     bool     elevated;
+    bool     uiaccess;
 
 } MShell;
 
@@ -834,6 +836,8 @@ bool     helper_available(void);
 bool     helper_set_window_pos(HWND hwnd, int x, int y, int w, int h, UINT flags);
 bool     helper_set_topmost(HWND hwnd, bool on);
 bool     helper_close_window(HWND hwnd);
+bool     helper_show_window(HWND hwnd, int cmd);
+bool     helper_set_style(HWND hwnd, LONG_PTR style, LONG_PTR exstyle);
 
 typedef enum {
     PLACE_OK = 0,

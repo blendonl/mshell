@@ -370,6 +370,92 @@ static int cmd_syscommand(int argc, wchar_t **argv) {
     return pass ? 0 : 1;
 }
 
+/* Replay the three things mshell does to a managed window — strip the frame,
+   un-minimize it, move it — directly from this (unelevated) process, so we can
+   see which ones a higher-integrity window silently refuses. This is the
+   on-machine confirmation of why elevated windows need the helper or uiAccess. */
+static int cmd_manage(int argc, wchar_t **argv) {
+    HWND target = resolve_target(argc, argv, 2);
+    if (!target) {
+        wprintf(L"FAIL  no target: open an elevated window (e.g. Task Manager) "
+                L"or pass an HWND\n");
+        return 2;
+    }
+
+    wchar_t desc[128];
+    describe_window(target, desc, 128);
+    wprintf(L"target    %p  %ls\n\n", (void *)target, desc);
+
+    DWORD protect = try_setpos_noop(target);
+    wprintf(L"guard     no-op SetWindowPos error = %ld  %ls\n\n", (long)protect,
+            protect == ERROR_ACCESS_DENIED
+                ? L"(UIPI-protected: this is the interesting case)"
+                : L"(NOT protected from here — try an elevated target unelevated)");
+
+    /* [1] Strip WS_CAPTION, as window_strip_decorations does. */
+    wprintf(L"[1] SetWindowLongPtr(GWL_STYLE) to drop WS_CAPTION/SYSMENU/"
+            L"MIN/MAXBOX\n");
+    LONG_PTR style0 = GetWindowLongPtrW(target, GWL_STYLE);
+    LONG_PTR want   = style0 & ~(LONG_PTR)(WS_CAPTION | WS_SYSMENU |
+                                           WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    SetLastError(0);
+    SetWindowLongPtrW(target, GWL_STYLE, want);
+    DWORD    e_style = GetLastError();
+    SetWindowPos(target, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE |
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    LONG_PTR style1   = GetWindowLongPtrW(target, GWL_STYLE);
+    bool     stripped = !(style1 & WS_CAPTION);
+    wprintf(L"      set error = %lu  caption now %ls  -> %ls\n",
+            e_style, stripped ? L"GONE" : L"STILL PRESENT",
+            stripped ? L"strip SUCCEEDED" : L"strip REFUSED (UIPI)");
+    if (stripped) {   /* put it back so the probe is non-destructive */
+        SetWindowLongPtrW(target, GWL_STYLE, style0);
+        SetWindowPos(target, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE |
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    wprintf(L"\n");
+
+    /* [2] Minimize via the window's own system menu (always allowed), then try
+       to un-minimize it the way mshell does — ShowWindow(SW_SHOWNOACTIVATE). */
+    wprintf(L"[2] minimize, then ShowWindow(SW_SHOWNOACTIVATE) to bring it back\n");
+    SendMessageTimeoutW(target, WM_SYSCOMMAND, SC_MINIMIZE, 0,
+                        SMTO_ABORTIFHUNG, 1000, NULL);
+    bool went_down = wait_for(target, is_iconic, 1500);
+    wprintf(L"      minimized = %d\n", went_down);
+    if (went_down) {
+        ShowWindow(target, SW_SHOWNOACTIVATE);
+        bool back = wait_for(target, is_not_iconic, 1500);
+        wprintf(L"      ShowWindow restored = %ls\n",
+                back ? L"YES — restore works from here"
+                     : L"NO — restore SILENTLY REFUSED (needs helper/uiAccess)");
+        if (!back) {   /* don't leave the user's window stuck minimized */
+            DWORD e_sc = try_post(target, WM_SYSCOMMAND, SC_RESTORE, 0);
+            wprintf(L"      (left minimized; SC_RESTORE post error = %ld)\n",
+                    (long)e_sc);
+        }
+    }
+    wprintf(L"\n");
+
+    /* [3] Move it 1px and back, as the tiler's SetWindowPos does. */
+    wprintf(L"[3] SetWindowPos move (what tiling does)\n");
+    RECT r = {0};
+    GetWindowRect(target, &r);
+    SetLastError(0);
+    BOOL moved = SetWindowPos(target, NULL, r.left + 1, r.top, 0, 0,
+                              SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    DWORD e_move = moved ? 0 : GetLastError();
+    if (moved) SetWindowPos(target, NULL, r.left, r.top, 0, 0,
+                            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    wprintf(L"      moved = %d  error = %ld  -> %ls\n\n", moved != 0, (long)e_move,
+            moved ? L"move allowed" : L"move REFUSED (UIPI)");
+
+    wprintf(L"VERDICT  on a UIPI-protected target, expect strip/restore/move to "
+            L"be refused from here;\n"
+            L"         that is exactly the gap mshelld.exe (or a uiAccess build) "
+            L"closes.\n");
+    return 0;
+}
+
 static const wchar_t *mods_name(UINT mods, wchar_t *buf, size_t cap) {
     _snwprintf(buf, cap, L"%ls%ls%ls%ls",
                (mods & MOD_WIN)     ? L"Win+"   : L"",
@@ -743,6 +829,7 @@ static int cmd_hotkey(int argc, wchar_t **argv) {
 static void usage(void) {
     wprintf(L"usage: probe_uipi integrity\n"
             L"       probe_uipi syscommand [hwnd] [--close]\n"
+            L"       probe_uipi manage [hwnd]\n"
             L"       probe_uipi hotkey [--mode mshell|pass] [--seconds N] [--stall]\n"
             L"       probe_uipi register-all\n");
 }
@@ -761,6 +848,7 @@ int wmain(int argc, wchar_t **argv) {
     if (argc < 2) { usage(); return 2; }
     if (_wcsicmp(argv[1], L"integrity") == 0)    return cmd_integrity();
     if (_wcsicmp(argv[1], L"syscommand") == 0)   return cmd_syscommand(argc, argv);
+    if (_wcsicmp(argv[1], L"manage") == 0)       return cmd_manage(argc, argv);
     if (_wcsicmp(argv[1], L"hotkey") == 0)       return cmd_hotkey(argc, argv);
     if (_wcsicmp(argv[1], L"register-all") == 0) return cmd_register_all();
     usage();

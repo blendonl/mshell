@@ -18,7 +18,34 @@ static bool is_elevated(void) {
     return ok && elev.TokenIsElevated != 0;
 }
 
+/* Whether this process actually holds the uiAccess token flag. A build made
+   with `make UIACCESS=1` only gets it when Windows accepts the manifest, which
+   needs the binary signed and under Program Files — so this is the authoritative
+   check, not the manifest. */
+static bool has_uiaccess(void) {
+    HANDLE token = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+
+    DWORD ui = 0, size = sizeof(ui);
+    BOOL ok = GetTokenInformation(token, TokenUIAccess, &ui, size, &size);
+    CloseHandle(token);
+    return ok && ui != 0;
+}
+
 static UINT g_prev_fg_lock_timeout = 0;
+
+/* Programs mshell launches inherit its environment. SDL's default is to
+   minimize a fullscreen game the moment it loses focus — which fights the
+   "nothing minimizes" rule, since there is no taskbar to bring it back from,
+   and mshell would then have to restore it after the fact. Turning the hint
+   off here stops the minimize happening in the first place, for every SDL1/2/3
+   game started from the shell. The variable is a no-op for non-SDL programs. */
+static void set_child_env_defaults(void) {
+    if (!SetEnvironmentVariableW(L"SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", L"0"))
+        log_w(L"could not set SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS for launched "
+              L"games: %lu", GetLastError());
+}
 
 static LONG WINAPI mshell_crash_handler(EXCEPTION_POINTERS *ep) {
     static LONG entered = 0;
@@ -376,13 +403,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     update_clear_staged_image();
 
     g.elevated = is_elevated();
+    g.uiaccess = has_uiaccess();
 
-    if (!g.elevated && shell_mode)
+    if (g.uiaccess)
+        log_err(L"uiAccess GRANTED — mshell can manage windows owned by "
+                L"higher-integrity processes directly, and its keyboard hook "
+                L"keeps working while one has focus. The mshelld.exe helper is "
+                L"not needed in this mode.");
+    else if (!g.elevated && shell_mode)
         log_w(L"Shell mode at user level (UAC on) — windows owned by elevated "
-              L"processes can't be managed (UIPI).");
+              L"processes can't be managed directly (UIPI); the mshelld.exe "
+              L"helper covers moving/restoring/closing them. (This is not a "
+              L"uiAccess build, or Windows declined the flag — see INSTALL.md.)");
 
     if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
         log_w(L"SetPriorityClass(ABOVE_NORMAL) failed: %lu", GetLastError());
+
+    set_child_env_defaults();
 
     config_reset();
 

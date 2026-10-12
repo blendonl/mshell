@@ -73,11 +73,21 @@ void window_strip_decorations(HWND hwnd) {
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     bool stripped = !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION);
+
+    /* A window owned by a higher-integrity process ignores SetWindowLongPtr
+       from here (UIPI), so it keeps its title bar and min/max buttons. The
+       elevated helper can set the style for us — it did the frame-change too. */
+    if (!stripped) {
+        stripped = helper_set_style(hwnd, style, exstyle) &&
+                   !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION);
+    }
+
     if (!stripped && !mw->decor_strip_refused) {
         mw->decor_strip_refused = true;
         log_msg(LOG_WARN, L"could not strip decorations from %p — the window "
-                          L"belongs to a higher-integrity process and keeps its "
-                          L"title bar", (void *)hwnd);
+                          L"belongs to a higher-integrity process and no "
+                          L"mshelld.exe is running to do it, so it keeps its "
+                          L"title bar (see INSTALL.md)", (void *)hwnd);
     }
     mw->decorations_stripped = stripped;
 
@@ -108,6 +118,12 @@ void window_restore_decorations(HWND hwnd) {
     SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    /* If the strip went through the helper, the restore must too: a higher-
+       integrity window would otherwise keep the stripped frame after mshell
+       exits. */
+    if (GetWindowLongPtrW(hwnd, GWL_STYLE) != mw->orig_style)
+        helper_set_style(hwnd, mw->orig_style, mw->orig_exstyle);
 
     mw->decorations_stripped = false;
     frame_props_init();

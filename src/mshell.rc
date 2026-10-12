@@ -12,7 +12,14 @@
 #define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
 #endif
 
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "mshell.exe.manifest"
+/* The manifest file is chosen at build time: the default asInvoker one, or the
+   uiAccess="true" variant when the Makefile passes MSHELL_MANIFEST (make
+   UIACCESS=1). windres expands the macro to the quoted file name. */
+#ifndef MSHELL_MANIFEST
+#define MSHELL_MANIFEST "mshell.exe.manifest"
+#endif
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST MSHELL_MANIFEST
 
 VS_VERSION_INFO VERSIONINFO
     FILEVERSION    VER_MAJOR,VER_MINOR,VER_PATCH,0
