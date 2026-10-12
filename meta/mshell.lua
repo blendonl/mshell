@@ -659,6 +659,15 @@ mshell.gaming = {}
 ---@param opts mshell.GamingOpts
 function mshell.gaming.setup(opts) end
 
+---Windows' power plan: when the screen turns off and the PC sleeps, and what its buttons and lid do.
+---@class mshell.power
+mshell.power = {}
+
+---Configure the active power plan. Saved with the plan.
+---Only while the config is loading.
+---@param opts mshell.PowerOpts
+function mshell.power.setup(opts) end
+
 ---Write a line to the mshell log.
 ---@class mshell.log
 ---@overload fun(message: string)

@@ -125,9 +125,10 @@ tiled, driven entirely from the keyboard and configured in Lua.
   signing out and booting into Explorer. mshell only writes a field that differs
   from what Windows already has, and a field you don't mention is left alone —
   deleting a line stops mshell asserting it but does not undo it. Scrolling,
-  cursor size, key repeat, the accessibility keys, light and dark theme and Game
-  Mode come the same way, from `mouse.setup`, `keyboard.setup`, `theme.setup` and
-  `gaming.setup`.
+  cursor size, key repeat, the accessibility keys, light and dark theme, Game
+  Mode, and the power plan's screen and sleep timeouts and button and lid
+  actions come the same way, from `mouse.setup`, `keyboard.setup`,
+  `theme.setup`, `gaming.setup` and `power.setup`.
 - **Nothing is remembered across a restart**: every start is the one your
   `init.lua` describes. A layout or master ratio you change at runtime lasts as
   long as mshell does, and a config reload keeps it — unless a `desktop_rule`
@@ -377,8 +378,8 @@ and it obeys the same rules — `no_ring` windows, fullscreen windows and
 rather than a string: `mshell.window.*`, `mshell.desktop.*`, `mshell.monitor.*`,
 `mshell.display.*`, `mshell.layout.*`, `mshell.bar.*`, `mshell.appearance.*`,
 `mshell.keys.*`, `mshell.mouse.*`, `mshell.keyboard.*`, `mshell.theme.*`,
-`mshell.gaming.*`, `mshell.system.*`, `mshell.media.*`, `mshell.exec`,
-`mshell.notify`, `mshell.log`, `mshell.config.*`, `mshell.on`.
+`mshell.gaming.*`, `mshell.power.*`, `mshell.system.*`, `mshell.media.*`,
+`mshell.exec`, `mshell.notify`, `mshell.log`, `mshell.config.*`, `mshell.on`.
 
 The full list is not reproduced here, because a list in a README goes stale.
 It is generated from the same table the binary dispatches through and shipped
@@ -416,7 +417,15 @@ mshell.mouse.setup{ scroll_lines = 5, scroll_by = "lines", reverse_scroll = fals
 mshell.keyboard.setup{ repeat_delay = 0, repeat_rate = 31, sticky_keys_shortcut = false }
 mshell.theme.setup{ mode = "dark", transparency = false, animations = false }
 mshell.gaming.setup{ game_mode = true }
+mshell.power.setup{ screen_off = 10, sleep = 0, power_button = "sleep",
+                    lid_battery = "hibernate" }
 ```
+
+Power is the exception to the handlers: Settings only offers its timeouts as
+translated labels ("15 minutes"), so `power.setup` writes the active power plan
+through Windows' documented power API instead. Timeouts are minutes, 0 meaning
+never; every field has a `_battery` twin for the value used off the charger. The
+values belong to the plan, so switching to another plan brings its own.
 
 They are saved to your profile exactly as the Settings page would save them, so
 they outlive mshell. On every start and reload mshell hands the lot to a

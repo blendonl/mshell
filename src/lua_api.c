@@ -975,6 +975,7 @@ static int setup_setting_namespace(lua_State *L, const char *ns) {
 static int lua_mshell_keyboard_setup(lua_State *L) { return setup_setting_namespace(L, "keyboard"); }
 static int lua_mshell_theme_setup(lua_State *L)    { return setup_setting_namespace(L, "theme"); }
 static int lua_mshell_gaming_setup(lua_State *L)   { return setup_setting_namespace(L, "gaming"); }
+static int lua_mshell_power_setup(lua_State *L)    { return setup_setting_namespace(L, "power"); }
 
 static int lua_mshell_monitor_rule(lua_State *L) {
     if (g.cfg.monitor_rule_count >= MAX_MONITOR_RULES)
@@ -2242,6 +2243,7 @@ static const ApiImpl api_impl[] = {
     { "keyboard.setup",           lua_mshell_keyboard_setup },
     { "theme.setup",              lua_mshell_theme_setup },
     { "gaming.setup",             lua_mshell_gaming_setup },
+    { "power.setup",              lua_mshell_power_setup },
     { "notify",                   lua_mshell_notify },
     { "notify.setup",             lua_mshell_set_notify },
 

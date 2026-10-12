@@ -3,11 +3,28 @@
 
 #include <ctype.h>
 #include <stdlib.h>
+#include <wctype.h>
 
 static bool is_identifier(const char *s, size_t len) {
     if (len == 0 || !islower((unsigned char)s[0])) return false;
     for (size_t k = 0; k < len; k++)
         if (!islower((unsigned char)s[k]) && !isdigit((unsigned char)s[k]) && s[k] != '_') return false;
+    return true;
+}
+
+static bool is_guid(const wchar_t *s) {
+    if (!s || wcslen(s) != 38 || s[0] != L'{' || s[37] != L'}') return false;
+    for (int k = 1; k < 37; k++) {
+        bool dash = (k == 9 || k == 14 || k == 19 || k == 24);
+        if (dash ? s[k] != L'-' : !iswxdigit(s[k])) return false;
+    }
+    return true;
+}
+
+static bool is_number(const wchar_t *s) {
+    if (!s || !*s) return false;
+    for (; *s; s++)
+        if (!iswdigit(*s)) return false;
     return true;
 }
 
@@ -38,15 +55,37 @@ static void test_rows_are_well_formed(void) {
         if (!dot) continue;
         CHECK(is_identifier(f->path, (size_t)(dot - f->path)), "%s: namespace is an identifier", f->path);
         CHECK(is_identifier(dot + 1, strlen(dot + 1)), "%s: field is an identifier", f->path);
-        CHECK(wcsncmp(f->id, SETTING_ID_PREFIX, wcslen(SETTING_ID_PREFIX)) == 0,
-              "%s: handler id carries the SystemSettings_ prefix", f->path);
+        if (settings_field_is_power(f)) {
+            CHECK(f->id == NULL, "%s: a power row has no handler id", f->path);
+            CHECK(is_guid(f->power_subgroup) && is_guid(f->power_setting),
+                  "%s: power subgroup and setting are braced GUIDs", f->path);
+            CHECK(f->power_scale >= 1, "%s: power scale is positive", f->path);
+            CHECK(f->kind == FIELD_INT || f->kind == FIELD_CHOICE,
+                  "%s: power rows are numbers or choices", f->path);
+            CHECK(f->kind != FIELD_CHOICE || f->power_scale == 1,
+                  "%s: a power choice is stored as its index", f->path);
+            for (int c = 0; f->kind == FIELD_CHOICE && c < f->choice_count; c++)
+                CHECK(is_number(f->choices[c].option), "%s: option %s is an index",
+                      f->path, f->choices[c].word);
+        } else {
+            CHECK(f->id && wcsncmp(f->id, SETTING_ID_PREFIX, wcslen(SETTING_ID_PREFIX)) == 0,
+                  "%s: handler id carries the SystemSettings_ prefix", f->path);
+            CHECK(f->power_subgroup == NULL && f->power_scale == 0,
+                  "%s: a handler row has no power target", f->path);
+        }
         CHECK(f->doc && f->doc[0], "%s: documented", f->path);
         CHECK(settings_catalog_find(f->path) == f, "%s: found by path", f->path);
 
         for (int j = k + 1; j < settings_catalog_count(); j++) {
             const SettingField *other = settings_catalog_at(j);
             CHECK(strcmp(f->path, other->path) != 0, "%s: path is unique", f->path);
-            CHECK(wcscmp(f->id, other->id) != 0, "%s and %s share a handler id", f->path, other->path);
+            if (f->id && other->id)
+                CHECK(wcscmp(f->id, other->id) != 0, "%s and %s share a handler id",
+                      f->path, other->path);
+            if (settings_field_is_power(f) && settings_field_is_power(other))
+                CHECK(wcscmp(f->power_setting, other->power_setting) != 0 ||
+                      f->power_battery != other->power_battery,
+                      "%s and %s write the same power setting", f->path, other->path);
         }
 
         switch (f->kind) {
@@ -187,6 +226,35 @@ static void test_word_of(void) {
     CHECK(!settings_field_word_of(lines, &raw, word, sizeof word), "bool for an int field");
 }
 
+static void test_power_rows(void) {
+    wchar_t out[64];
+    char err[160], word[32];
+    SettingValue raw;
+    const SettingField *screen = must("power.screen_off");
+    const SettingField *battery = must("power.screen_off_battery");
+    const SettingField *button = must("power.power_button");
+    const SettingField *lid = must("power.lid");
+    if (!screen || !battery || !button || !lid) return;
+
+    CHECK(settings_field_is_power(screen) && !screen->power_battery, "screen_off is the plugged-in value");
+    CHECK(battery->power_battery, "screen_off_battery is the battery value");
+    CHECK(!settings_field_is_power(must("mouse.scroll_lines")), "handler rows are not power rows");
+
+    CHECK(settings_field_engine_text(screen, "10", out, 64, err, sizeof err) && !wcscmp(out, L"10"),
+          "a timeout is passed on in minutes");
+    CHECK(!settings_field_engine_text(screen, "1441", out, 64, err, sizeof err), "a day at most");
+    CHECK(settings_field_engine_text(button, "shutdown", out, 64, err, sizeof err) && !wcscmp(out, L"3"),
+          "an action becomes its power index");
+    CHECK(!settings_field_engine_text(lid, "display_off", out, 64, err, sizeof err),
+          "the lid has no display_off");
+
+    memset(&raw, 0, sizeof raw);
+    raw.kind = SV_STRING;
+    wcscpy(raw.s, L"4");
+    CHECK(settings_field_word_of(button, &raw, word, sizeof word) && !strcmp(word, "display_off"),
+          "a power index reads back as its word");
+}
+
 static void test_describe(void) {
     char out[64];
     const SettingField *lines = must("mouse.scroll_lines");
@@ -237,6 +305,7 @@ int main(void) {
     test_from_input();
     test_engine_text();
     test_word_of();
+    test_power_rows();
     test_describe();
     test_documented_in_meta();
     return tests_report("settings_catalog");

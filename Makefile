@@ -73,6 +73,7 @@ MSHELL_SRCS = $(SRC_DIR)/main.c       \
               $(SRC_DIR)/settings_parse.c \
               $(SRC_DIR)/settings_catalog.c \
               $(SRC_DIR)/settings_sync.c \
+              $(SRC_DIR)/settings_power.c \
               $(SRC_DIR)/display.c \
               $(SRC_DIR)/update_parse.c \
               $(SRC_DIR)/tree_algebra.c \

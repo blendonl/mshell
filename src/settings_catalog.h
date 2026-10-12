@@ -27,6 +27,10 @@ typedef struct {
     const FieldChoice *choices;
     int                choice_count;
     const char        *doc;
+    const wchar_t     *power_subgroup;
+    const wchar_t     *power_setting;
+    bool               power_battery;
+    int                power_scale;
 } SettingField;
 
 typedef enum {
@@ -52,6 +56,7 @@ const SettingField *settings_catalog_find(const char *path);
 
 const char *settings_field_leaf(const SettingField *f);
 bool        settings_field_in_namespace(const SettingField *f, const char *ns);
+bool        settings_field_is_power(const SettingField *f);
 
 bool settings_field_from_input(const SettingField *f, const FieldInput *in,
                                char *text, size_t cap, char *error, size_t error_cap);

@@ -5,6 +5,12 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+- feat(power): configure the active power plan from `power.setup` and
+  `--settings` — `screen_off`, `sleep` and `hibernate` timeouts in minutes
+  (0 never) and `power_button`, `sleep_button` and `lid` actions, each with a
+  `_battery` twin. Written through Windows' documented power API, since the
+  Settings handlers only offer these as translated labels
+
 ## 0.15.24 — 2026-09-30
 
 - build: add probe_uipi under make probe
