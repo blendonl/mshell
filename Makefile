@@ -22,6 +22,19 @@ STRICT_WARNINGS = -Wshadow -Wformat=2 -Wvla
 RCFLAGS  = -DVER_MAJOR=$(VER_MAJOR) \
            -DVER_MINOR=$(VER_MINOR) \
            -DVER_PATCH=$(VER_PATCH)
+
+# Opt-in uiAccess build: `make UIACCESS=1` embeds the uiAccess="true" manifest
+# instead of the default asInvoker one. The resulting binary must be
+# Authenticode-signed and installed under Program Files or Windows will not
+# honour the flag (it may even refuse to launch) — see src/mshell.uiaccess.manifest
+# and INSTALL.md. The default build is unchanged, so an unsigned shell still boots.
+UIACCESS ?=
+ifneq ($(UIACCESS),)
+RCFLAGS += -DMSHELL_MANIFEST='\"mshell.uiaccess.manifest\"'
+MANIFEST_FILE = $(SRC_DIR)/mshell.uiaccess.manifest
+else
+MANIFEST_FILE = $(SRC_DIR)/mshell.exe.manifest
+endif
 LDFLAGS  = -luser32 -lgdi32 -lshell32 -lole32 -luuid -ldwmapi -lwtsapi32 \
            -ladvapi32 -lpowrprof -lwinhttp -lbcrypt \
            -lruntimeobject -lm
@@ -224,8 +237,8 @@ $(SRC_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/mshell.h
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) $(STRICT_WARNINGS) -c -o $@ $<
 
-$(RES_OBJ): $(SRC_DIR)/mshell.rc $(SRC_DIR)/mshell.exe.manifest
-	@echo "  RC    $<"
+$(RES_OBJ): $(SRC_DIR)/mshell.rc $(MANIFEST_FILE)
+	@echo "  RC    $< ($(notdir $(MANIFEST_FILE)))"
 	$(WINDRES) $(RCFLAGS) -I$(SRC_DIR) -O coff -i $< -o $@
 
 $(LUA_DIR)/%.o: $(LUA_DIR)/%.c

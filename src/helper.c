@@ -236,6 +236,32 @@ bool helper_close_window(HWND hwnd) {
     return helper_request(&req, L"a window could not be closed", &warned);
 }
 
+bool helper_show_window(HWND hwnd, int cmd) {
+    static bool warned;
+
+    ProtoMsg req = {
+        .type    = PROTO_SHOW,
+        .version = MSHELLD_PROTO_VERSION,
+        .hwnd    = (uint64_t)(uintptr_t)hwnd,
+        .flags   = (uint32_t)cmd,
+    };
+    return helper_request(&req, L"a window could not be restored", &warned);
+}
+
+bool helper_set_style(HWND hwnd, LONG_PTR style, LONG_PTR exstyle) {
+    static bool warned;
+
+    ProtoMsg req = {
+        .type    = PROTO_SETSTYLE,
+        .version = MSHELLD_PROTO_VERSION,
+        .hwnd    = (uint64_t)(uintptr_t)hwnd,
+        .style   = (int64_t)style,
+        .exstyle = (int64_t)exstyle,
+    };
+    return helper_request(&req, L"a window's frame could not be stripped",
+                          &warned);
+}
+
 #define HELPER_TASK_NAME  L"mshelld"
 #define HELPER_SETTLE_MS  1500
 #define HELPER_SCHTASKS_TIMEOUT_MS 15000

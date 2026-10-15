@@ -259,6 +259,45 @@ The recommended option above — leave UAC on, let the helper do the privileged
 work — avoids all of this: the elevated half is a small binary with no config
 and no scripting, and `init.lua` stays unprivileged.
 
+### uiAccess (advanced — removes the last UIPI gap without elevating)
+
+There is a third route that needs neither an elevated mshell nor the helper:
+build mshell with the **uiAccess** manifest. A uiAccess process may bypass the
+UIPI restrictions that stop an unelevated shell from touching elevated windows,
+so a single unelevated mshell can tile, restore, re-style and close them **and**
+its keyboard hook keeps working while an elevated window has focus — the one
+thing the helper cannot do. It stays unelevated, so `init.lua` stays
+unprivileged and auto-reload keeps working.
+
+Windows guards the flag strictly, and these are hard requirements, not
+suggestions:
+
+- **The binary must be Authenticode-signed by a certificate the machine
+  trusts.** The PKI signature check is always enforced for a uiAccess process.
+- **It must live under a protected path** — `C:\Program Files\...` or
+  `C:\Windows\System32\...`. `C:\mshell` does **not** qualify, so the usual
+  install location has to change for this build.
+
+If either is not met, Windows refuses the flag — the process may launch without
+it, or fail to launch at all. Because being started as the Winlogon shell is an
+unusual launch path for a uiAccess binary, **verify it actually worked**: the
+startup log says `uiAccess GRANTED` when the flag is live. If it doesn't, you
+are running an ordinary build and should keep the helper.
+
+Building it:
+
+```
+make UIACCESS=1          # embeds src/mshell.uiaccess.manifest instead of the default
+```
+
+then sign `mshell.exe` and install it under `C:\Program Files\mshell\`. For a
+personal machine you can create your own certificate, trust it machine-wide,
+sign with it, and delete the private key afterwards so nothing else can ever be
+signed as mshell; a public release needs a real code-signing certificate. The
+default `make` build is unchanged and still boots unsigned from `C:\mshell`, so
+nothing here is required — it is the maximal-control option for those who want
+it.
+
 ## 5. Turn off the rest of Windows (optional, recommended)
 
 mshell itself already eats every `Win`+* combo, Alt+Tab / Alt+Esc / Ctrl+Esc,

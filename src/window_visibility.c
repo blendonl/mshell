@@ -270,6 +270,21 @@ void window_unminimize(ManagedWindow *mw) {
 
     events_suppress_begin();
     ShowWindow(mw->hwnd, SW_SHOWNOACTIVATE);
+
+    /* ShowWindow can't report a UIPI refusal: on a window owned by a higher-
+       integrity process it silently does nothing and the window stays
+       minimized with no taskbar to bring it back from. Confirm it actually
+       un-minimized, and hand it to the elevated helper if it didn't. */
+    if (IsIconic(mw->hwnd)) {
+        if (!helper_show_window(mw->hwnd, SW_SHOWNOACTIVATE) &&
+            !mw->unminimize_refused) {
+            mw->unminimize_refused = true;
+            log_msg(LOG_WARN, L"could not un-minimize %p — it belongs to a "
+                              L"higher-integrity process and no mshelld.exe is "
+                              L"running to restore it (see INSTALL.md).",
+                              (void *)mw->hwnd);
+        }
+    }
     events_suppress_end();
     mw->has_applied = false;
 }

@@ -152,6 +152,16 @@ tiled, driven entirely from the keyboard and configured in Lua.
   with `mshell.exec("mcapture.exe", "--select")` like any other program.
 - Single global instance, low-level keyboard hook, out-of-context WinEvent
   hooks — no DLL injection.
+- **Anti-cheat safe by construction.** mshell never injects a DLL, creates a
+  remote thread, or writes into another process's memory, and it never touches
+  the boot chain (no kernel driver, no test-signing, so Secure Boot and TPM
+  stay intact for Vanguard, Javelin, Ricochet, EAC, BattlEye and FACEIT). It
+  only ever calls public window APIs from its own process, reads a game
+  process's name and path to match a rule, and — where a window is owned by a
+  higher-integrity process — asks the elevated helper (`mshelld.exe`) to move,
+  restore, re-style or close it. This is a deliberate non-goal: mshell will not
+  gain a feature that requires reaching into another process, because doing so
+  is exactly what kernel anti-cheat is built to flag.
 
 ## Build
 

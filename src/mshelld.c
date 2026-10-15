@@ -273,6 +273,38 @@ static bool do_close(const ProtoMsg *m) {
     return PostMessageW(h, WM_CLOSE, 0, 0) != 0;
 }
 
+/* ShowWindow returns the window's PREVIOUS visibility, not success, so we
+   confirm the state change ourselves: a restore must clear the iconic bit. */
+static bool do_show(const ProtoMsg *m) {
+    HWND h   = (HWND)(uintptr_t)m->hwnd;
+    int  cmd = (int)m->flags;
+    if (!h || !IsWindow(h)) return false;
+
+    ShowWindow(h, cmd);
+
+    if (cmd == SW_RESTORE || cmd == SW_SHOWNOACTIVATE ||
+        cmd == SW_SHOW     || cmd == SW_SHOWNA)
+        return !IsIconic(h);
+    return true;
+}
+
+static bool do_setstyle(const ProtoMsg *m) {
+    HWND h = (HWND)(uintptr_t)m->hwnd;
+    if (!h || !IsWindow(h)) return false;
+
+    SetLastError(0);
+    SetWindowLongPtrW(h, GWL_STYLE,   (LONG_PTR)m->style);
+    SetWindowLongPtrW(h, GWL_EXSTYLE, (LONG_PTR)m->exstyle);
+
+    /* A style change only takes visual effect once the frame is recomputed. */
+    SetWindowPos(h, NULL, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    return (GetWindowLongPtrW(h, GWL_STYLE) & 0xFFFFFFFFu) ==
+           ((LONG_PTR)m->style & 0xFFFFFFFFu);
+}
+
 static void serve(const Client *c) {
     bool greeted = false;
 
@@ -317,6 +349,16 @@ static void serve(const Client *c) {
         case PROTO_CLOSE:
             if (!greeted)                 out.type = PROTO_FAIL;
             else if (!do_close(&in))      out.type = PROTO_FAIL;
+            break;
+
+        case PROTO_SHOW:
+            if (!greeted)                 out.type = PROTO_FAIL;
+            else if (!do_show(&in))       out.type = PROTO_FAIL;
+            break;
+
+        case PROTO_SETSTYLE:
+            if (!greeted)                 out.type = PROTO_FAIL;
+            else if (!do_setstyle(&in))   out.type = PROTO_FAIL;
             break;
 
         default:

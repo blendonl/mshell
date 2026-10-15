@@ -207,7 +207,12 @@ static void claim_foreground_rights(void) {
 void window_focus(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd)) return;
 
-    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+    if (IsIconic(hwnd)) {
+        ShowWindow(hwnd, SW_RESTORE);
+        /* A higher-integrity window ignores the call above; let the helper
+           restore it so focusing a minimized admin window still works. */
+        if (IsIconic(hwnd)) helper_show_window(hwnd, SW_RESTORE);
+    }
 
     SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
