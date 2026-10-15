@@ -245,6 +245,23 @@ function Window:kill() end
 ---@field game_mode boolean?
 ---@field game_bar boolean? A controller's Xbox button opens Game Bar.
 
+---@alias mshell.ButtonAction "nothing"|"sleep"|"hibernate"|"shutdown"|"display_off"
+---@alias mshell.LidAction "nothing"|"sleep"|"hibernate"|"shutdown"
+
+---@class mshell.PowerOpts
+---@field screen_off integer? Minutes idle before the screen turns off when plugged in, 0 to 1440; 0 never.
+---@field screen_off_battery integer? The same on battery.
+---@field sleep integer? Minutes idle before the PC sleeps when plugged in; 0 never.
+---@field sleep_battery integer? The same on battery.
+---@field hibernate integer? Minutes idle before the PC hibernates when plugged in; 0 never.
+---@field hibernate_battery integer? The same on battery.
+---@field power_button mshell.ButtonAction? When plugged in.
+---@field power_button_battery mshell.ButtonAction?
+---@field sleep_button mshell.ButtonAction? When plugged in.
+---@field sleep_button_battery mshell.ButtonAction?
+---@field lid mshell.LidAction? Closing the lid when plugged in.
+---@field lid_battery mshell.LidAction?
+
 ---@class mshell.WhichKeyOpts
 ---@field enabled boolean?
 ---@field delay integer? Milliseconds before the panel appears.

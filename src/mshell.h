@@ -907,6 +907,8 @@ void     tweaks_list(void);
 void     tweaks_emit_reg(const wchar_t *group, bool undo);
 
 int      settings_cli(int argc, wchar_t **argv);
+DWORD    settings_power_read(const SettingField *f, DWORD *value);
+DWORD    settings_power_write(const SettingField *f, DWORD value);
 void     settings_sync(void);
 
 void     update_check_async(void);

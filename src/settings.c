@@ -550,7 +550,85 @@ static void job_set(SettingJob *job, void *item) {
     report_line(r, L"%ls: %ls -> %ls", job->name, before, after);
 }
 
+static void power_word(const SettingField *f, DWORD raw, wchar_t *out, size_t cap) {
+    if (f->kind == FIELD_INT && raw % (DWORD)f->power_scale != 0) {
+        _snwprintf(out, cap - 1, L"%lu seconds", (unsigned long)raw);
+        out[cap - 1] = L'\0';
+        return;
+    }
+    SettingValue v;
+    memset(&v, 0, sizeof v);
+    if (f->kind == FIELD_INT) {
+        v.kind = SV_UINT32;
+        v.u    = raw / (DWORD)f->power_scale;
+    } else {
+        v.kind = SV_STRING;
+        _snwprintf(v.s, SETTING_TEXT_MAX - 1, L"%lu", (unsigned long)raw);
+    }
+    word_of(f, &v, out, cap);
+}
+
+static void power_job(SettingJob *job) {
+    Report             *r = &job->report;
+    const SettingField *f = job->field;
+
+    DWORD current = 0;
+    DWORD rc = settings_power_read(f, &current);
+    if (rc != ERROR_SUCCESS) {
+        report_fail(r, job->name, L"Windows would not read it from the active power plan "
+                                  L"(error %lu)", (unsigned long)rc);
+        return;
+    }
+
+    wchar_t before[SETTING_TEXT_MAX + 32];
+    power_word(f, current, before, ARRAYSIZE(before));
+    if (!job->set) {
+        report_line(r, L"%ls = %ls", job->name, before);
+        return;
+    }
+
+    wchar_t      *end = NULL;
+    unsigned long n   = wcstoul(job->want, &end, 10);
+    if (end == job->want || *end) {
+        report_fail(r, job->name, L"'%ls' is not a value for it", job->want);
+        return;
+    }
+    DWORD want = (DWORD)n * (DWORD)f->power_scale;
+
+    wchar_t after[SETTING_TEXT_MAX + 32];
+    power_word(f, want, after, ARRAYSIZE(after));
+    if (current == want) {
+        report_line(r, L"%ls: already %ls", job->name, after);
+        return;
+    }
+
+    rc = settings_power_write(f, want);
+    if (rc == ERROR_ACCESS_DENIED) {
+        report_fail(r, job->name, L"Windows refused the change: this power plan needs "
+                                  L"administrator rights to edit");
+        return;
+    }
+    if (rc != ERROR_SUCCESS) {
+        report_fail(r, job->name, L"Windows refused the change (error %lu)", (unsigned long)rc);
+        return;
+    }
+
+    DWORD now = 0;
+    if (settings_power_read(f, &now) == ERROR_SUCCESS && now != want) {
+        wchar_t now_t[SETTING_TEXT_MAX + 32];
+        power_word(f, now, now_t, ARRAYSIZE(now_t));
+        report_fail(r, job->name, L"Windows accepted %ls but it still reads %ls", after, now_t);
+        return;
+    }
+    report_line(r, L"%ls: %ls -> %ls", job->name, before, after);
+}
+
 static void job_run(SettingJob *job) {
+    if (settings_field_is_power(job->field)) {
+        power_job(job);
+        return;
+    }
+
     wchar_t why[512];
     void *item = open_item(job->field->id, why, ARRAYSIZE(why));
     if (!item) {

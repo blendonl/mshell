@@ -874,6 +874,25 @@ for. `mshell.exe --settings get` before you start records what you had.
 - Quit mshell and boot once into Explorer: Settings shows every value the config
   set.
 
+## Power plan settings
+
+- `mshell.exe --settings get power.screen_off power.lid` matches
+  `powercfg /qh SCHEME_CURRENT SUB_VIDEO VIDEOIDLE` (seconds / 60) and
+  `powercfg /qh SCHEME_CURRENT SUB_BUTTONS LIDACTION` (0 nothing, 1 sleep,
+  2 hibernate, 3 shutdown).
+- `--settings set power.screen_off 4` changes only the plugged-in value:
+  `powercfg` shows the AC index as 240 and the DC index untouched. Set it back.
+- `--settings set power.lid display_off` fails naming the four lid actions; the
+  power and sleep buttons accept `display_off`.
+- Put `mshell.power.setup{ screen_off = 4 }` in `init.lua` and save: the log has
+  `settings: power.screen_off: 3 -> 4`, and the screen goes dark after four idle
+  minutes. Switch to another power plan and the value reverts to that plan's own
+  until the next reload writes it again.
+- A timeout `powercfg` set to a non-whole minute (`powercfg /change
+  monitor-timeout-ac` only takes minutes, so use
+  `powercfg /setacvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 90`) reads back
+  as `90 seconds`, and setting it from the config writes the minute value.
+
 ## Floating windows stay on top
 
 Open one tiled window and one floating one (`Win+f`), overlapping.
