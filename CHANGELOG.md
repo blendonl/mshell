@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.15.25 — 2026-10-15
+
 - feat(power): configure the active power plan from `power.setup` and
   `--settings` — `screen_off`, `sleep` and `hibernate` timeouts in minutes
   (0 never) and `power_button`, `sleep_button` and `lid` actions, each with a
