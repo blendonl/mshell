@@ -10,8 +10,9 @@ tiled, driven entirely from the keyboard and configured in Lua.
 
 ## Features
 
-- **Seven tiling layouts:** master-stack, monocle (true single-window), grid,
-  spiral (fibonacci), centered-master, bottom-stack, and columns — with
+- **Eight tiling layouts:** seven dynamic ones — master-stack, monocle (true
+  single-window), grid, spiral (fibonacci), centered-master, bottom-stack and
+  columns — plus a manual `bsp` layout you split by hand, with
   configurable **`nmaster`** (master count) and per-window **`cfact`** sizing.
   `cfact` sizes a window *within its stack*, so it applies to master-stack,
   bottom-stack, columns and centered-master. Grid and spiral tile on a fixed
