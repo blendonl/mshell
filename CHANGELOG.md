@@ -5,6 +5,8 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+## 0.16.0 — 2026-10-27
+
 ### Changed
 
 - **BREAKING: mshell installs from the MSI only.** `install.bat` and
