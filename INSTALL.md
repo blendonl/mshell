@@ -4,103 +4,109 @@ This replaces `explorer.exe` — no taskbar, no tray, no desktop. Read the
 **Recovery** section before you start; a broken shell is easy to undo once
 you know the Task Manager trick.
 
-## 0. Build (on Linux)
+## 1. Run the installer
+
+Download `mshell-<version>.msi` from the
+[releases page](https://github.com/blendonl/mshell/releases) (or use
+`winget install blendonl.mshell` once the package is listed) and run it **from
+the account that will use mshell** — the shell setting and the Windows tweaks
+are per-user, and they go to whoever ran the installer. Windows asks for
+administrator approval once.
+
+The *Custom Setup* page lists what it can install. Everything is on by default:
+
+| Option | What it does |
+|--------|--------------|
+| **mshell** | `mshell.exe`, the helper binary, the default config and the editor type definitions, in `C:\Program Files\mshell`. Always installed. |
+| **Use mshell as my Windows shell** | Sets the per-user (HKCU) Winlogon `Shell` value. Turn it off to try mshell in test mode first. |
+| **Privileged helper** | Registers the `mshelld` sign-in task, so windows of elevated apps tile and follow their desktop. See [The privileged helper](#the-privileged-helper-recommended-instead-of-elevating-mshell). |
+| **Windows tweaks** | Hands `Win`+key and PrintScreen to mshell, silences the Sticky/Filter/Toggle Keys prompts, and keeps Chrome and Edge drawing while hidden. See [section 5](#5-turn-off-the-rest-of-windows-optional-recommended). |
+| **mrun** | The launcher behind `Win+Space`. Without it, mshell's built-in launcher is used. |
+| **mnotify** | App notifications and tray icons, which Explorer would otherwise draw. |
+| **mcapture** | Screenshots on `Win+Shift+s` / `Win+PrintScreen`. Without it, Windows' snipping overlay is used. |
+
+The default config adapts to whichever of these you picked, so turning one off
+never leaves a key bound to a program that is not there. Run the MSI again (or
+*Modify* it under *Apps*) to add or remove one later.
+
+Unattended, the feature ids are `Core`, `Shell`, `Helper`, `Tweaks`, `Mrun`,
+`Mnotify` and `Mcapture`:
 
 ```
-make clean && make          # produces mshell.exe
+msiexec /i mshell-<version>.msi /passive
+msiexec /i mshell-<version>.msi /passive ADDLOCAL=Core,Shell,Helper,Mrun
 ```
 
-You need `mshell.exe` and the `config/` folder on the Windows machine.
-
-## 1. Get the files onto Windows
-
-Copy these to the Windows box (USB, scp, network share) into one folder:
-
-```
-mshell.exe
-config\init.lua
-install.bat
-uninstall.bat
-```
-
-`install.bat` then splits these into the two places they belong — the program
-under `C:\mshell`, your config in your own profile:
-
-```
-C:\mshell\mshell.exe
-%APPDATA%\mshell\init.lua      (C:\Users\<you>\AppData\Roaming\mshell\init.lua)
-```
-
-That's the standard Windows spot for per-user configuration, so your config is
-never overwritten by reinstalling mshell and follows your roaming profile. An
-existing `init.lua` there is always kept as-is; upgrading only replaces the exe.
-
-If `%APPDATA%\mshell\init.lua` does not exist, mshell falls back to
-`config\init.lua` next to `mshell.exe` — which is what makes step 2 below work
-straight out of the unzipped folder, before you install anything.
+Your config lives at `%APPDATA%\mshell\init.lua`. The installer does not write
+it: mshell copies the shipped default there the first time it starts without
+one, so every account on the machine gets its own, and an existing `init.lua`
+is never touched. That first start shows a notification with the keys to
+begin with: tap `Win` for the menu, hold it for the chords. The editor type definitions beside it are refreshed on every
+start, so they always describe the build you are running.
 
 ## 2. Try it WITHOUT committing (strongly recommended)
 
-Before making it your shell, run it alongside Explorer:
+Turn **Use mshell as my Windows shell** off, and on the last page tick *Try
+mshell now in test mode*. Or, any time:
 
 ```
-mshell.exe --test
+"C:\Program Files\mshell\mshell.exe" --test
 ```
 
-Tile some windows, switch desktops (Win+1..9), open a terminal
-(Win+Shift+Return). Quit with **Win+Shift+Q** — in `--test` that just closes
-the process, it does NOT log you out. If this feels right, continue.
+Tile some windows, switch desktops (`Win+1..9`), open a terminal
+(`Win+Return`), tap `Win` alone for the leader menu. Quit from the leader menu,
+`x` then `q` — in `--test` that just closes the process, it does NOT log you
+out. If this feels right, run the MSI again and turn the shell option on.
 
-## 3. Install as the shell
+## 3. Sign out and back in
 
-Double-click **`install.bat`** (or run it from a terminal). It copies the
-program to `C:\mshell`, installs the default config to `%APPDATA%\mshell\init.lua`
-(keeping yours if one is already there), and sets the per-user shell key:
+mshell is now your shell. Explorer never launches. This is **per-user**: it only
+affects the account that ran the installer, and overrides the system default
+(`explorer.exe`) just for you:
 
 ```
 HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon
-    Shell = "C:\mshell\mshell.exe --shell"
+    Shell = "C:\Program Files\mshell\mshell.exe" --shell
 ```
 
-This is **per-user (HKCU)** — it only affects your account, and it overrides
-the system default (`explorer.exe`) just for you. Other accounts still get
-Explorer. Run `install.bat` as the account that will use mshell: both `HKCU`
-and `%APPDATA%` follow whoever runs the script.
+If Windows asked for a *different* administrator's password rather than a
+Yes/No, the installer ran as that account and set *its* shell. Sign in as the
+administrator, or run the MSI from an account that is an administrator itself.
 
-> Upgrading from 0.3 or earlier? `install.bat` moves an existing
-> `C:\mshell\config\init.lua` to `%APPDATA%\mshell\init.lua` for you, so your
-> keybindings carry over.
+### Upgrading
 
-**Sign out and back in.** mshell is now your shell. Explorer never launches.
-
-### Reinstalling / upgrading
-
-Running `install.bat` again is the upgrade path, and it always wins over what
-is already installed:
+Run a newer MSI, or press `Win+Shift+u` to have mshell fetch, verify and run
+the latest one for you. Either way:
 
 - **The exe is replaced even while it is your running shell.** Windows locks
-  the image of a running process, so the installer renames the old one to
-  `mshell.exe.old` and drops the new one in its place.
-- **Then it restarts mshell for you**, so the build you just installed is the
-  one running — no sign-out. Your windows are left where they are; the new
-  instance picks them up. (If mshell wasn't running, there is nothing to
-  restart and it simply starts at your next sign-in.)
-- **Your config is the exception** — an existing `%APPDATA%\mshell\init.lua` is
-  never overwritten.
+  the image of a running process, so the installer renames it — and the
+  helper, mrun, mnotify and mcapture — to `*.old` and drops the new one in its
+  place. Nothing waits for a reboot.
+- **Then mshell hands over to the new build** — `Win+Shift+u` does it as soon as
+  the installer finishes, and an MSI you ran yourself does it when you press
+  *Finish*. Your windows are left where they are; the new instance picks them
+  up and starts mrun and mnotify again. `mshell.exe --msg restart` does the
+  same by hand.
+- **Your choices carry over**, and so does your config — an existing
+  `%APPDATA%\mshell\init.lua` is never overwritten. When the release changes
+  the default and yours differs from it, the new default is copied to
+  `%APPDATA%\mshell\init.lua.new` and a notification says so; diff the two
+  and take what you want. It is written once per new default, so deleting it
+  keeps it gone.
 
-The restart works by stopping the running mshell: Windows then puts the shell
-back from the `Shell` value above — the new exe — and the installer only starts
-it itself if Windows didn't. That safety net is Winlogon's `AutoRestartShell`
+The hand-over works by mshell exiting: Windows then puts the shell back from
+the `Shell` value above. That safety net is Winlogon's `AutoRestartShell`
 (`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`, `1` unless
 someone turned it off). **If it is `0`, a shell that exits logs the session
-off**, so the installer checks it first and skips the restart rather than
-dropping you at the login screen with apps open.
+off**, so mshell checks it first and tells you to sign out instead.
 
-If the installer can't stop the running mshell, or skips the restart, it says
-so — the upgrade is still installed, so sign out and back in to switch to it.
-Note that a restart launched by the installer inherits the installer's token,
-so an `install.bat` you ran elevated leaves mshell elevated until your next
-sign-in.
+### Coming from `install.bat` (0.15 and earlier)
+
+Earlier releases installed to `C:\mshell` with a batch script. The MSI points
+your `Shell` value and the `mshelld` task at `C:\Program Files\mshell` and
+leaves the old folder alone — sign in once on the new build, then delete
+`C:\mshell`. Tweaks applied by the old script stay recorded, so
+`mshell.exe --tweaks revert input apps` still puts your previous values back.
 
 ## 4. Elevation (optional, for full window control)
 
@@ -117,7 +123,7 @@ elevated. In order of preference:
 
 - **Run mshell elevated via a logon scheduled task (keeps UAC on).** Create a
   task set to *Run with highest privileges*, triggered *At log on* for your
-  account, that starts `C:\mshell\mshell.exe --shell`, and point the Winlogon
+  account, that starts `"C:\Program Files\mshell\mshell.exe" --shell`, and point the Winlogon
   Shell key at a do-nothing stub (or leave Explorer’s default). This gives
   mshell a full token without weakening UAC system-wide. More moving parts,
   but the safe way to get full control.
@@ -167,42 +173,32 @@ The close
 keybind reaches them too. And your `init.lua` is never administrator-level
 code.
 
-`install.bat` always installs `mshelld.exe` next to `mshell.exe` in `C:\mshell`,
-and always replaces it in step with the shell — the two shake hands on a
-protocol version and refuse a mismatch, so upgrading one without the other is a
-supported way to break the helper. Installing the file is not the same as
-running it, though: that needs a logon task with administrator rights, so it
-happens whenever `install.bat` runs **from an administrator prompt**:
-
-```
-install.bat
-```
-
-Run elevated, it creates the task below and starts the helper straight away
-rather than making you sign out. Run unelevated, it installs everything else,
-leaves the task alone and says how to add it later. On upgrades, once the task
-exists, `install.bat` restarts the helper so the build you just installed is the
-one running (unelevated, the new build takes over at your next sign-in).
-`install.bat /nohelper` skips registering the task; `/helper` still works and
-insists on an administrator prompt.
+The MSI always installs `mshelld.exe` next to `mshell.exe`, and always replaces
+it in step with the shell — the two shake hands on a protocol version and
+refuse a mismatch, so upgrading one without the other is a supported way to
+break the helper. Installing the file is not the same as running it, though:
+that needs a logon task with administrator rights, which is what the
+**Privileged helper** option registers. It starts the helper straight away
+rather than making you sign out, and restarts it on every upgrade so the build
+you just installed is the one running. Turning the option off (or uninstalling)
+removes the task.
 
 If you would rather do it by hand, this is the same command. A logon task is
 what gives the helper a full token without weakening UAC:
 
 ```
-schtasks /create /tn "mshelld" /tr "C:\mshell\mshelld.exe" ^
-         /sc onlogon /rl highest /f
+schtasks /create /tn "mshelld" /tr "\"C:\Program Files\mshell\mshelld.exe\"" ^
+         /sc onlogon /rl highest /ru %USERNAME% /it /f
 ```
 
 mshell finds it automatically; nothing needs configuring. If it is not running,
 mshell behaves exactly as it always has — those windows float and stay visible
-on every desktop — so leaving it out (`/nohelper`, or an unelevated install) is
-safe. `%TEMP%\mshelld.log` is the helper's own log if you need to see whether it
+on every desktop — so leaving the option off is safe. `%TEMP%\mshelld.log` is the helper's own log if you need to see whether it
 started.
 
-**Do not add `/ru SYSTEM` to that task.** The helper's pipe is restricted to the
-user it runs as, and the command above has no `/ru`, so it runs as *you* —
-elevated, but still you, which is why your unelevated mshell can talk to it.
+**Do not change `/ru` to `SYSTEM`.** The helper's pipe is restricted to the
+user it runs as, and the command above names *you* — elevated, but still you,
+which is why your unelevated mshell can talk to it.
 Running it as SYSTEM grants the pipe to SYSTEM and no shell will ever connect;
 it would also put the helper in session 0, where it cannot touch your windows at
 all. The log says which identity it granted on the line above `listening on`, so
@@ -221,7 +217,7 @@ anything running as you that can relaunch that `mshell.exe` or inject into it
 gets the same reach, and on an unsigned build so can anything that can replace
 it. The boundary the helper draws is your login session, not administrator — so
 keep the install directory writable by administrators only, and that is the
-whole of it.
+whole of it. `C:\Program Files\mshell` is exactly that by default.
 
 **What it does not do:** keybinds still stop responding while an elevated window
 has *focus*. That needs the keyboard hook itself to be elevated, and the hook was
@@ -275,8 +271,7 @@ suggestions:
 - **The binary must be Authenticode-signed by a certificate the machine
   trusts.** The PKI signature check is always enforced for a uiAccess process.
 - **It must live under a protected path** — `C:\Program Files\...` or
-  `C:\Windows\System32\...`. `C:\mshell` does **not** qualify, so the usual
-  install location has to change for this build.
+  `C:\Windows\System32\...`. The MSI's `C:\Program Files\mshell` qualifies.
 
 If either is not met, Windows refuses the flag — the process may launch without
 it, or fail to launch at all. Because being started as the Winlogon shell is an
@@ -290,11 +285,12 @@ Building it:
 make UIACCESS=1          # embeds src/mshell.uiaccess.manifest instead of the default
 ```
 
-then sign `mshell.exe` and install it under `C:\Program Files\mshell\`. For a
+then sign `mshell.exe` and put it in place of the installed one in
+`C:\Program Files\mshell\`. For a
 personal machine you can create your own certificate, trust it machine-wide,
 sign with it, and delete the private key afterwards so nothing else can ever be
 signed as mshell; a public release needs a real code-signing certificate. The
-default `make` build is unchanged and still boots unsigned from `C:\mshell`, so
+default `make` build is unchanged and still boots unsigned, so
 nothing here is required — it is the maximal-control option for those who want
 it.
 
@@ -304,22 +300,23 @@ mshell itself already eats every `Win`+* combo, Alt+Tab / Alt+Esc / Ctrl+Esc,
 strips title bars, and — baked into `mshell.exe` (`window.c`) — forces square
 corners and kills the per-window open/close/minimise animation on every
 window it manages. Everything else Windows adds lives in the registry, split
-into three importable files by blast radius:
+by blast radius. The installer's **Windows tweaks** option covers the first two
+below; the `.reg` files are in `C:\Program Files\mshell\extras`:
 
 - **`harden.reg`** — keyboard shortcuts the low-level hook can't reach: Win+L
   lock, the Sticky / Filter / Toggle / High-Contrast / Mouse-Keys hotkeys, and
-  bare PrtScn → Snip. All per-user (HKCU), and `install.bat` already applies
-  them — as `mshell.exe --tweaks apply input`, one value at a time, which also
-  records what each was so the uninstall can put *your* value back rather than
-  Microsoft's default. The file is for applying the same set without mshell.
+  bare PrtScn → Snip. All per-user (HKCU), and the **Windows tweaks** option
+  applies them — as `mshell.exe --tweaks apply input`, one value at a time,
+  which also records what each was so the uninstall can put *your* value back
+  rather than Microsoft's default. The file is for applying the same set without
+  mshell.
 
-  **Two of them need an administrator prompt**, and they are the two under
+  **Two of them need administrator rights**, and they are the two under
   `HKCU\…\CurrentVersion\Policies\` — the blanket Win-key hotkey policy and
   Win+L. Windows ACLs that subtree read-only for the user who owns the hive, so
-  an ordinary per-user install applies the other nine and skips those, and says
-  so. Re-run `install.bat` elevated (or right-click → Merge `harden.reg` and
-  accept UAC) to pick them up. Undo: `harden-undo.reg`, or `mshell.exe
-  --tweaks revert input`.
+  the installer writes those two itself, with the rights it was given, and
+  removes them on uninstall. Undo by hand: `harden-undo.reg` (elevated), or
+  `mshell.exe --tweaks revert input`.
 
 - **The browser fix (`--tweaks apply apps`)** — Chromium decides for itself
   whether anyone can see each of its windows and stops drawing the ones it
@@ -330,17 +327,17 @@ into three importable files by blast radius:
   minimise/restore were all measured against such a window and none brought a
   pixel back.
 
-  `install.bat` sets the policy that turns that decision off, for Chrome,
-  Chromium and Edge. It needs an **administrator prompt** (its key lives under
-  `HKCU\Software\Policies`, which Windows ACLs read-only for you), and without
-  one it is skipped and reported, like the two hardening policies above. From an
-  admin prompt at any time:
+  The **Windows tweaks** option sets the policy that turns that decision off,
+  for Chrome, Chromium and Edge. Its key lives under `HKCU\Software\Policies`,
+  which Windows ACLs read-only for you, so like the two hardening policies above
+  the installer writes it with administrator rights. From an admin prompt at any
+  time:
 
   ```
-  C:\mshell\mshell.exe --tweaks apply apps
+  "C:\Program Files\mshell\mshell.exe" --tweaks apply apps
   ```
 
-  No admin, or an Electron app (which has no policy at all)? Put the flag on the
+  An Electron app (which has no policy at all)? Put the flag on the
   launch instead — in your shortcut, your launcher, or the `app`/`startup`
   command in `init.lua`:
 
@@ -387,7 +384,8 @@ even if mshell has grabbed the keyboard hook. From there:
 - **File → Run new task → `regedit`** — go to
   `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon` and delete the
   `Shell` value to permanently revert.
-- **File → Run new task → `cmd`**, then run `uninstall.bat`.
+- **File → Run new task → `ms-settings:appsfeatures`** — *Apps* in Settings,
+  where *mshell → Uninstall* puts Explorer back for good.
 - If mshell is stuck, find `mshell.exe` in the Details tab and End Task; your
   Win key comes back.
 
@@ -397,15 +395,23 @@ account (which still has Explorer) and fix things.
 
 ## Uninstall
 
-Run **`uninstall.bat`**, or delete the `Shell` value under
-`HKCU\...\Winlogon`. Sign out and back in — Explorer returns.
-
-`uninstall.bat` also removes the `mshelld` logon task, so nothing keeps starting
-an elevated binary out of `C:\mshell` after you delete that folder. That step
-needs an administrator prompt — the task was created with `/rl highest` — and
-the script tells you if it could not do it:
+Uninstall **mshell** from *Settings → Apps* (`ms-settings:appsfeatures`, or
+from the Explorer that `mshell.exe --msg panic` starts), or with the MSI you
+installed from:
 
 ```
+msiexec /x mshell-<version>.msi
+```
+
+That removes the `Shell` value, the `mshelld` logon task, the companion apps
+and the installer's tweaks — putting your previous values back — and leaves
+`%APPDATA%\mshell` (your config) in place; delete it too if you want mshell
+fully gone. Sign out and back in — Explorer returns.
+
+If the uninstall ran from another account, remove the leftovers by hand:
+
+```
+reg delete "HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /f
 schtasks /delete /tn "mshelld" /f
 ```
 

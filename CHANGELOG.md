@@ -5,6 +5,59 @@ All notable changes to mshell are documented here. This project adheres to
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING: mshell installs from the MSI only.** `install.bat` and
+  `uninstall.bat` are gone, and so is the release zip. `mshell-<version>.msi`
+  installs to `C:\Program Files\mshell` and offers, as checkboxes on its
+  *Custom Setup* page: using mshell as your shell, the privileged helper's
+  sign-in task, the Windows tweaks (including the five policy values that
+  used to need an elevated `install.bat`), and the companion apps **mrun**,
+  **mnotify** and **mcapture**, which are now bundled. Upgrading renames the
+  running images and hands over to the new build without a reboot or a
+  sign-out; uninstalling from *Apps* removes the shell value, the task, the
+  companions and the tweaks. The MSI is built with WiX v5 on Windows
+  (`packaging/build-msi.ps1`).
+- **`config.update` runs the MSI.** `Win+Shift+u` downloads the release's
+  `.msi`, checks it against the published SHA-256, runs it with
+  `msiexec /passive` and restarts into the new build.
+- **mshell writes its own default config.** The first start without
+  `%APPDATA%\mshell\init.lua` copies the shipped one there with its
+  `.luarc.json`, and every start refreshes `%APPDATA%\mshell\meta`.
+- **A new default `init.lua`.** `h/j/k/l` only work while `Win` is held; a bare
+  `Win` tap opens a one-shot leader menu — `g` go to a desktop, `m` send the
+  window to one, `w` window, `l` layout, `r` resize, `a` apps, `v` media,
+  `s` session, `x` mshell. `Win+Ctrl+1..9` takes the window to a desktop and
+  follows it. `Win+Return` is the terminal (the first of `wt`, `pwsh`, `cmd`
+  that launches), `Win+Space` the launcher (mrun when installed), `Win+q`
+  closes. mnotify and `mrun --daemon` start with the session when installed,
+  and `Win+Shift+s` / `Win+PrintScreen` take screenshots. The colours are
+  Catppuccin Mocha, the palette mrun and mnotify already ship with.
+- **New defaults land beside your config.** When a release changes the shipped
+  `init.lua` and yours differs from it, mshell copies the new one to
+  `%APPDATA%\mshell\init.lua.new` and says so in a notification. Yours is
+  never overwritten.
+- **The bundled companions are pinned.** `packaging/companions.json` names the
+  mrun, mnotify and mcapture release each MSI ships and its SHA-256, so a
+  companion release no longer changes an mshell build. `-LatestCompanions`
+  takes the newest instead.
+
+### Added
+
+- `config.restart` (`mshell.exe --msg restart`) hands over to the build that is
+  installed now, the way an update does.
+- `--tweaks apply` and `--tweaks revert` take several groups:
+  `--tweaks apply input apps`.
+- A welcome notification on the first start explains the leader menu and the
+  main chords.
+- Code signing: with the `MSHELL_SIGN_PFX_BASE64` and
+  `MSHELL_SIGN_PFX_PASSWORD` secrets set, the release signs every unsigned
+  binary and the MSI. A signed `mshelld.exe` turns on the helper's
+  same-certificate check of its clients.
+- winget: each release attaches `mshell-<version>-winget.zip` with the
+  `blendonl.mshell` manifests, and submits them to winget-pkgs when the
+  `WINGET_TOKEN` secret is set.
+
 ## 0.15.25 — 2026-10-15
 
 - feat(power): configure the active power plan from `power.setup` and

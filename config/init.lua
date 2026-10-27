@@ -1,10 +1,6 @@
 --[[
     mshell — default configuration.
 
-    Deliberately small, and it assumes nothing is installed but Windows itself.
-    Everything here works on a bare machine; change the terminal on the first
-    line below and you have your setup.
-
     Location:  %APPDATA%\mshell\init.lua
     Reload:    save the file (auto-reload), or press Win+Shift+R.
     Safety:    a syntax error keeps the PREVIOUS config running and writes the
@@ -18,91 +14,95 @@
                warning on anything mshell does not have.
 --]]
 
--- The one thing worth changing first. cmd.exe is used because it is the only
--- terminal guaranteed to exist on every Windows install; swap in
--- "wt.exe", "alacritty.exe", "pwsh.exe", … once you know what you have.
-local TERMINAL = "cmd.exe"
-
 local mod, shft, ctrl = "LWin", "Shift", "Ctrl"
 
-----------------------------------------------------------------------
--- Appearance
-----------------------------------------------------------------------
-mshell.layout.gaps(6, 6)               -- between windows, at the screen edge
-mshell.appearance.border {             -- focus ring plus a bar on one edge, because
-    width  = 2,                        -- a 2px ring at the screen edge is easy to miss
-    focused = 0xffffff,                -- 0xRRGGBB
-    accent = "bottom",                 -- "top" | "bottom" | "none"
+local TERMINALS = { "wt.exe", "pwsh.exe", "cmd.exe" }
+
+local function find_app(name)
+    local roots = {
+        (os.getenv("ProgramFiles") or "C:\\Program Files") .. "\\mshell\\" .. name,
+        (os.getenv("LOCALAPPDATA") or "") .. "\\Programs\\" .. name,
+    }
+    for _, root in ipairs(roots) do
+        local path = root .. "\\" .. name .. ".exe"
+        local f = io.open(path, "rb")
+        if f then
+            f:close()
+            return path
+        end
+    end
+end
+
+local MRUN     = find_app("mrun")
+local MNOTIFY  = find_app("mnotify")
+local MCAPTURE = find_app("mcapture")
+
+local function terminal()
+    for _, exe in ipairs(TERMINALS) do
+        if mshell.exec(exe) then return end
+    end
+end
+
+local function launcher()
+    if not (MRUN and mshell.exec(MRUN)) then mshell.launcher.open() end
+end
+
+local function capture(args)
+    return function()
+        if MCAPTURE then mshell.exec(MCAPTURE, args) else mshell.exec("ms-screenclip:") end
+    end
+end
+
+local function notifications(args)
+    return function()
+        if MNOTIFY then
+            mshell.exec(MNOTIFY, args)
+        else
+            mshell.notify("mnotify is not installed — re-run the mshell installer to add it", "warn")
+        end
+    end
+end
+
+local function go(name)     return function() mshell.desktop.focus(name) end end
+local function send(name)   return function() mshell.window.move.to_desktop(name) end end
+local function follow(name)
+    return function()
+        mshell.window.move.to_desktop(name)
+        mshell.desktop.focus(name)
+    end
+end
+
+mshell.layout.gaps(6, 6)
+mshell.layout.smart_gaps(true)
+mshell.layout.set("tiling")
+mshell.layout.master.ratio(0.55)
+
+mshell.appearance.border {
+    width        = 2,
+    focused      = 0x89b4fa,
+    accent       = "bottom",
     accent_width = 3,
 }
-mshell.appearance.background(0x1e1e2e) -- desktop backdrop (there is no wallpaper)
-mshell.layout.set("tiling")            -- tiling|monocle|grid|spiral|centered|bstack|columns
-mshell.layout.master.ratio(0.60)
+mshell.appearance.background(0x1e1e2e)
 
--- Status bar. There is no taskbar, and because desktops are created and
--- destroyed as you use them, this is the only thing telling you which ones
--- exist and which you are on.
---
--- mode = "top_bar" is a strip on every monitor that reserves its space, so
--- tiled windows sit below it while a fullscreen window still covers it.
--- mode = "floating" is instead one panel in the middle of the focused monitor
--- — big clock, date, desktops, and mshell's notifications listed inline — that
--- floats over the windows and reserves nothing. Bind mshell.bar.toggle to get
--- it out of the way.
 mshell.bar.setup({
     enabled  = true,
-    mode     = "top_bar",    -- or "floating"
-    position = "top",        -- or "bottom" (top_bar mode)
-    height   = 28,           -- scaled per monitor for DPI; sets the type scale
+    mode     = "top_bar",
+    position = "top",
+    height   = 28,
     bg       = 0x1e1e2e,
     fg       = 0xcdd6f4,
-    accent   = 0x7aa2f7,     -- the desktop you're on
-    dim      = 0x6c7086,     -- the others
-    -- "notifications" is floating-only: with it on, the panel is where
-    -- mshell's messages appear instead of as separate toasts.
+    accent   = 0x89b4fa,
+    dim      = 0x7f849c,
     modules  = { "desktops", "layout", "title", "clock", "notifications" },
 })
 
-----------------------------------------------------------------------
--- Window rules
-----------------------------------------------------------------------
--- Float anything Windows considers a dialog — file pickers, message boxes,
--- permission prompts. They carry no class or process of their own (a file
--- picker IS the host app's process), so this is the only way to name them.
 mshell.window.rule({ dialog = true }, "float")
-
--- Credential and UAC prompts are their own processes and are not dialogs in
--- the sense above, so they need naming.
 mshell.window.rule({ process = "consent.exe"            }, "float")
 mshell.window.rule({ process = "CredentialUIBroker.exe" }, "float")
+mshell.window.rule({ process = "Taskmgr.exe"            }, "float")
+mshell.window.rule({ process = "SnippingTool.exe"       }, "float")
 
-----------------------------------------------------------------------
--- Sub-maps
-----------------------------------------------------------------------
--- Bar sub-map (one-shot): switch bar mode then back to root.
-mshell.keys.submap("bar", {
-    t = mshell.bar.top,       -- top-bar strip on every monitor
-    f = mshell.bar.floating,  -- floating panel in the centre
-})
-
--- Extra sub-map (one-shot): Win+x opens it, then pick a category. A submap is
--- entered by naming it, which is why "bar" is a plain string here.
-mshell.keys.submap("extra", {
-    b = "bar",   -- bar mode: Win+x b t / Win+x b f
-})
-
-----------------------------------------------------------------------
--- Keybindings — hold Win and press a key
---
--- The third argument is the action itself, not its name: mshell.window.close
--- rather than "close". Your editor completes them, and a typo is caught as you
--- write it instead of when the config loads.
---
--- Anything that needs telling WHAT to act on goes inside a function, which is
--- why the desktop keys below are written the way they are. A function has no
--- name for the which-key panel to show, so give those a desc.
-----------------------------------------------------------------------
--- focus / move, vim keys
 mshell.keys.bind({mod},       "h", mshell.window.focus.left)
 mshell.keys.bind({mod},       "j", mshell.window.focus.down)
 mshell.keys.bind({mod},       "k", mshell.window.focus.up)
@@ -111,96 +111,172 @@ mshell.keys.bind({mod, shft}, "h", mshell.window.move.left)
 mshell.keys.bind({mod, shft}, "j", mshell.window.move.down)
 mshell.keys.bind({mod, shft}, "k", mshell.window.move.up)
 mshell.keys.bind({mod, shft}, "l", mshell.window.move.right)
+mshell.keys.bind({mod, ctrl}, "h", mshell.layout.master.ratio.shrink)
+mshell.keys.bind({mod, ctrl}, "l", mshell.layout.master.ratio.grow)
+mshell.keys.bind({mod, ctrl}, "j", mshell.layout.cfact.shrink)
+mshell.keys.bind({mod, ctrl}, "k", mshell.layout.cfact.grow)
 
--- desktops. These are NAMES, not slots: Win+3 goes to a desktop called "3",
--- which is created when you go there and destroyed when you leave it empty.
--- Any name works, whether or not it appears in this file.
 for i = 1, 9 do
     local name = tostring(i)
-    mshell.keys.bind({mod}, name,
-        function() mshell.desktop.focus(name) end, { desc = name })
-    mshell.keys.bind({mod, shft}, name,
-        function() mshell.window.move.to_desktop(name) end, { desc = "→ " .. name })
+    mshell.keys.bind({mod},       name, go(name),     { desc = name })
+    mshell.keys.bind({mod, shft}, name, send(name),   { desc = "send → " .. name })
+    mshell.keys.bind({mod, ctrl}, name, follow(name), { desc = "take → " .. name })
 end
-mshell.keys.bind({mod}, "`", mshell.desktop.focus.last)   -- back where you came from
-mshell.keys.bind({mod}, "]", mshell.desktop.focus.next)   -- step through what exists now
-mshell.keys.bind({mod}, "[", mshell.desktop.focus.prev)
+mshell.keys.bind({mod}, "Tab", mshell.desktop.focus.last)
+mshell.keys.bind({mod}, "]",   mshell.desktop.focus.next)
+mshell.keys.bind({mod}, "[",   mshell.desktop.focus.prev)
 
--- monitors
 mshell.keys.bind({mod},       ",", mshell.monitor.focus.prev)
 mshell.keys.bind({mod},       ".", mshell.monitor.focus.next)
 mshell.keys.bind({mod, shft}, ",", mshell.window.move.to_monitor.prev)
 mshell.keys.bind({mod, shft}, ".", mshell.window.move.to_monitor.next)
 
--- layout
-mshell.keys.bind({mod}, "t",     mshell.layout.tiling)
-mshell.keys.bind({mod}, "m",     mshell.layout.monocle)
-mshell.keys.bind({mod}, "g",     mshell.layout.grid)
-mshell.keys.bind({mod}, "Space", mshell.layout.cycle)
-mshell.keys.bind({mod}, "f",     mshell.window.float.toggle)
-mshell.keys.bind({mod}, "Return",mshell.layout.master.promote)
-mshell.keys.bind({mod}, "b",     mshell.bar.toggle)   -- hide/show the status bar
-mshell.keys.bind({mod}, "x",     "extra")             -- Win+x b t/f: bar mode
+mshell.keys.bind({mod},       "Return", terminal, { desc = "terminal" })
+mshell.keys.bind({mod},       "Space",  launcher, { desc = "launcher" })
+mshell.keys.bind({mod, shft}, "Return", mshell.layout.master.zoom)
+mshell.keys.bind({mod, shft}, "Space",  mshell.layout.cycle)
 
--- master area: ratio (Ctrl+h/l), count (Ctrl+j/k)
-mshell.keys.bind({mod, ctrl}, "h", mshell.layout.master.ratio.shrink)
-mshell.keys.bind({mod, ctrl}, "l", mshell.layout.master.ratio.grow)
-mshell.keys.bind({mod, ctrl}, "j", mshell.layout.master.count.dec)
-mshell.keys.bind({mod, ctrl}, "k", mshell.layout.master.count.inc)
+mshell.keys.bind({mod},       "q",   mshell.window.close)
+mshell.keys.bind({mod, shft}, "q",   mshell.window.kill)
+mshell.keys.bind({mod},       "f",   mshell.window.float.toggle)
+mshell.keys.bind({mod, shft}, "f",   mshell.window.fullscreen.window)
+mshell.keys.bind({mod, ctrl}, "f",   mshell.window.fullscreen.content)
+mshell.keys.bind({mod},       "F11", mshell.window.fullscreen.both)
+mshell.keys.bind({mod},       "t",   mshell.layout.tiling)
+mshell.keys.bind({mod},       "m",   mshell.layout.monocle)
+mshell.keys.bind({mod},       "b",   mshell.bar.toggle)
+mshell.keys.bind({mod},       "`",   mshell.window.scratchpad.toggle)
+mshell.keys.bind({mod, shft}, "`",   mshell.window.scratchpad.mark)
 
--- fullscreen. Three flavours, because the WINDOW and the app's own CONTENT
--- fullscreen (YouTube's button, F11) are different things:
-mshell.keys.bind({mod, shft}, "f",   mshell.window.fullscreen.window)   -- covers the monitor
-mshell.keys.bind({mod, ctrl}, "f",   mshell.window.fullscreen.content)  -- stays in the tile
-mshell.keys.bind({mod},       "F11", mshell.window.fullscreen.both)     -- covers the display
+mshell.keys.bind({mod, shft}, "s",           capture("--select"), { desc = "screenshot: region" })
+mshell.keys.bind({mod},       "PrintScreen", capture("--screen"), { desc = "screenshot: screen" })
+mshell.keys.bind({mod},       "n",           notifications("--history"), { desc = "notifications" })
+mshell.keys.bind({mod, shft}, "n",           notifications("--tray"),    { desc = "tray icons" })
 
--- windows.
-mshell.keys.bind({mod, shft}, "c", mshell.window.close)
-mshell.keys.bind({mod, shft}, "x", mshell.window.kill)
-mshell.keys.bind({mod},       "s", mshell.window.sticky.toggle) -- to every desktop
-mshell.keys.bind({mod},       "z", mshell.layout.master.zoom)   -- swap with master
+mshell.keys.bind({mod}, "VolumeUp",   mshell.media.volume.up)
+mshell.keys.bind({mod}, "VolumeDown", mshell.media.volume.down)
+mshell.keys.bind({mod}, "VolumeMute", mshell.media.volume.mute)
+mshell.keys.bind({mod}, "MediaPlay",  mshell.media.play)
+mshell.keys.bind({mod}, "MediaNext",  mshell.media.next)
+mshell.keys.bind({mod}, "MediaPrev",  mshell.media.prev)
 
--- Scratchpad: one window you can summon anywhere and dismiss again. Mark a
--- window once (Win+Shift+s), then Win+Ctrl+Space toggles it wherever you are.
-mshell.keys.bind({mod, shft}, "s",     mshell.window.scratchpad.mark)
-mshell.keys.bind({mod, ctrl}, "Space", mshell.window.scratchpad.toggle)
-
--- programs
-mshell.keys.bind({mod, shft}, "Return",
-    function() mshell.exec(TERMINAL) end, { desc = "terminal" })
-
--- mshell itself
 mshell.keys.bind({mod, shft}, "r", mshell.config.reload)
-mshell.keys.bind({mod, shft}, "q", mshell.config.quit)   -- as the shell, this logs you out
-
--- Install the latest GitHub release: downloads it, checks it against the hash
--- GitHub published, and runs the install.bat inside it — which restarts mshell.
 mshell.keys.bind({mod, shft}, "u", mshell.config.update)
 
-----------------------------------------------------------------------
--- Leader mode — tap Win on its own, then press bare keys
-----------------------------------------------------------------------
--- A submap is persist = true (stay until Esc) or one-shot (next key drops
--- back). This one persists, so h/j/k/l can be pressed repeatedly.
-mshell.keys.submap("normal", {
-    h = mshell.window.focus.left,
-    j = mshell.window.focus.down,
-    k = mshell.window.focus.up,
-    l = mshell.window.focus.right,
-    Space  = mshell.layout.cycle,
-    Return = mshell.layout.master.promote,
-    f      = mshell.window.float.toggle,
-    c      = mshell.window.close,
-    t      = { function() mshell.exec(TERMINAL) end, desc = "terminal" },
+local go_keys, send_keys = {}, {}
+for i = 1, 9 do
+    local name = tostring(i)
+    go_keys[name]   = { go(name),   desc = name }
+    send_keys[name] = { send(name), desc = "→ " .. name }
+end
+go_keys.Tab  = mshell.desktop.focus.last
+go_keys["]"] = mshell.desktop.focus.next
+go_keys["["] = mshell.desktop.focus.prev
+go_keys[","] = mshell.monitor.focus.prev
+go_keys["."] = mshell.monitor.focus.next
+send_keys[","] = mshell.window.move.to_monitor.prev
+send_keys["."] = mshell.window.move.to_monitor.next
+
+mshell.keys.submap("go",   go_keys)
+mshell.keys.submap("send", send_keys)
+
+mshell.keys.submap("window", {
+    q = mshell.window.close,
+    k = mshell.window.kill,
+    f = mshell.window.float.toggle,
+    c = { function() mshell.window.center() end, desc = "center" },
+    s = mshell.window.sticky.toggle,
+    t = mshell.window.on_top.toggle,
+    z = mshell.layout.master.zoom,
+    p = mshell.layout.master.promote,
+    w = mshell.window.fullscreen.window,
+    i = mshell.window.fullscreen.content,
+    a = mshell.window.fullscreen.both,
+    m = mshell.window.scratchpad.mark,
+    u = mshell.window.urgent.jump,
+})
+
+mshell.keys.submap("layout", {
+    t     = mshell.layout.tiling,
+    m     = mshell.layout.monocle,
+    g     = mshell.layout.grid,
+    s     = mshell.layout.spiral,
+    c     = mshell.layout.centered,
+    b     = mshell.layout.bstack,
+    o     = mshell.layout.columns,
+    Space = mshell.layout.cycle,
+    ["="] = mshell.layout.master.count.inc,
+    ["-"] = mshell.layout.master.count.dec,
+})
+
+mshell.keys.submap("resize", {
+    h     = mshell.layout.master.ratio.shrink,
+    l     = mshell.layout.master.ratio.grow,
+    j     = mshell.layout.cfact.shrink,
+    k     = mshell.layout.cfact.grow,
+    r     = mshell.layout.cfact.reset,
+    Left  = mshell.window.resize.left,
+    Down  = mshell.window.resize.down,
+    Up    = mshell.window.resize.up,
+    Right = mshell.window.resize.right,
 }, { persist = true })
 
-mshell.keys.leader("normal")   -- a bare Win tap enters it; Esc or Win leaves
+mshell.keys.submap("apps", {
+    t = { terminal,                    desc = "terminal" },
+    r = { launcher,                    desc = "launcher" },
+    s = { capture("--select"),         desc = "screenshot: region" },
+    w = { capture("--window"),         desc = "screenshot: window" },
+    f = { capture("--screen"),         desc = "screenshot: screen" },
+    n = { notifications("--history"),  desc = "notifications" },
+    y = { notifications("--tray"),     desc = "tray icons" },
+})
 
-----------------------------------------------------------------------
--- Startup
-----------------------------------------------------------------------
--- Nothing is launched by default — you may not have any of the usual
--- suspects installed. Add what you want:
---
---   mshell.exec.startup("alacritty.exe")
---   mshell.exec.startup("wt.exe", "-p Ubuntu")   -- arguments are a second string
+mshell.keys.submap("media", {
+    k = mshell.media.volume.up,
+    j = mshell.media.volume.down,
+    m = mshell.media.volume.mute,
+    p = mshell.media.play,
+    l = mshell.media.next,
+    h = mshell.media.prev,
+}, { persist = true })
+
+mshell.keys.submap("session", {
+    l = mshell.system.lock,
+    s = mshell.system.sleep,
+    h = mshell.system.hibernate,
+    o = mshell.system.logoff,
+    r = mshell.system.reboot,
+    p = mshell.system.shutdown,
+})
+
+mshell.keys.submap("mshell", {
+    r = mshell.config.reload,
+    u = mshell.config.update,
+    s = mshell.config.restart,
+    h = mshell.config.restart_helper,
+    b = mshell.bar.toggle,
+    t = mshell.bar.top,
+    f = mshell.bar.floating,
+    p = mshell.config.panic,
+    q = mshell.config.quit,
+})
+
+mshell.keys.submap("leader", {
+    g      = "go",
+    m      = "send",
+    w      = "window",
+    l      = "layout",
+    r      = "resize",
+    a      = "apps",
+    v      = "media",
+    s      = "session",
+    x      = "mshell",
+    Space  = { launcher, desc = "launcher" },
+    Return = { terminal, desc = "terminal" },
+    Tab    = mshell.desktop.focus.last,
+})
+
+mshell.keys.leader("leader")
+
+if MNOTIFY then mshell.exec.startup(MNOTIFY) end
+if MRUN    then mshell.exec.startup(MRUN, "--daemon") end

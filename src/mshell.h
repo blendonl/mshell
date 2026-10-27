@@ -920,6 +920,7 @@ void     update_check_async(void);
 void     update_install_async(void);
 
 void     update_clear_staged_image(void);
+void     update_restart_installed(void);
 
 void     ipc_start(void);
 void     ipc_stop(void);

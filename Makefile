@@ -2,7 +2,7 @@ CC       = x86_64-w64-mingw32-gcc
 WINDRES  = x86_64-w64-mingw32-windres
 OBJCOPY  = x86_64-w64-mingw32-objcopy
 
-VERSION  = 0.15.25
+VERSION  = 0.16.0
 
 VER_MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 VER_MINOR := $(word 2,$(subst ., ,$(VERSION)))
@@ -150,15 +150,15 @@ HELPER_LDLIBS = -luser32 -ladvapi32 -lwintrust -lcrypt32
 SYMBOLS       = $(TARGET).debug $(HELPER).debug
 
 DISTNAME = mshell-$(VERSION)-win64
-DISTDIR  = dist/$(DISTNAME)
 SYMNAME  = $(DISTNAME)-symbols
 SYMDIR   = dist/$(SYMNAME)
-DIST_FILES = install.bat uninstall.bat \
-             harden.reg harden-undo.reg \
-             debloat.reg debloat-undo.reg \
-             services.reg services-undo.reg \
-             INSTALL.md README.md CHANGELOG.md MANUAL-TESTS.md \
-             LICENSE THIRD-PARTY-NOTICES.md
+STAGEDIR = dist/stage
+MSI      = dist/mshell-$(VERSION).msi
+EXTRA_FILES = harden.reg harden-undo.reg \
+              debloat.reg debloat-undo.reg \
+              services.reg services-undo.reg
+DOC_FILES   = INSTALL.md README.md CHANGELOG.md \
+              LICENSE THIRD-PARTY-NOTICES.md
 
 CPPCHECK       = cppcheck
 CPPCHECK_DIR   = .github/cppcheck
@@ -179,7 +179,7 @@ ASAN_CFLAGS = -O1 -g -Wall -Wextra \
               -fno-sanitize-recover=all
 TEST_BINS   = $(TEST_MODULES:%=$(TEST_DIR)/test_%$(TEST_SUFFIX))
 
-.PHONY: all clean check-lua dist test test-asan run-host-tests regs msi \
+.PHONY: all clean check-lua dist stage test test-asan run-host-tests regs msi \
         print-version probe meta check-config cppcheck symbols
 
 all: check-lua $(TARGET) $(HELPER)
@@ -279,31 +279,32 @@ regs: $(TARGET)
 	    echo "  SKIP  regs — wine not installed (the .reg files are checked in)"; \
 	fi
 
-msi: $(TARGET) $(HELPER)
-	@if command -v wixl >/dev/null 2>&1; then \
-	    echo "  MSI   dist/mshell-$(VERSION).msi"; \
-	    mkdir -p dist; \
-	    wixl -D Version=$(VERSION) -o "dist/mshell-$(VERSION).msi" \
-	         packaging/mshell.wxs; \
+stage: $(TARGET) $(HELPER)
+	@echo "  STAGE $(STAGEDIR)"
+	rm -rf "$(STAGEDIR)"
+	mkdir -p "$(STAGEDIR)/config" "$(STAGEDIR)/meta" \
+	         "$(STAGEDIR)/extras" "$(STAGEDIR)/docs"
+	cp $(TARGET) $(HELPER)              "$(STAGEDIR)/"
+	cp config/init.lua config/.luarc.json "$(STAGEDIR)/config/"
+	cp meta/mshell.lua meta/types.lua   "$(STAGEDIR)/meta/"
+	cp $(EXTRA_FILES)                   "$(STAGEDIR)/extras/"
+	cp $(DOC_FILES)                     "$(STAGEDIR)/docs/"
+
+msi: stage
+	@if command -v pwsh >/dev/null 2>&1 && command -v wix >/dev/null 2>&1; then \
+	    pwsh -NoProfile -File packaging/build-msi.ps1 \
+	         -Version $(VERSION) -Stage "$(STAGEDIR)" -Out "$(MSI)"; \
 	else \
-	    echo "  SKIP  msi — wixl not installed (apt install wixl)"; \
+	    echo "  SKIP  msi — needs pwsh and the WiX v5 'wix' tool (CI builds it on Windows)"; \
 	fi
 
-dist: $(TARGET) $(HELPER) $(SYMBOLS)
-	@echo "  DIST  $(DISTNAME)"
-	rm -rf "$(DISTDIR)" "dist/$(DISTNAME).zip" "$(SYMDIR)" "dist/$(SYMNAME).zip"
-	mkdir -p "$(DISTDIR)/config" "$(DISTDIR)/meta" "$(SYMDIR)"
-	cp $(TARGET)          "$(DISTDIR)/"
-	cp $(HELPER)          "$(DISTDIR)/"
-	cp $(SYMBOLS)         "$(SYMDIR)/"
-	cp config/init.lua      "$(DISTDIR)/config/"
-	cp meta/mshell.lua      "$(DISTDIR)/meta/"
-	cp meta/types.lua       "$(DISTDIR)/meta/"
-	cp config/.luarc.json   "$(DISTDIR)/config/"
-	cp $(DIST_FILES)      "$(DISTDIR)/"
-	cd dist && python3 -m zipfile -c "$(DISTNAME).zip" "$(DISTNAME)"
+dist: stage $(SYMBOLS)
+	@echo "  DIST  $(SYMNAME)"
+	rm -rf "$(SYMDIR)" "dist/$(SYMNAME).zip"
+	mkdir -p "$(SYMDIR)"
+	cp $(SYMBOLS) "$(SYMDIR)/"
 	cd dist && python3 -m zipfile -c "$(SYMNAME).zip" "$(SYMNAME)"
-	@echo "  ->    dist/$(DISTNAME).zip"
+	@echo "  ->    $(STAGEDIR)/"
 	@echo "  ->    dist/$(SYMNAME).zip"
 
 $(TEST_DIR)/test_%$(TEST_SUFFIX): $(TEST_DIR)/test_%.c $(SRC_DIR)/%.c $(SRC_DIR)/%.h

@@ -139,9 +139,8 @@ tiled, driven entirely from the keyboard and configured in Lua.
 - **An optional privileged helper** (`mshelld.exe`) so an *unelevated* mshell can
   still tile, hide and close windows owned by elevated processes — without your
   `init.lua` ever becoming administrator-level code. No config, no Lua, no
-  scripting: it moves, restacks and closes windows, and nothing else. Installed by
-  `install.bat`, and registered to start at sign-in whenever `install.bat` runs
-  from an administrator prompt (`/nohelper` skips it).
+  scripting: it moves, restacks and closes windows, and nothing else. Installed
+  and registered to start at sign-in by the MSI's *Privileged helper* option.
 - **A built-in launcher.** `launcher` types a name and runs a program. If you
   want modules, Lua configuration and a clipboard/emoji story,
   [**mrun**](https://github.com/blendonl/mrun) is a separate app that does that.
@@ -176,11 +175,17 @@ tar xzf lua-5.4.7.tar.gz --strip-components=1
 cd ../..
 make            # produces mshell.exe
 make test       # runs the host-side unit tests (no Windows needed)
-make dist       # produces dist/mshell-<version>-win64.zip
+make dist       # stages the installer's payload in dist/stage, plus a symbols zip
 ```
 
-The version lives in one place — `VERSION` in the `Makefile` — and is baked into
-the binary's startup log, its VERSIONINFO resource, and the release zip name.
+The installer itself, `mshell-<version>.msi`, is built on Windows by
+`packaging/build-msi.ps1` with WiX v5 — CI does it on every push, bundling the
+mrun, mnotify and mcapture releases pinned in `packaging/companions.json` (bump
+a version and its `sha256` there to ship a newer one). When the
+`MSHELL_SIGN_PFX_BASE64` and `MSHELL_SIGN_PFX_PASSWORD` secrets hold a
+code-signing certificate, the binaries and the MSI are signed. The version lives in one place —
+`VERSION` in the `Makefile` — and is baked into the binary's startup log, its
+VERSIONINFO resource, and the MSI.
 
 `make test` builds the parts with no Windows in them — rule pattern matching and
 the tiling arithmetic — with the host compiler and runs them directly, so it
@@ -189,8 +194,9 @@ machine is listed in [MANUAL-TESTS.md](MANUAL-TESTS.md).
 
 ## Try it (without committing)
 
-Copy `mshell.exe` and `config/` to the Windows machine and run alongside
-Explorer — quitting just exits, it does **not** log you out:
+Install the MSI with **Use mshell as my Windows shell** turned off, then tick
+*Try mshell now in test mode* on the last page — or run it alongside Explorer
+yourself any time. Quitting just exits, it does **not** log you out:
 
 ```
 mshell.exe --test
@@ -212,26 +218,35 @@ helper writes `mshelld.log` beside it.
 
 ## Install as the shell
 
-See [INSTALL.md](INSTALL.md). In short: `install.bat` copies the program to
-`C:\mshell`, your config to `%APPDATA%\mshell\init.lua`, and sets the
-**per-user** (HKCU) Winlogon `Shell` key. It only affects your account and is
-reverted by `uninstall.bat`.
+See [INSTALL.md](INSTALL.md). In short: run `mshell-<version>.msi`. It installs
+to `C:\Program Files\mshell`, sets the **per-user** (HKCU) Winlogon `Shell` key
+for the account that runs it, and offers the privileged helper, the Windows
+tweaks and the companion apps — mrun, mnotify and mcapture — as checkboxes.
+mshell copies the default config to `%APPDATA%\mshell\init.lua` the first time
+it starts without one. Uninstalling from *Apps* puts Explorer back.
 
-Run it again to upgrade: it replaces the installed exe even while that exe is
-your running shell, then restarts mshell so the new build takes over without a
-sign-out. Your `init.lua` is never overwritten.
+Run a newer MSI (or press `Win+Shift+u`) to upgrade: it replaces the installed
+exe even while that exe is your running shell, then restarts mshell so the new
+build takes over without a sign-out. Your `init.lua` is never overwritten.
 
 ## The default config
 
-The release ships one config, `config/init.lua`. It is small, assumes nothing
-is installed but Windows, and opens `cmd.exe` because that is the one terminal
-every machine has. `install.bat` puts it at `%APPDATA%\mshell\init.lua` only
-when you have no config there yet, and a portable copy with no config falls back
-to it beside `mshell.exe`.
+The release ships one config, `config/init.lua`, and mshell copies it to
+`%APPDATA%\mshell\init.lua` the first time it starts without a config there.
+It is written to work whichever installer options you picked:
 
-It launches nothing at startup: a default that opened a browser, a chat client
-and a game would greet most new users with a log full of launch failures. It is
-a starting point to make your own, not someone else's setup.
+- **Terminal** is the first of `wt.exe`, `pwsh.exe` and `cmd.exe` that launches.
+- **Launcher** (`Win+Space`) is mrun when it is installed, kept resident with
+  `--daemon` so it opens instantly, and mshell's built-in launcher otherwise.
+- **Notifications and tray** — mnotify is started with the session when it is
+  installed; `Win+n` opens its history and `Win+Shift+n` the tray icons.
+- **Screenshots** (`Win+Shift+s`, `Win+PrintScreen`) use mcapture when it is
+  installed and Windows' own snipping overlay otherwise.
+
+It looks for each companion under `C:\Program Files\mshell\<app>` (where the
+MSI puts it) and `%LOCALAPPDATA%\Programs\<app>` (where its own installer
+does). Nothing else is launched at startup — the config is a starting point to
+make your own, not someone else's setup.
 
 ## The launcher
 
@@ -256,28 +271,47 @@ mshell.keys.bind({"LWin"}, "Space",
 ## Default keybindings
 
 Modifier is **`Win`** (swallowed entirely; every `Win+*` combo is mshell's).
-Two ways to drive it: hold **`Win`+key** for a chord, or **tap `Win`** on its own
-to enter the leader map and use bare keys — `h/j/k/l` focus, `Space` cycles the
-layout, `t` opens a terminal. Tap `Win` again or press `Esc` to leave.
+Two ways to drive it:
+
+- **Hold `Win`** and press a key for a chord. Focus and movement (`h/j/k/l`)
+  live only here, so a stray letter never moves your focus.
+- **Tap `Win`** on its own for the leader menu. The which-key panel lists what
+  is next; every entry runs once and drops you back, except `resize` and
+  `media`, which stay until `Esc` or another `Win` tap.
 
 Desktops are created by going to them and destroyed when you leave them empty,
 so none of the numbered desktops has to exist in advance.
 
-| Keys | Action |
+| Hold `Win` + | Action |
 |------|--------|
-| `Win+h/j/k/l` | Focus left/down/up/right |
-| `Win+Shift+h/j/k/l` | Move the window that way |
-| `Win+1..9` / `Win+Shift+1..9` | Go to desktop `1`..`9` / send the window there |
-| ``Win+` `` · `Win+[` · `Win+]` | Last desktop · previous · next |
-| `Win+,` `.` (+`Shift`) | Focus / move to the previous or next monitor |
-| `Win+t` `m` `g` · `Win+Space` | Layout tiling / monocle / grid · cycle |
-| `Win+f` · `Win+Return` | Toggle floating · promote to master |
-| `Win+Ctrl+h/l` · `Win+Ctrl+j/k` | Master ratio · master count |
-| `Win+Shift+f` · `Win+Ctrl+f` · `Win+F11` | Fullscreen: window · inside the tile · both |
-| `Win+Shift+c` · `Win+Shift+x` | Close · kill |
-| `Win+Shift+Return` | Terminal |
-| `Win+Shift+r` · `Win+Shift+q` | Reload config · quit |
-| `Win+Shift+u` | Install the latest GitHub release (mshell restarts) |
+| `h/j/k/l` · `Shift+h/j/k/l` | Focus · move the window that way |
+| `Ctrl+h/l` · `Ctrl+j/k` | Master ratio · size within the stack (cfact) |
+| `1..9` · `Shift+1..9` · `Ctrl+1..9` | Go to desktop · send the window there · take it there |
+| `Tab` · `[` · `]` | Last desktop · previous · next |
+| `,` `.` (+`Shift`) | Focus / move to the previous or next monitor |
+| `Return` · `Space` | Terminal · launcher |
+| `Shift+Return` · `Shift+Space` | Swap with master · cycle layout |
+| `t` · `m` | Tiling · monocle |
+| `q` · `Shift+q` | Close · kill |
+| `f` · `Shift+f` · `Ctrl+f` · `F11` | Float · fullscreen window · inside the tile · both |
+| `` ` `` · `Shift+` `` ` `` | Scratchpad toggle · mark |
+| `b` | Hide / show the bar |
+| `Shift+s` · `PrintScreen` | Screenshot region · screen |
+| `n` · `Shift+n` | Notification history · tray icons |
+| `Shift+r` · `Shift+u` | Reload config · install the latest release |
+
+| Tap `Win`, then | Submap |
+|------|--------|
+| `g` | **go** — `1..9` desktop, `Tab` last, `[` `]` previous/next, `,` `.` monitor |
+| `m` | **send** — `1..9` send the window to a desktop, `,` `.` to a monitor |
+| `w` | **window** — `q` close, `k` kill, `f` float, `c` center, `s` sticky, `t` on top, `z` zoom, `p` promote, `w`/`i`/`a` fullscreen, `m` mark scratchpad, `u` urgent |
+| `l` | **layout** — `t` tiling, `m` monocle, `g` grid, `s` spiral, `c` centered, `b` bstack, `o` columns, `Space` cycle, `=` `-` master count |
+| `r` | **resize** (stays) — `h/l` master ratio, `j/k` cfact, `r` reset, arrows grow a floating window |
+| `a` | **apps** — `t` terminal, `r` launcher, `s`/`w`/`f` screenshot, `n` notifications, `y` tray |
+| `v` | **media** (stays) — `k/j` volume, `m` mute, `p` play, `h/l` previous/next |
+| `s` | **session** — `l` lock, `s` sleep, `h` hibernate, `o` log off, `r` reboot, `p` shut down |
+| `x` | **mshell** — `r` reload, `u` update, `s` restart, `h` restart helper, `b`/`t`/`f` bar, `p` panic, `q` quit |
+| `Space` · `Return` · `Tab` | Launcher · terminal · last desktop |
 
 ## Configuration
 
@@ -331,7 +365,7 @@ end
 
 mshell ships the type definitions for its whole API, generated from the same
 table the binary dispatches through, so they describe exactly the release you
-have installed. `install.bat` puts them in `%APPDATA%\mshell\meta` alongside a
+have installed. mshell keeps them current in `%APPDATA%\mshell\meta` alongside a
 `.luarc.json` that points [lua-language-server][luals] at them.
 
 Open `%APPDATA%\mshell` in any editor with that LSP and you get completion over
@@ -403,7 +437,7 @@ split wherever you were, `layout.split.h`/`layout.split.v` decide the direction 
 takes, and any split can become a **tabbed** or **stacked** container showing one
 window at a time. The tree does not replace the window list — it is an index
 over it — so a desktop moves between `bsp` and the dynamic layouts freely. Each
-display gets its own tree, and `Win+Space` deliberately does not cycle into
+display gets its own tree, and `layout.cycle` deliberately does not cycle into
 `bsp`: a layout you build by hand is one you ask for, with `mshell.layout.bsp`.
 
 **A launcher.** `mshell.launcher.open` opens a filter over your Start-menu
@@ -484,21 +518,23 @@ can, because not binding keys is the point.
 
 **Updating from a keybinding.** The `update` action — `Win+Shift+u` in the
 default config — fetches the latest GitHub release, checks the
-download against the SHA-256 the release published, unpacks it and runs the
-`install.bat` inside it. That script is the upgrade path either way: it renames
-the running image rather than overwriting it and restarts mshell itself, so the
-screen blinks and you come back on the new build. Progress, and every way it can
-fail, arrives as a notification.
+download against the SHA-256 the release published, and runs the `.msi` with
+`msiexec /passive` — Windows asks for administrator approval once. The installer
+renames the running image rather than overwriting it, keeps the options you
+picked last time, and mshell then hands over to the new build, so the screen
+blinks and you come back on it. Progress, and every way it can fail, arrives as
+a notification; `%LOCALAPPDATA%\mshell\install.log` is the installer's own log.
 
 This is the deliberate opposite of `set_update_check`, which only ever *tells*
 you a release exists. An updater that swapped out the shell unattended would
 turn a bad release into a black screen at sign-in with no desktop left to fix it
 from; a key you pressed, while sitting in front of the machine, is a different
 proposition. Two things it will not do: run twice at once, and install when the
-running mshell is not the registered shell — from a portable copy or `--test`,
-`install.bat` would not be upgrading anything, it would be taking over your
-shell for the first time. In that case it unpacks and tells you where, and you
-run `install.bat` yourself. `mshell.exe --msg update` works too.
+running mshell is not the registered shell — from `--test`, the installer would
+not be upgrading anything, it would be taking over your shell for the first
+time. In that case it tells you so, and you run the MSI yourself.
+`mshell.exe --msg update` works too, and `mshell.exe --msg restart` hands over
+to whatever build is installed now.
 
 **Safe mode.** Three starts inside a minute means the previous two did not
 survive one, so the next run skips `init.lua` entirely and comes up on the
@@ -563,7 +599,7 @@ once — it stays completely untouched.
 Naming a window in a rule also rescues it from the "caption-less popup =
 menu/tooltip" filter — the exact style a borderless-fullscreen game uses — so
 the game stays a real managed window: it hides on desktop switch and
-`Win+Shift+c` can close it. Because games rebuild their window when the
+`Win+q` can close it. Because games rebuild their window when the
 graphics device comes up (and again whenever you change resolution or flip
 windowed/borderless in their options), the frame and the fullscreen geometry are
 re-asserted whenever the window moves, not just once when it opens.

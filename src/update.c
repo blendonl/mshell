@@ -14,7 +14,7 @@
 #define UPDATE_MAX_DOWNLOAD  (64u * 1024u * 1024u)
 #define UPDATE_MAX_JSON      (1u * 1024u * 1024u)
 
-#define UPDATE_ASSET_SUFFIX  "-win64.zip"
+#define UPDATE_ASSET_SUFFIX  ".msi"
 
 #define UPDATE_DIGEST_PREFIX  "sha256:"
 
@@ -250,7 +250,7 @@ void update_check_async(void) {
 static volatile LONG s_update_running = 0;
 
 static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
-                     DWORD timeout_ms, DWORD *exit_code) {
+                     DWORD timeout_ms, WORD show, DWORD *exit_code) {
     wchar_t buf[2048];
     if (!fmt_w(buf, ARRAYSIZE(buf), L"%ls", cmdline)) {
         log_err(L"update: command line does not fit in %d characters",
@@ -264,10 +264,11 @@ static bool run_wait(const wchar_t *cmdline, const wchar_t *cwd,
     memset(&pi, 0, sizeof(pi));
     si.cb = sizeof(si);
     si.dwFlags     = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
+    si.wShowWindow = show;
 
     if (!CreateProcessW(NULL, buf, NULL, NULL, FALSE,
-                        CREATE_NO_WINDOW, NULL, cwd, &si, &pi))
+                        show == SW_HIDE ? CREATE_NO_WINDOW : 0,
+                        NULL, cwd, &si, &pi))
         return false;
 
     bool ok = (WaitForSingleObject(pi.hProcess, timeout_ms) == WAIT_OBJECT_0);
@@ -288,7 +289,7 @@ static bool prepare_workdir(wchar_t *out, size_t cap) {
     wchar_t cmd[MAX_PATH + 64];
     if (!fmt_w(cmd, ARRAYSIZE(cmd), L"cmd.exe /c rd /s /q \"%ls\"", out))
         return false;
-    run_wait(cmd, NULL, 15000, NULL);
+    run_wait(cmd, NULL, 15000, SW_HIDE, NULL);
 
     return CreateDirectoryW(out, NULL) ||
            GetLastError() == ERROR_ALREADY_EXISTS;
@@ -433,22 +434,27 @@ void update_clear_staged_image(void) {
         log_msg(LOG_INFO, L"update: removed the previous build (%ls)", old);
 }
 
-static void update_restart_self(const wchar_t *version) {
+static bool hand_over_to_successor(void) {
     if (!winlogon_restarts_the_shell()) {
         update_notify(NOTIFY_WARN, 30000,
-                      L"mshell %ls is installed, but AutoRestartShell is off on "
-                      L"this machine — stopping the shell would log you out. "
-                      L"Sign out and back in to start the new build.", version);
-        return;
+                      L"The new mshell is installed, but AutoRestartShell is "
+                      L"off on this machine — stopping the shell would log you "
+                      L"out. Sign out and back in to start it.");
+        return false;
     }
 
     if (!launch_successor()) {
         update_notify(NOTIFY_ERROR, 30000,
-                      L"mshell %ls is installed, but the new build could not be "
+                      L"The new mshell is installed, but it could not be "
                       L"started, so this one keeps running. Sign out and back "
-                      L"in to switch to it.", version);
-        return;
+                      L"in to switch to it.");
+        return false;
     }
+    return true;
+}
+
+static void update_restart_self(const wchar_t *version) {
+    if (!hand_over_to_successor()) return;
 
     update_notify(NOTIFY_INFO, 5000,
                   L"mshell %ls installed — restarting.", version);
@@ -458,10 +464,23 @@ static void update_restart_self(const wchar_t *version) {
         PostMessageW(g.message_window, WM_MSHELL_RESTART, 0, 0);
 }
 
+void update_restart_installed(void) {
+    if (!running_as_installed_shell()) {
+        update_notify(NOTIFY_WARN, 12000,
+                      L"This mshell is not the installed shell, so there is "
+                      L"no installed build to restart into.");
+        return;
+    }
+    if (!hand_over_to_successor()) return;
+
+    if (g.message_window)
+        PostMessageW(g.message_window, WM_MSHELL_RESTART, 0, 0);
+}
+
 static DWORD WINAPI install_thread(LPVOID param) {
     (void)param;
 
-    BYTE *body = NULL, *zip = NULL;
+    BYTE *body = NULL, *msi = NULL;
 
     update_notify(NOTIFY_INFO, 4000, L"Checking for updates …");
 
@@ -529,9 +548,9 @@ static DWORD WINAPI install_thread(LPVOID param) {
     update_notify(NOTIFY_INFO, 8000,
                   L"Downloading mshell %ls …", latest);
 
-    DWORD zip_len = 0;
-    zip = http_get(url, &zip_len, UPDATE_MAX_DOWNLOAD, 120000);
-    if (!zip || zip_len == 0) {
+    DWORD msi_len = 0;
+    msi = http_get(url, &msi_len, UPDATE_MAX_DOWNLOAD, 120000);
+    if (!msi || msi_len == 0) {
         update_notify(NOTIFY_ERROR, 12000, L"Download of mshell %ls failed.",
                       latest);
         goto out;
@@ -540,7 +559,7 @@ static DWORD WINAPI install_thread(LPVOID param) {
     const char *want = digest_u8 + sizeof(UPDATE_DIGEST_PREFIX) - 1;
     char        got[65];
 
-    if (!sha256_hex(zip, zip_len, got)) {
+    if (!sha256_hex(msi, msi_len, got)) {
         update_notify(NOTIFY_ERROR, 12000,
                       L"Could not hash the download to verify it.");
         goto out;
@@ -553,6 +572,14 @@ static DWORD WINAPI install_thread(LPVOID param) {
     }
     log_msg(LOG_INFO, L"update: sha256 verified (%hs)", got);
 
+    if (!running_as_installed_shell()) {
+        update_notify(NOTIFY_WARN, 20000,
+                      L"mshell %ls is available, but this session is not the "
+                      L"installed shell — not installing. Run the .msi from "
+                      L"the release page yourself.", latest);
+        goto out;
+    }
+
     wchar_t dir[MAX_PATH];
     if (!prepare_workdir(dir, ARRAYSIZE(dir))) {
         update_notify(NOTIFY_ERROR, 12000,
@@ -560,82 +587,27 @@ static DWORD WINAPI install_thread(LPVOID param) {
         goto out;
     }
 
-    wchar_t zip_path[MAX_PATH];
-    if (!fmt_w(zip_path, ARRAYSIZE(zip_path), L"%ls\\%ls", dir, asset)) {
+    wchar_t msi_path[MAX_PATH];
+    if (!fmt_w(msi_path, ARRAYSIZE(msi_path), L"%ls\\%ls", dir, asset)) {
         update_notify(NOTIFY_ERROR, 12000,
                       L"The path for %ls is too long to write.", asset);
         goto out;
     }
 
-    HANDLE f = CreateFileW(zip_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+    HANDLE f = CreateFileW(msi_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
     if (f == INVALID_HANDLE_VALUE) {
-        update_notify(NOTIFY_ERROR, 12000, L"Could not write %ls.", zip_path);
+        update_notify(NOTIFY_ERROR, 12000, L"Could not write %ls.", msi_path);
         goto out;
     }
     DWORD written = 0;
-    BOOL  wrote   = WriteFile(f, zip, zip_len, &written, NULL);
+    BOOL  wrote   = WriteFile(f, msi, msi_len, &written, NULL);
     CloseHandle(f);
-    if (!wrote || written != zip_len) {
+    if (!wrote || written != msi_len) {
         update_notify(NOTIFY_ERROR, 12000,
                       L"Could not write the whole download to disk.");
         goto out;
     }
-
-    update_notify(NOTIFY_INFO, 6000, L"Unpacking mshell %ls …", latest);
-
-    wchar_t cmd[MAX_PATH * 3];
-    DWORD   rc = 1;
-    if (!fmt_w(cmd, ARRAYSIZE(cmd),
-               L"tar.exe -xf \"%ls\" -C \"%ls\"", zip_path, dir)) {
-        update_notify(NOTIFY_ERROR, 12000,
-                      L"The command to unpack %ls is too long to run.", asset);
-        goto out;
-    }
-    if (!run_wait(cmd, dir, 120000, &rc) || rc != 0) {
-        rc = 1;
-        if (!fmt_w(cmd, ARRAYSIZE(cmd),
-                   L"powershell.exe -NoProfile -NonInteractive -Command "
-                   L"\"Expand-Archive -LiteralPath '%ls' -DestinationPath "
-                   L"'%ls' -Force\"", zip_path, dir) ||
-            !run_wait(cmd, dir, 180000, &rc) || rc != 0) {
-            update_notify(NOTIFY_ERROR, 12000,
-                          L"Could not unpack %ls.", asset);
-            goto out;
-        }
-    }
-
-    wchar_t root[MAX_PATH], bat[MAX_PATH];
-    if (!fmt_w(root, ARRAYSIZE(root), L"%ls\\%ls", dir, asset)) {
-        update_notify(NOTIFY_ERROR, 12000,
-                      L"The path unpacked from %ls is too long to use.", asset);
-        goto out;
-    }
-    size_t rl = wcslen(root);
-    if (rl > 4 && _wcsicmp(root + rl - 4, L".zip") == 0) root[rl - 4] = L'\0';
-
-    if (!fmt_w(bat, ARRAYSIZE(bat), L"%ls\\install.bat", root)) {
-        update_notify(NOTIFY_ERROR, 12000,
-                      L"The path to install.bat in %ls is too long to use.",
-                      asset);
-        goto out;
-    }
-
-    if (GetFileAttributesW(bat) == INVALID_FILE_ATTRIBUTES) {
-        update_notify(NOTIFY_ERROR, 15000,
-                      L"Unpacked %ls but found no install.bat in it.", asset);
-        goto out;
-    }
-
-    if (!running_as_installed_shell()) {
-        update_notify(NOTIFY_WARN, 20000,
-                      L"mshell %ls is unpacked, but this session is not the "
-                      L"installed shell — not installing. Run "
-                      L"install.bat in %ls yourself.", latest, root);
-        goto out;
-    }
-
-    update_notify(NOTIFY_INFO, 15000, L"Installing mshell %ls …", latest);
 
     wchar_t ilog[MAX_PATH];
     if (!install_log_path(ilog, ARRAYSIZE(ilog))) {
@@ -646,31 +618,40 @@ static DWORD WINAPI install_thread(LPVOID param) {
 
     wchar_t run[MAX_PATH * 3];
     if (!fmt_w(run, ARRAYSIZE(run),
-               L"cmd.exe /c \"\"%ls\" /norestart >\"%ls\" 2>&1\"", bat, ilog)) {
+               L"msiexec.exe /i \"%ls\" /passive /norestart "
+               L"/l*v \"%ls\"", msi_path, ilog)) {
         update_notify(NOTIFY_ERROR, 12000,
-                      L"The command to run install.bat is too long.");
+                      L"The command to run the installer is too long.");
         goto out;
     }
 
+    update_notify(NOTIFY_INFO, 15000,
+                  L"Installing mshell %ls — accept the Windows prompt.", latest);
+
     DWORD irc = 1;
-    if (!run_wait(run, root, 300000, &irc)) {
+    if (!run_wait(run, dir, 900000, SW_SHOWNORMAL, &irc)) {
         update_notify(NOTIFY_ERROR, 25000,
-                      L"install.bat did not finish. Nothing was restarted; "
+                      L"The installer did not finish. Nothing was restarted; "
                       L"%ls says how far it got.", ilog);
         goto out;
     }
-    if (irc != 0) {
+    if (irc == ERROR_INSTALL_USEREXIT || irc == ERROR_CANCELLED) {
+        update_notify(NOTIFY_WARN, 12000,
+                      L"Update to mshell %ls cancelled.", latest);
+        goto out;
+    }
+    if (irc != ERROR_SUCCESS && irc != ERROR_SUCCESS_REBOOT_REQUIRED) {
         update_notify(NOTIFY_ERROR, 25000,
-                      L"install.bat failed (exit %lu) — see %ls. The running "
+                      L"The installer failed (exit %lu) — see %ls. The running "
                       L"mshell is untouched.", irc, ilog);
         goto out;
     }
 
-    log_msg(LOG_INFO, L"update: install.bat finished cleanly (log: %ls)", ilog);
+    log_msg(LOG_INFO, L"update: msiexec finished cleanly (log: %ls)", ilog);
     update_restart_self(latest);
 
 out:
-    free(zip);
+    free(msi);
     free(body);
     InterlockedExchange(&s_update_running, 0);
     return 0;

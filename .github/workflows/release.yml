@@ -12,24 +12,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     if: "!contains(github.event.head_commit.message, '[skip release]')"
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install mingw-w64 and wixl
+      - name: Install mingw-w64
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 wixl
-
-          command -v wixl >/dev/null || {
-            echo "::error::wixl is not on PATH after installing it"; exit 1; }
-          wixl --version
+          sudo apt-get install -y gcc-mingw-w64-x86-64
 
       - name: Host-side unit tests
         run: make test
@@ -83,27 +79,99 @@ jobs:
           echo "--- release notes ---"
           cat "$RUNNER_TEMP/notes.md"
 
-      - name: Build and package
-        run: make CFLAGS_EXTRA=-Werror dist msi
+      - name: Build and stage
+        run: make CFLAGS_EXTRA=-Werror dist
+
+      - name: Keep the release notes and the bumped files
+        run: cp Makefile CHANGELOG.md "$RUNNER_TEMP/notes.md" dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage
+          path: dist/stage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-meta
+          path: |
+            dist/Makefile
+            dist/CHANGELOG.md
+            dist/notes.md
+            dist/*-symbols.zip
+
+  msi:
+    needs: build
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MSHELL_SIGN_PFX_BASE64: ${{ secrets.MSHELL_SIGN_PFX_BASE64 }}
+      MSHELL_SIGN_PFX_PASSWORD: ${{ secrets.MSHELL_SIGN_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage
+          path: dist/stage
+
+      - name: Build the installer
+        shell: pwsh
+        run: >
+          ./packaging/build-msi.ps1
+          -Version ${{ needs.build.outputs.version }}
+          -Stage dist/stage
+          -Out dist/mshell-${{ needs.build.outputs.version }}.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msi
+          path: dist/*.msi
+
+  publish:
+    needs: [build, msi]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NEW: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-meta
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: msi
+          path: dist
 
       - name: Check every artifact exists
-        env:
-          NEW: ${{ steps.version.outputs.version }}
         run: |
-          for f in "dist/mshell-$NEW-win64.zip" \
-                   "dist/mshell-$NEW-win64-symbols.zip" \
+          for f in "dist/mshell-$NEW-win64-symbols.zip" \
                    "dist/mshell-$NEW.msi"; do
             test -s "$f" || { echo "::error::$f was not produced"; exit 1; }
           done
-          ls -l "dist/mshell-$NEW-win64.zip" \
-                "dist/mshell-$NEW-win64-symbols.zip" \
-                "dist/mshell-$NEW.msi"
+          ls -l dist
+
+      - name: Write the winget manifests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y msitools
+          code=$(msiinfo export "dist/mshell-$NEW.msi" Property | awk -F'\t' '$1=="ProductCode"{print $2}' | tr -d '\r')
+          python3 .github/scripts/winget-manifest.py \
+            --version "$NEW" \
+            --msi "dist/mshell-$NEW.msi" \
+            --product-code "$code" \
+            --out dist/winget
+          (cd dist/winget && zip -r "../mshell-$NEW-winget.zip" manifests)
 
       - name: Commit the bump back to main
         id: commit
-        env:
-          NEW: ${{ steps.version.outputs.version }}
         run: |
+          cp dist/Makefile dist/CHANGELOG.md .
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Makefile CHANGELOG.md
@@ -112,13 +180,29 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Publish
-        env:
-          NEW: ${{ steps.version.outputs.version }}
         run: |
           gh release create "v$NEW" \
             --target "${{ steps.commit.outputs.sha }}" \
             --title "mshell $NEW" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            "dist/mshell-$NEW-win64.zip" \
+            --notes-file dist/notes.md \
+            "dist/mshell-$NEW.msi" \
             "dist/mshell-$NEW-win64-symbols.zip" \
-            "dist/mshell-$NEW.msi"
+            "dist/mshell-$NEW-winget.zip"
+
+  winget:
+    needs: [build, publish]
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      NEW: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Submit to winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        shell: pwsh
+        run: |
+          gh release download "v$env:NEW" -R "$env:GITHUB_REPOSITORY" -p "mshell-$env:NEW-winget.zip" -D winget
+          Expand-Archive "winget/mshell-$env:NEW-winget.zip" winget
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          ./wingetcreate.exe submit --token $env:WINGET_TOKEN "winget/manifests/b/blendonl/mshell/$env:NEW"
+          if ($LASTEXITCODE) { throw "wingetcreate failed ($LASTEXITCODE)" }

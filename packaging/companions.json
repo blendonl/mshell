@@ -1,0 +1,14 @@
+{
+    "mrun": {
+        "version": "0.6.1",
+        "sha256": "20d04244eb832f0e3f815ab4ebd84a595b61dce646fc5f76e86c454a1238cbc7"
+    },
+    "mnotify": {
+        "version": "0.4.0",
+        "sha256": "795c920719b7d3db8e2d5f134f1a62c8b5ca95e7099ca75c7a12c40ca3839da9"
+    },
+    "mcapture": {
+        "version": "0.1.0",
+        "sha256": "f8fda12ba7ca0b8eaf6208ad9135537afeb742764524ca7e05a825a73f4d1a76"
+    }
+}

@@ -34,7 +34,7 @@ With `mode = "top_bar"` (the default):
   rather than underneath it.
 - The desktop list updates as desktops are created and destroyed; the current
   one is both coloured and marked with `*`.
-- The layout indicator follows `Win+Space`; the title follows the focus; the
+- The layout indicator follows `Win+Shift+Space`; the title follows the focus; the
   clock advances.
 - A **fullscreen** window covers the bar. A **floating** window does not.
 - `position = "bottom"` moves it and the reserved strip together.
@@ -200,7 +200,7 @@ With `mshelld.exe` running:
 - With Task Manager hidden on a background desktop, quit mshell
   (`Win+Shift+Q`): it is visible afterwards — an elevated window must not be
   stranded off-screen on exit.
-- Focus Task Manager and press the close binding (`Win+Shift+c`): it closes.
+- Focus Task Manager and press the close binding (`Win+q`): it closes.
 - Same three with an *admin* terminal or regedit, and with an app run
   explicitly as administrator (right-click → Run as administrator).
 
@@ -260,31 +260,66 @@ belongs to a desktop instead of sitting on all of them.
 The mismatch case above is the one the installer exists to prevent, so check
 that the pair really does move together.
 
-- **Plain `install.bat` unelevated, no task yet**: `C:\mshell\mshelld.exe`
-  exists afterwards, no `mshelld` task is registered (`schtasks /query /tn
-  mshelld` finds nothing), the closing summary says to re-run it as
-  administrator, and the exit code is 0 (the in-app updater depends on that).
-- **Plain `install.bat` as administrator, no task yet**: the task is
-  registered, the helper is running immediately (no sign-out), and Task Manager
-  tiles.
-- **`install.bat /nohelper` as administrator, no task yet**: no task is
-  registered, one line says so, and there is no "re-run as administrator" hint.
-- **`install.bat /helper` unelevated**: refuses with the "needs an administrator
-  prompt" message, and `mshelld.exe` is still installed.
-- **In-app update (`Win+Shift+U`) with no task**: the update succeeds; the
-  unelevated installer run it does registers nothing and prompts for nothing.
-- **Upgrade with the helper already running**: re-run plain `install.bat` (no
-  flag) from a build with a different `MSHELLD_PROTO_VERSION`. Both binaries are
-  replaced, the helper is restarted, and mshell connects — no handshake failure
-  in `%TEMP%\mshell.log`. This is the case that silently broke before: the
-  singleton mutex means a helper that fails to stop leaves the *old* build
-  serving, so confirm the running `mshelld.exe` is the new one.
-- **Upgrade unelevated with the helper running**: the copy is staged
-  (`mshelld.exe.old` appears), the script says the new helper takes over at the
-  next sign-in, and it does.
-- **`uninstall.bat` as administrator**: the `mshelld` task is gone and the
-  helper is not running. Unelevated, it says so and prints the `schtasks
-  /delete` command instead of failing.
+- **MSI with Privileged helper on, no task yet**: the task is registered
+  (`schtasks /query /tn mshelld /v` shows *Run As User* = you, not SYSTEM), the
+  helper is running immediately (no sign-out), and Task Manager tiles.
+- **MSI with Privileged helper off**: no `mshelld` task is registered, but
+  `C:\Program Files\mshell\mshelld.exe` is still installed.
+- **Modify → turn the helper off**: the task is deleted and `mshelld.exe` is
+  not running.
+- **Upgrade with the helper already running**: run an MSI from a build with a
+  different `MSHELLD_PROTO_VERSION`. Both binaries are replaced, the helper is
+  restarted, and mshell connects — no handshake failure in `%TEMP%\mshell.log`.
+  The singleton mutex means a helper that fails to stop leaves the *old* build
+  serving, so confirm the running `mshelld.exe` is the new one and that
+  `mshelld.exe.old` is gone.
+- **Uninstall**: the `mshelld` task is gone and the helper is not running.
+
+### The installer
+
+- **Fresh install, everything on**: *Custom Setup* lists all seven options.
+  Afterwards `C:\Program Files\mshell` holds `mshell.exe`, `mshelld.exe`,
+  `config\`, `meta\`, `extras\` and `mrun\`, `mnotify\`, `mcapture\`; HKCU
+  `Winlogon\Shell` is `"C:\Program Files\mshell\mshell.exe" --shell`; the
+  three App Paths keys exist; a *new* terminal finds `mshell`, `mrun` and
+  `mnotify` on `PATH`.
+- **Shell off + "Try mshell now in test mode"**: mshell starts alongside
+  Explorer after *Finish*, and `Shell` is not set.
+- **Tweaks on**: `HKCU\…\Policies\Explorer\NoWinKeys` = 1,
+  `…\Policies\System\DisableLockWorkstation` = 1, the three
+  `NativeWindowOcclusionEnabled` policies = 0, and `HKCU\Software\mshell\
+  TweakBackup` records the previous values. Uninstall puts them back.
+- **Companions off**: install with only `Core,Shell`. Sign in: no launch
+  failures in the log, `Win+Space` opens the built-in launcher, `Win+Shift+s`
+  opens Windows' snipping overlay, `Win+n` says mnotify is not installed.
+- **Companions on**: sign in: mnotify and `mrun --daemon` are running,
+  `Win+Space` opens mrun instantly, `Win+n` opens notification history.
+- **Manual upgrade while it is your shell**: run a newer MSI from the running
+  session. No "files in use" reboot is requested, `*.old` copies appear, and on
+  *Finish* mshell hands over to the new build (log banner names the new
+  version) and mnotify/mrun come back. A "files in use" page listing mshell may
+  appear first: pick the option that does not close it.
+- **Failed upgrade rolls back**: cancel the upgrade at the progress page. The
+  old `mshell.exe` is back in place (not left as `mshell.exe.old`) and the next
+  sign-in still starts mshell.
+- **Over-the-shoulder UAC** (a standard user typing an admin's password): the
+  closing text is the only warning — check the *admin's* `Shell` was set, which
+  is what INSTALL.md describes.
+- **First start**: with no `%APPDATA%\mshell` folder, start mshell. The
+  default `init.lua` is copied there and a welcome notification explains the
+  leader menu. Restart: no second notification.
+- **New default on upgrade**: edit `%APPDATA%\mshell\init.lua`, then install a
+  build whose shipped `init.lua` differs. Yours is unchanged, `init.lua.new`
+  holds the new default, and one notification names it. Delete
+  `init.lua.new` and restart: it does not come back. With an unedited
+  `init.lua`, the same upgrade writes no `init.lua.new`.
+- **Signed release**: on a build made with the signing secrets, *Properties →
+  Digital Signatures* shows the certificate on the MSI, `mshell.exe` and
+  `mshelld.exe`, and the log no longer says `mshelld.exe is not
+  Authenticode-signed`.
+- **winget**: `winget install --manifest <unzipped winget zip>\manifests\b\
+  blendonl\mshell\<version>` installs the release, and `winget list mshell`
+  shows it with the right version.
 
 ## DPI
 
@@ -433,21 +468,22 @@ labels come out right.
   `--msg window.close` both close the focused window; `--msg "desktop.focus web"`
   and `--msg "switch_desktop web"` both switch.
 - **A count still repeats the right things.** `3` then `Win+j` moves the focus
-  three windows; `3` then `Win+Shift+q` quits once, not three times.
+  three windows; `3` then `Win+Shift+r` reloads once, not three times.
 
 ### Editor types
 
-- After `install.bat`, `%APPDATA%\mshell\meta\mshell.lua`,
-  `meta\types.lua` and `.luarc.json` are all present.
+- Delete `%APPDATA%\mshell` and start mshell: `init.lua`, `.luarc.json`,
+  `meta\mshell.lua` and `meta\types.lua` are all copied there, and the log
+  says `config: installed the default …` for the first two.
 - Open `%APPDATA%\mshell` in an editor with lua-language-server: typing
   `mshell.win` completes to `mshell.window`, hovering `mshell.window.close`
   shows its documentation, and `mshell.window.nope` is underlined.
-- A reinstall refreshes `meta\`, but does **not** overwrite a `.luarc.json`
-  you have edited.
-- Press `Win+Space` once and wait a second: the new layout **stays**. Then hold
+- Upgrading refreshes `meta\` on the next start, but does **not** overwrite an
+  `init.lua` or `.luarc.json` you have edited.
+- Press `Win+Shift+Space` once and wait a second: the new layout **stays**. Then hold
   it so autorepeat cycles through every layout, and release: the layout you
   released on stays. The log must NOT show `config: file changed on disk` after a
-  `Win+Space`; it must show it after actually saving `init.lua`.
+  `Win+Shift+Space`; it must show it after actually saving `init.lua`.
 
 ## The start desktop (`default`)
 
@@ -601,7 +637,7 @@ labels come out right.
 - Switch to `tiling` and back to `bsp`: the dynamic layout works normally in
   between and the tree is rebuilt on return.
 - Move a window to another desktop while in bsp — it leaves the tree cleanly.
-- `Win+Space` cycles the seven dynamic layouts and never lands in bsp; from bsp
+- `Win+Shift+Space` cycles the seven dynamic layouts and never lands in bsp; from bsp
   it cycles OUT, to tiling. `layout.bsp` (`b b`) is the only way in.
 
 With **two monitors**, the desktop spanning both:
@@ -666,7 +702,7 @@ and whether it is still readable.
 - `set_animation(120)`: windows glide to their new tiles rather than jumping.
 - During the motion, confirm windows are NOT snapped back — the drift detector
   must not fight the animation.
-- Press `Win+Space` **twice in quick succession**, while the first move is still
+- Press `Win+Shift+Space` **twice in quick succession**, while the first move is still
   in flight. The windows re-aim from where they are; they must not jump back to
   where the first move started, and the shell must stay responsive.
 - `set_animation(0)` restores instant placement.
@@ -697,7 +733,7 @@ its cell — Discord, Steam and Spotify all have a minimum size — so open one 
 those, not four terminals.
 
 - Open the stubborn app plus three or four other windows on one desktop, then
-  cycle layouts with `Win+Space` through all of them, and again with
+  cycle layouts with `Win+Shift+Space` through all of them, and again with
   `set_animation(120)` on. mshell, the bar and the other windows keep answering
   throughout; the mouse does not stutter.
 - The stubborn window ends up wherever it can fit and **stays there** — mshell
@@ -951,7 +987,7 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 - Monocle: with three windows, cycle focus repeatedly. Each one is fully drawn
   when it comes up. Then switch to another desktop and back — the same single
   window is showing, and no other window flashed on the way.
-- Leave monocle for `tiling` (`Win+Space`). All three windows are visible; none
+- Leave monocle for `tiling` (`Win+Shift+Space`). All three windows are visible; none
   stayed hidden.
 - Close Discord to the tray **while on another desktop**, then click its tray
   icon from that other desktop. Its window does **not** appear over the desktop
@@ -965,8 +1001,8 @@ Chrome or Edge, VS Code, Discord or Spotify (Electron), and something WPF.
 - `mshell.window.policy.hide("hide")`, save, then switch desktops. Desktops still
   work. Windows may flicker and a GPU-heavy app may briefly blank — that is the
   mechanism, and it is why `"cloak"` is the default.
-- Still on `"hide"`, with two windows on one desktop: `Win+Space` into monocle,
-  `Win+Space` again to leave it. The second window comes back. Ten times over,
+- Still on `"hide"`, with two windows on one desktop: `Win+Shift+Space` into monocle,
+  `Win+Shift+Space` again to leave it. The second window comes back. Ten times over,
   switching desktops away and back in between. Then read the log: an `app hid
   its own window` line naming a window *mshell* hid is the bug — our own hide,
   delivered late and mistaken for a minimise-to-tray — and the window it names
@@ -1014,8 +1050,8 @@ level.
 ## The `config.update` action
 
 `make test` covers the version comparison and the release-JSON reading
-(`test_update_parse`). What it cannot cover is the network, the unpack, and the
-hand-off to `install.bat` — after which mshell restarts itself, so the
+(`test_update_parse`). What it cannot cover is the network, `msiexec`, and the
+hand-off to the new build — after which mshell restarts itself, so the
 shell-mode rows below need a real install rather than `--test`.
 
 Bind it if your config has not: `mshell.keys.bind({mod, shft}, "u", "config.update")`.
@@ -1024,11 +1060,12 @@ Bind it if your config has not: `mshell.keys.bind({mod, shft}, "u", "config.upda
 |---|------|----------|
 | 1 | Press it while already on the latest release. | One notification: "mshell *x.y.z* is the latest release." Nothing is downloaded and nothing restarts. |
 | 2 | Press it with no network (disable the adapter). | "Could not reach GitHub to check for updates." No crash, no partial download left in `%TEMP%\mshell-update`. |
+| 2b | During an update, answer **No** at the UAC prompt. | "Update to mshell *x.y.z* cancelled." mshell keeps running on the old build. |
 | 3 | Press it twice in quick succession, or hold the key down. | Only one run happens; the log says `update: already in progress`. |
-| 4 | Press it from a **portable** copy (`--test`, or an exe outside the installed location). | It downloads, verifies and unpacks, then declines: a warning naming the unpacked folder, and `install.bat` is **not** run. Your shell is unchanged. |
+| 4 | Press it from `--test` (not the registered shell). | It finds the release, then declines with a warning to run the MSI yourself; nothing is downloaded and `msiexec` is **not** run. Your shell is unchanged. |
 | 5 | Temporarily edit the version in `Makefile` down (e.g. to `0.0.1`), rebuild, install, and press it. | It reports the real latest release as available and proceeds — this is how to exercise the whole path without waiting for a release. |
-| 6 | During #5, watch `%LOCALAPPDATA%\mshell\mshell.log`. | `update: sha256 verified (…)` appears before anything is unpacked. |
-| 7 | Corrupt the check: with a proxy or by pointing `UPDATE_URL` at a release whose digest will not match, run it. | "The download does not match the hash GitHub published. Nothing was installed." Nothing is unpacked. |
+| 6 | During #5, watch `%LOCALAPPDATA%\mshell\mshell.log`. | `update: sha256 verified (…)` appears before `msiexec` starts. |
+| 7 | Corrupt the check: with a proxy or by pointing `UPDATE_URL` at a release whose digest will not match, run it. | "The download does not match the hash GitHub published. Nothing was installed." `msiexec` is not run. |
 
 **Shell-mode only** (needs a real install, Task Manager ready):
 
@@ -1039,15 +1076,14 @@ Bind it if your config has not: `mshell.keys.bind({mod, shft}, "u", "config.upda
   banner**: `=== mshell vX.Y.Z starting ===` naming the version just installed.
   That line is the only proof the restart happened — an update that copies the
   exe and leaves the old process running looks identical from the desktop, and
-  is the bug this path was rewritten to make impossible. `C:\mshell\
-  mshell.exe.old` should be gone afterwards, deleted by the new instance.
+  is the bug this path was rewritten to make impossible. `C:\Program Files\
+  mshell\mshell.exe.old` should be gone afterwards, deleted by the new instance.
   Windows open beforehand are all still there and visible.
-- Read `%LOCALAPPDATA%\mshell\install.log` after it: the whole of install.bat's
-  output is there, ending in "The caller asked to restart mshell itself".
-- Make the install fail (make `C:\mshell` read-only, or delete `harden.reg`
-  from the unpacked folder before the copy) and run it. The toast names the
-  exit code and the log file, and mshell keeps running on the old build — no
-  restart into a half-installed tree.
+- Read `%LOCALAPPDATA%\mshell\install.log` after it: it is the verbose MSI log,
+  ending in `Installation success or error status: 0`.
+- Make the install fail (run a second `msiexec` so the first finds the installer
+  busy) and run it. The toast names the exit code and the log file, and mshell
+  keeps running on the old build — no restart into a half-installed tree.
 - Do the same with `AutoRestartShell` set to `0`. mshell installs, then says so
   and does **not** exit — quitting would log the session out. The new build is
   there for the next sign-in.
@@ -1062,9 +1098,9 @@ These cannot be tested with `--test` and need a real install. Have Task Manager
 - Lock and unlock: no modifier is stuck afterwards (press a bare letter key and
   confirm it types rather than firing a `Win+` binding).
 - Trigger a UAC prompt: same check on return.
-- Run `install.bat` over a running install: it replaces the exe and restarts.
-- `uninstall.bat`, sign out and in: Explorer returns, and the foreground-lock
-  timeout is back to its previous value.
+- Run the MSI over a running install: it replaces the exe and restarts.
+- Uninstall from *Apps*, sign out and in: Explorer returns, and the
+  foreground-lock timeout is back to its previous value.
 - Run a fullscreen game: keybinds keep responding while it has focus.
 
 ## Restarting over a live session

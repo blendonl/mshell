@@ -37,12 +37,28 @@ static int run_displays(const char *cmdline) {
     return 0;
 }
 
+static int for_each_group(const char *groups, int (*fn)(const wchar_t *)) {
+    wchar_t group[64];
+    int     done = 0, n = 0;
+    bool    any  = false;
+
+    while (groups && sscanf(groups, " %63ls%n", group, &n) == 1) {
+        done   += fn(group);
+        groups += n;
+        any     = true;
+    }
+    return any ? done : fn(NULL);
+}
+
 static int run_tweaks(const char *cmdline) {
     const char *arg = cli_flag_value(cmdline, "--tweaks");
     wchar_t     group[64] = {0};
     char        verb[32]  = {0};
+    int         used      = 0;
 
-    if (arg) sscanf(arg, "%31s %63ls", verb, group);
+    if (arg) sscanf(arg, "%31s%n", verb, &used);
+    const char *groups = arg ? arg + used : NULL;
+    if (groups) sscanf(groups, " %63ls", group);
 
     if (!verb[0] || !strcmp(verb, "list")) {
         tweaks_list();
@@ -51,14 +67,14 @@ static int run_tweaks(const char *cmdline) {
     if (!strcmp(verb, "apply")) {
         char msg[128];
         snprintf(msg, sizeof msg, "applied %d tweaks",
-                 tweaks_apply(group[0] ? group : NULL));
+                 for_each_group(groups, tweaks_apply));
         console_print(msg);
         return 0;
     }
     if (!strcmp(verb, "revert")) {
         char msg[128];
         snprintf(msg, sizeof msg, "reverted %d tweaks",
-                 tweaks_revert(group[0] ? group : NULL));
+                 for_each_group(groups, tweaks_revert));
         console_print(msg);
         return 0;
     }
@@ -67,7 +83,7 @@ static int run_tweaks(const char *cmdline) {
         return 0;
     }
     console_print("usage: mshell --tweaks <list|apply|revert|reg|reg-undo> "
-                  "[input|visual|quiet|apps|all]");
+                  "[input|visual|quiet|apps|all]...");
     return 1;
 }
 
