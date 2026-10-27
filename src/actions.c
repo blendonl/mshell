@@ -401,6 +401,8 @@ static void act_quit(const ActionCtx *c) {
 
 static void act_update(const ActionCtx *c) { update_install_async(); }
 
+static void act_restart(const ActionCtx *c) { update_restart_installed(); }
+
 static void act_restart_helper(const ActionCtx *c) { helper_restart_async(); }
 
 static void act_panic(const ActionCtx *c) {

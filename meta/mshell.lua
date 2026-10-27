@@ -697,6 +697,9 @@ function mshell.config.panic() end
 ---Install the latest release.
 function mshell.config.update() end
 
+---Restart mshell into the build that is installed now.
+function mshell.config.restart() end
+
 ---Restart the privileged helper.
 function mshell.config.restart_helper() end
 

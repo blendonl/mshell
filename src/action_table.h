@@ -108,5 +108,6 @@
     X(ACTION_RELOAD,                 act_reload)                           \
     X(ACTION_QUIT,                   act_quit)                             \
     X(ACTION_UPDATE,                 act_update)                           \
+    X(ACTION_RESTART,                act_restart)                          \
     X(ACTION_RESTART_HELPER,         act_restart_helper)                   \
     X(ACTION_PANIC,                  act_panic)

@@ -1,67 +1,212 @@
 <?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*"
-           Name="mshell"
-           Language="1033"
-           Version="$(var.Version)"
+  <Package Name="mshell"
            Manufacturer="mshell"
-           UpgradeCode="6f1c9a52-3d84-4a71-9d0e-2f0a6b5c8e13">
+           Version="$(var.Version)"
+           UpgradeCode="6f1c9a52-3d84-4a71-9d0e-2f0a6b5c8e13"
+           Scope="perMachine"
+           Compressed="yes">
 
-    <Package InstallerVersion="200" Compressed="yes"
-             InstallScope="perMachine"
-             Description="Keyboard-driven tiling window manager shell for Windows" />
+    <SummaryInformation Description="Keyboard-driven tiling window manager shell for Windows" />
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of mshell is already installed." />
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of mshell is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLDIR" Name="mshell">
-          <Directory Id="CONFIGDIR" Name="config" />
-        </Directory>
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/blendonl/mshell" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/blendonl/mshell/blob/main/INSTALL.md" />
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.Stage)\license.rtf" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
+              Value="If you chose to make mshell your shell, sign out and back in to start it. Ctrl+Shift+Esc always opens Task Manager, which can run explorer.exe if you ever need a way out." />
+    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT"
+                 Value="Try mshell now in test mode, alongside Explorer"
+                 Before="ExecuteAction" Sequence="ui"
+                 Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+
+    <UI>
+      <ui:WixUI Id="WixUI_FeatureTree" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction"
+               Value="LaunchTestMode"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction"
+               Value="RestartRunningShell"
+               Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+    </UI>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="mshell">
+        <Directory Id="CONFIGDIR" Name="config" />
+        <Directory Id="METADIR" Name="meta" />
+        <Directory Id="EXTRASDIR" Name="extras" />
+        <Directory Id="MRUNDIR" Name="mrun" />
+        <Directory Id="MNOTIFYDIR" Name="mnotify" />
+        <Directory Id="MCAPTUREDIR" Name="mcapture" />
       </Directory>
-    </Directory>
+    </StandardDirectory>
 
-    <DirectoryRef Id="INSTALLDIR">
-      <Component Id="cmpMshell" Guid="*">
-        <File Id="filMshell" Source="mshell.exe" KeyPath="yes" />
+    <ComponentGroup Id="CoreFiles" Directory="INSTALLDIR">
+      <Component Id="cmpMshell">
+        <File Id="filMshell" Source="$(var.Stage)\mshell.exe" KeyPath="yes" />
+        <RemoveFile Id="rmMshellOld" Name="mshell.exe.old" On="uninstall" />
+        <RemoveFile Id="rmHelperOld" Name="mshelld.exe.old" On="uninstall" />
+        <RemoveFile Id="rmMrunOld" Directory="MRUNDIR" Name="mrun.exe.old" On="uninstall" />
+        <RemoveFile Id="rmMnotifyOld" Directory="MNOTIFYDIR" Name="mnotify.exe.old" On="uninstall" />
+        <RemoveFile Id="rmMcaptureOld" Directory="MCAPTUREDIR" Name="mcapture.exe.old" On="uninstall" />
+        <Environment Id="envPath" Name="PATH" Value="[INSTALLDIR]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
       </Component>
-      <Component Id="cmpHelper" Guid="*">
-        <File Id="filHelper" Source="mshelld.exe" KeyPath="yes" />
+      <Component Id="cmpHelper">
+        <File Id="filHelper" Source="$(var.Stage)\mshelld.exe" KeyPath="yes" />
       </Component>
-      <Component Id="cmpInstallBat" Guid="*">
-        <File Id="filInstallBat" Source="install.bat" KeyPath="yes" />
-      </Component>
-      <Component Id="cmpUninstallBat" Guid="*">
-        <File Id="filUninstallBat" Source="uninstall.bat" KeyPath="yes" />
-      </Component>
-      <Component Id="cmpReadme" Guid="*">
-        <File Id="filInstallMd" Source="INSTALL.md" KeyPath="yes" />
-      </Component>
-      <Component Id="cmpLicense" Guid="*">
-        <File Id="filLicense" Source="LICENSE" KeyPath="yes" />
-      </Component>
-      <Component Id="cmpThirdPartyNotices" Guid="*">
-        <File Id="filThirdPartyNotices" Source="THIRD-PARTY-NOTICES.md" KeyPath="yes" />
-      </Component>
-    </DirectoryRef>
+      <Files Include="$(var.Stage)\docs\**" />
+      <Files Directory="CONFIGDIR" Include="$(var.Stage)\config\**" />
+      <Files Directory="METADIR" Include="$(var.Stage)\meta\**" />
+      <Files Directory="EXTRASDIR" Include="$(var.Stage)\extras\**" />
+    </ComponentGroup>
 
-    <DirectoryRef Id="CONFIGDIR">
-      <Component Id="cmpInitLua" Guid="*">
-        <File Id="filInitLua" Source="config/init.lua" KeyPath="yes" />
-      </Component>
-    </DirectoryRef>
+    <Component Id="cmpShell" Directory="INSTALLDIR" Guid="5b7e0c1d-9a43-4f2e-8d61-3c0f7a2b9e45">
+      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
+                     Name="Shell" Type="string" Value="&quot;[INSTALLDIR]mshell.exe&quot; --shell"
+                     KeyPath="yes" />
+    </Component>
 
-    <Feature Id="Complete" Level="1" Title="mshell">
-      <ComponentRef Id="cmpMshell" />
-      <ComponentRef Id="cmpHelper" />
-      <ComponentRef Id="cmpInstallBat" />
-      <ComponentRef Id="cmpUninstallBat" />
-      <ComponentRef Id="cmpReadme" />
-      <ComponentRef Id="cmpLicense" />
-      <ComponentRef Id="cmpThirdPartyNotices" />
-      <ComponentRef Id="cmpInitLua" />
+    <Component Id="cmpHelperTask" Directory="INSTALLDIR" Guid="0e4a8f52-6b1d-4c39-a7e2-91d5c3f86b07">
+      <RegistryValue Root="HKLM" Key="Software\mshell\Features" Name="HelperTask"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="cmpTweaks" Directory="INSTALLDIR" Guid="c2d94b17-3e85-4a60-b8f1-7d2e5a09c634">
+      <RegistryValue Root="HKCU" Key="Software\mshell\Features" Name="Tweaks"
+                     Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+                     Name="NoWinKeys" Type="integer" Value="1" />
+      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Policies\System"
+                     Name="DisableLockWorkstation" Type="integer" Value="1" />
+      <RegistryValue Root="HKCU" Key="Software\Policies\Google\Chrome"
+                     Name="NativeWindowOcclusionEnabled" Type="integer" Value="0" />
+      <RegistryValue Root="HKCU" Key="Software\Policies\Chromium"
+                     Name="NativeWindowOcclusionEnabled" Type="integer" Value="0" />
+      <RegistryValue Root="HKCU" Key="Software\Policies\Microsoft\Edge"
+                     Name="NativeWindowOcclusionEnabled" Type="integer" Value="0" />
+    </Component>
+
+    <ComponentGroup Id="MrunFiles" Directory="MRUNDIR">
+      <Component Id="cmpMrunAppPath" Guid="8a1f3c64-27d9-4e5b-9c08-b6e4d7a2f195">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\mrun.exe"
+                       Type="string" Value="[MRUNDIR]mrun.exe" KeyPath="yes" />
+        <Environment Id="envPathMrun" Name="PATH" Value="[MRUNDIR]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+      </Component>
+      <Files Include="$(var.Stage)\mrun\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="MnotifyFiles" Directory="MNOTIFYDIR">
+      <Component Id="cmpMnotifyAppPath" Guid="d47b0e29-81c6-4f3a-a5d2-0c9e6b8f7134">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\mnotify.exe"
+                       Type="string" Value="[MNOTIFYDIR]mnotify.exe" KeyPath="yes" />
+        <Environment Id="envPathMnotify" Name="PATH" Value="[MNOTIFYDIR]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+      </Component>
+      <Files Include="$(var.Stage)\mnotify\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="McaptureFiles" Directory="MCAPTUREDIR">
+      <Component Id="cmpMcaptureAppPath" Guid="3f9c2a71-5e08-4bd6-92a4-e17b0c5d8f63">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\mcapture.exe"
+                       Type="string" Value="[MCAPTUREDIR]mcapture.exe" KeyPath="yes" />
+        <Environment Id="envPathMcapture" Name="PATH" Value="[MCAPTUREDIR]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+      </Component>
+      <Files Include="$(var.Stage)\mcapture\**" />
+    </ComponentGroup>
+
+    <Feature Id="Core" Title="mshell" Level="1" AllowAbsent="no" Display="expand"
+             Description="The tiling shell, its privileged helper, the default config and the editor type definitions.">
+      <ComponentGroupRef Id="CoreFiles" />
+
+      <Feature Id="Shell" Title="Use mshell as my Windows shell" Level="1"
+               Description="Replaces Explorer for your account at the next sign-in. Leave this off to try mshell in test mode first; uninstalling puts Explorer back.">
+        <ComponentRef Id="cmpShell" />
+      </Feature>
+
+      <Feature Id="Helper" Title="Privileged helper (tile admin windows)" Level="1"
+               Description="Starts mshelld at sign-in, so windows of elevated apps such as Task Manager or an admin terminal tile and hide with their desktop instead of floating everywhere.">
+        <ComponentRef Id="cmpHelperTask" />
+      </Feature>
+
+      <Feature Id="Tweaks" Title="Windows tweaks for a tiling shell" Level="1"
+               Description="Hands Win+key and PrintScreen to mshell, stops the Sticky/Filter/Toggle Keys prompts and keeps Chrome and Edge drawing while hidden. Reverted on uninstall.">
+        <ComponentRef Id="cmpTweaks" />
+      </Feature>
     </Feature>
-  </Product>
+
+    <Feature Id="Mrun" Title="mrun — launcher" Level="1"
+             Description="A modular launcher with its own Lua config. The default config opens it on Win+Space and keeps it resident; without it, mshell's built-in launcher is used.">
+      <ComponentGroupRef Id="MrunFiles" />
+    </Feature>
+
+    <Feature Id="Mnotify" Title="mnotify — notifications and tray" Level="1"
+             Description="Shows app notifications and tray icons, which Explorer would otherwise draw. The default config starts it with mshell and opens it on Win+N / Win+Shift+N.">
+      <ComponentGroupRef Id="MnotifyFiles" />
+    </Feature>
+
+    <Feature Id="Mcapture" Title="mcapture — screenshots" Level="1"
+             Description="Region, window and screen captures. The default config binds it to Win+Shift+S and Win+PrintScreen; without it, Windows' own snipping overlay is used.">
+      <ComponentGroupRef Id="McaptureFiles" />
+    </Feature>
+
+    <SetProperty Id="StageRunningImages" Value="&quot;[System64Folder]cmd.exe&quot; /c cd /d &quot;[INSTALLDIR]&quot; &amp;&amp; for %f in (mshell.exe mshelld.exe mrun\mrun.exe mnotify\mnotify.exe mcapture\mcapture.exe) do @if exist %f move /y %f %f.old"
+                 Before="StageRunningImages" Sequence="execute" />
+    <CustomAction Id="StageRunningImages" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="UnstageRunningImages" Value="&quot;[System64Folder]cmd.exe&quot; /c cd /d &quot;[INSTALLDIR]&quot; &amp;&amp; for %f in (mshell.exe mshelld.exe mrun\mrun.exe mnotify\mnotify.exe mcapture\mcapture.exe) do @if exist %f.old if not exist %f move /y %f.old %f"
+                 Before="UnstageRunningImages" Sequence="execute" />
+    <CustomAction Id="UnstageRunningImages" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="ApplyTweaks" Value="&quot;[INSTALLDIR]mshell.exe&quot; --tweaks apply input apps"
+                 Before="ApplyTweaks" Sequence="execute" />
+    <CustomAction Id="ApplyTweaks" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+
+    <SetProperty Id="RevertTweaks" Value="&quot;[INSTALLDIR]mshell.exe&quot; --tweaks revert input apps"
+                 Before="RevertTweaks" Sequence="execute" />
+    <CustomAction Id="RevertTweaks" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+
+    <SetProperty Id="StartHelperTask" Value="&quot;[System64Folder]cmd.exe&quot; /c &quot;&quot;[System64Folder]schtasks.exe&quot; /create /tn mshelld /tr &quot;\&quot;[INSTALLDIR]mshelld.exe\&quot;&quot; /sc onlogon /rl highest /ru &quot;[LogonUser]&quot; /it /f &amp; &quot;[System64Folder]schtasks.exe&quot; /end /tn mshelld &amp; &quot;[System64Folder]schtasks.exe&quot; /run /tn mshelld &amp; del /q &quot;[INSTALLDIR]mshelld.exe.old&quot;&quot;"
+                 Before="StartHelperTask" Sequence="execute" />
+    <CustomAction Id="StartHelperTask" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="DeleteHelperTask" Value="&quot;[System64Folder]cmd.exe&quot; /c &quot;&quot;[System64Folder]schtasks.exe&quot; /end /tn mshelld &amp; &quot;[System64Folder]schtasks.exe&quot; /delete /tn mshelld /f &amp; &quot;[System64Folder]taskkill.exe&quot; /f /im mshelld.exe&quot;"
+                 Before="DeleteHelperTask" Sequence="execute" />
+    <CustomAction Id="DeleteHelperTask" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <CustomAction Id="LaunchTestMode" FileRef="filMshell" ExeCommand="--test"
+                  Return="asyncNoWait" />
+    <CustomAction Id="RestartRunningShell" FileRef="filMshell" ExeCommand="--msg restart"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="UnstageRunningImages" Before="StageRunningImages"
+              Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+      <Custom Action="StageRunningImages" Before="RemoveExistingProducts"
+              Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+      <Custom Action="RevertTweaks" Before="RemoveRegistryValues"
+              Condition="(&amp;Tweaks = 2) AND (!Tweaks = 3) AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="DeleteHelperTask" Before="RemoveFiles"
+              Condition="(&amp;Helper = 2) AND (!Helper = 3) AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="ApplyTweaks" After="InstallFiles"
+              Condition="&amp;Tweaks = 3" />
+      <Custom Action="StartHelperTask" After="ApplyTweaks"
+              Condition="&amp;Helper = 3" />
+    </InstallExecuteSequence>
+  </Package>
 </Wix>

@@ -98,17 +98,186 @@ static bool file_exists(const wchar_t *path) {
            !(attr & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static bool portable_config_path(wchar_t *out, size_t out_len) {
-    wchar_t exe_dir[MAX_PATH];
-    DWORD   n = GetModuleFileNameW(NULL, exe_dir, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return false;
+static bool exe_dir(wchar_t *out, size_t out_len) {
+    DWORD n = GetModuleFileNameW(NULL, out, (DWORD)out_len);
+    if (n == 0 || n >= out_len) return false;
 
-    wchar_t *last_slash = wcsrchr(exe_dir, L'\\');
+    wchar_t *last_slash = wcsrchr(out, L'\\');
     if (!last_slash) return false;
     *last_slash = L'\0';
+    return true;
+}
 
-    int w = _snwprintf(out, out_len, L"%ls\\config\\init.lua", exe_dir);
+static bool portable_config_path(wchar_t *out, size_t out_len) {
+    wchar_t dir[MAX_PATH];
+    if (!exe_dir(dir, MAX_PATH)) return false;
+
+    int w = _snwprintf(out, out_len, L"%ls\\config\\init.lua", dir);
     return w > 0 && (size_t)w < out_len;
+}
+
+static void copy_shipped(const wchar_t *from_dir, const wchar_t *to_dir,
+                         const wchar_t *name, bool overwrite) {
+    wchar_t src[MAX_PATH], dst[MAX_PATH];
+    int a = _snwprintf(src, MAX_PATH, L"%ls\\%ls", from_dir, name);
+    int b = _snwprintf(dst, MAX_PATH, L"%ls\\%ls", to_dir, name);
+    if (a <= 0 || a >= MAX_PATH || b <= 0 || b >= MAX_PATH) return;
+    if (!file_exists(src)) return;
+
+    if (CopyFileW(src, dst, !overwrite) && !overwrite)
+        log_msg(LOG_INFO, L"config: installed the default %ls", dst);
+}
+
+#define DEFAULTS_KEY   L"Software\\mshell"
+#define DEFAULTS_VALUE L"DefaultConfigHash"
+#define SEED_MAX_BYTES (4u * 1024u * 1024u)
+
+typedef enum {
+    SEED_NOTICE_NONE = 0,
+    SEED_NOTICE_WELCOME,
+    SEED_NOTICE_NEW_DEFAULT,
+} SeedNotice;
+
+static SeedNotice s_seed_notice;
+static ULONGLONG  s_seed_hash;
+static wchar_t    s_seed_new_path[MAX_PATH];
+
+static char *read_small_file(const wchar_t *path, DWORD *len) {
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return NULL;
+
+    char *data = NULL;
+    LARGE_INTEGER size;
+    if (GetFileSizeEx(f, &size) && size.QuadPart <= SEED_MAX_BYTES) {
+        DWORD n = (DWORD)size.QuadPart, got = 0;
+        data = malloc(n + 1);
+        if (data && ReadFile(f, data, n, &got, NULL) && got == n) {
+            *len = n;
+        } else {
+            free(data);
+            data = NULL;
+        }
+    }
+    CloseHandle(f);
+    return data;
+}
+
+static ULONGLONG fnv1a64(const char *p, DWORD n) {
+    ULONGLONG h = 0xcbf29ce484222325ULL;
+    for (DWORD i = 0; i < n; i++) {
+        h ^= (unsigned char)p[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h ? h : 1;
+}
+
+static ULONGLONG defaults_stamp_read(void) {
+    ULONGLONG v = 0;
+    DWORD sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, DEFAULTS_KEY, DEFAULTS_VALUE,
+                     RRF_RT_REG_QWORD, NULL, &v, &sz) != ERROR_SUCCESS)
+        return 0;
+    return v;
+}
+
+static void defaults_stamp_write(ULONGLONG v) {
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, DEFAULTS_KEY, 0, NULL,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &k,
+                        NULL) != ERROR_SUCCESS)
+        return;
+    RegSetValueExW(k, DEFAULTS_VALUE, 0, REG_QWORD, (const BYTE *)&v, sizeof(v));
+    RegCloseKey(k);
+}
+
+static void seed_init_lua(const wchar_t *shipped_cfg, const wchar_t *user_dir) {
+    wchar_t shipped[MAX_PATH], user[MAX_PATH], fresh[MAX_PATH];
+    int a = _snwprintf(shipped, MAX_PATH, L"%ls\\init.lua", shipped_cfg);
+    int b = _snwprintf(user,    MAX_PATH, L"%ls\\init.lua", user_dir);
+    int c = _snwprintf(fresh,   MAX_PATH, L"%ls\\init.lua.new", user_dir);
+    if (a <= 0 || a >= MAX_PATH || b <= 0 || b >= MAX_PATH ||
+        c <= 0 || c >= MAX_PATH)
+        return;
+
+    DWORD shipped_len = 0;
+    char *shipped_data = read_small_file(shipped, &shipped_len);
+    if (!shipped_data) return;
+
+    ULONGLONG hash  = fnv1a64(shipped_data, shipped_len);
+    ULONGLONG stamp = defaults_stamp_read();
+
+    if (!file_exists(user)) {
+        if (CopyFileW(shipped, user, TRUE)) {
+            log_msg(LOG_INFO, L"config: installed the default %ls", user);
+            s_seed_notice = SEED_NOTICE_WELCOME;
+            s_seed_hash   = hash;
+        }
+    } else if (stamp != hash) {
+        DWORD user_len = 0;
+        char *user_data = read_small_file(user, &user_len);
+        bool  same = user_data && user_len == shipped_len &&
+                     memcmp(user_data, shipped_data, user_len) == 0;
+        free(user_data);
+
+        if (same) {
+            s_seed_notice = stamp ? SEED_NOTICE_NONE : SEED_NOTICE_WELCOME;
+            s_seed_hash   = hash;
+        } else if (CopyFileW(shipped, fresh, FALSE)) {
+            log_msg(LOG_INFO, L"config: the default config changed — the new "
+                    L"one is at %ls", fresh);
+            s_seed_notice = SEED_NOTICE_NEW_DEFAULT;
+            s_seed_hash   = hash;
+            wcsncpy(s_seed_new_path, fresh, MAX_PATH - 1);
+        }
+    }
+    free(shipped_data);
+}
+
+static void seed_user_config(const wchar_t *user_dir) {
+    wchar_t root[MAX_PATH], shipped_cfg[MAX_PATH], shipped_meta[MAX_PATH];
+    wchar_t user_meta[MAX_PATH];
+    if (!exe_dir(root, MAX_PATH)) return;
+
+    int a = _snwprintf(shipped_cfg,  MAX_PATH, L"%ls\\config", root);
+    int b = _snwprintf(shipped_meta, MAX_PATH, L"%ls\\meta", root);
+    int c = _snwprintf(user_meta,    MAX_PATH, L"%ls\\meta", user_dir);
+    if (a <= 0 || a >= MAX_PATH || b <= 0 || b >= MAX_PATH ||
+        c <= 0 || c >= MAX_PATH)
+        return;
+
+    CreateDirectoryW(user_dir, NULL);
+    seed_init_lua(shipped_cfg, user_dir);
+    copy_shipped(shipped_cfg, user_dir, L".luarc.json", false);
+
+    CreateDirectoryW(user_meta, NULL);
+    copy_shipped(shipped_meta, user_meta, L"mshell.lua", true);
+    copy_shipped(shipped_meta, user_meta, L"types.lua", true);
+}
+
+static void show_seed_notice(void) {
+    if (!s_seed_hash) return;
+    defaults_stamp_write(s_seed_hash);
+
+    switch (s_seed_notice) {
+    case SEED_NOTICE_WELCOME:
+        notify_show(L"Welcome to mshell. Tap Win for the menu, hold Win for "
+                    L"shortcuts: Win+Space launcher, Win+Return terminal, "
+                    L"Win+1..9 desktops.", NOTIFY_INFO, 15000);
+        break;
+    case SEED_NOTICE_NEW_DEFAULT: {
+        wchar_t text[MAX_PATH + 128];
+        _snwprintf(text, sizeof text / sizeof text[0],
+                   L"mshell has a new default config. Yours is unchanged; "
+                   L"compare it with %ls", s_seed_new_path);
+        text[sizeof text / sizeof text[0] - 1] = L'\0';
+        notify_show(text, NOTIFY_INFO, 15000);
+        break;
+    }
+    case SEED_NOTICE_NONE:
+        break;
+    }
+    s_seed_hash = 0;
 }
 
 #define CRASHLOOP_KEY     L"Software\\mshell"
@@ -231,6 +400,7 @@ void resolve_config_path(wchar_t *out, size_t out_len) {
     if (appdata_config_dir(dir, MAX_PATH)) {
         int n = _snwprintf(appdata, MAX_PATH, L"%ls\\init.lua", dir);
         have_appdata = n > 0 && (size_t)n < MAX_PATH;
+        if (have_appdata) seed_user_config(dir);
     }
     if (have_appdata && file_exists(appdata)) {
         if (path_copy(out, out_len, appdata)) return;
@@ -496,6 +666,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     desktop_launch_app_if_empty(desktop_current_slot());
+
+    show_seed_notice();
 
     log_w(L"mshell started — mode=%ls, on desktop '%ls', %d managed windows",
           g.test_mode ? L"test" : L"shell",

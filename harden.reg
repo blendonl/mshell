@@ -17,7 +17,7 @@ Windows Registry Editor Version 5.00
 ;  Ctrl+Alt+Del is a kernel Secure Attention Sequence and cannot be disabled by
 ;  anything here or anywhere in user space. That is by design.
 ;
-;  Apply:   double-click, or  reg import harden.reg   (install.bat does this)
+;  Apply:   double-click, or  reg import harden.reg   (the installer's Windows tweaks option does this)
 ;  Undo:    run harden-undo.reg
 ;  Most of these take effect on next sign-in.
 ; ============================================================================

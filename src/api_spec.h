@@ -119,6 +119,7 @@ typedef enum {
     ACTION_QUIT,
 
     ACTION_UPDATE,
+    ACTION_RESTART,
 
     ACTION_PANIC,
 
